@@ -1,0 +1,692 @@
+[
+ {
+  "query": "filesystem",
+  "capabilities": [
+   {
+    "id": "cline-marketplace:github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+    "name": "File System",
+    "kind": "mcp-server",
+    "description": "Provides comprehensive filesystem operations including reading, writing, moving files, directory management, and advanced file editing with pattern matching and formatting capabilities.",
+    "source": {
+     "id": "cline-marketplace",
+     "tier": "curated",
+     "name": "Cline MCP Marketplace",
+     "url": "https://github.com/cline/mcp-marketplace"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+    },
+    "repoUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+    "tags": [
+     "filesystem",
+     "file-management",
+     "directory-operations",
+     "file-search",
+     "file-editing",
+     "file-systems",
+     "recommended"
+    ],
+    "updatedAt": "2026-09-25T15:25:47.692241Z",
+    "stars": 90589,
+    "downloads": 162610,
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.6200586666666666,
+     "tier": "curated",
+     "evidence": {
+      "stars": 90589,
+      "downloads": 162610,
+      "monthsSinceUpdate": 0,
+      "evidenceScore": 0.7750733333333333
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:apireno/domshell",
+    "name": "apireno/DOMShell",
+    "kind": "mcp-server",
+    "description": "📇 🏠 - Browse the web with filesystem commands (ls, cd, grep, click) by mapping Chrome's accessibility tree to a virtual filesystem via an extension.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/apireno/DOMShell"
+    },
+    "repoUrl": "https://github.com/apireno/DOMShell",
+    "homepage": "https://github.com/apireno/DOMShell",
+    "tags": [
+     "📂 <a name=\"browser-automation\"></a>Browser Automation"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:lukelamb/claude-terminal-mcp",
+    "name": "LukeLamb/claude-terminal-mcp",
+    "kind": "mcp-server",
+    "description": "📇 🏠 🐧 🍎 - Terminal, filesystem and background-job tools for Linux and macOS.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/LukeLamb/claude-terminal-mcp"
+    },
+    "repoUrl": "https://github.com/LukeLamb/claude-terminal-mcp",
+    "homepage": "https://github.com/LukeLamb/claude-terminal-mcp",
+    "tags": [
+     "🖥️ <a name=\"command-line\"></a>Command Line"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:marin1321/mcp-devtools",
+    "name": "marin1321/mcp-devtools",
+    "kind": "mcp-server",
+    "description": "📇 🏠 🍎 🪟 🐧 - Scoped access to local dev environments (filesystem, databases, processes, OpenAPI) with a command allowlist and read-only database mode.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/marin1321/mcp-devtools"
+    },
+    "repoUrl": "https://github.com/marin1321/mcp-devtools",
+    "homepage": "https://github.com/marin1321/mcp-devtools",
+    "tags": [
+     "💻 <a name=\"developer-tools\"></a>Developer Tools"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:gorosun/unified-diff-mcp",
+    "name": "gorosun/unified-diff-mcp",
+    "kind": "mcp-server",
+    "description": "📇 🏠 - Generate and visualize unified diffs as HTML or PNG, with side-by-side and line-by-line views for filesystem dry runs.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/gorosun/unified-diff-mcp"
+    },
+    "repoUrl": "https://github.com/gorosun/unified-diff-mcp",
+    "homepage": "https://github.com/gorosun/unified-diff-mcp",
+    "tags": [
+     "💻 <a name=\"developer-tools\"></a>Developer Tools"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   }
+  ],
+  "statuses": [
+   {
+    "source": "mcp-so",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 449,
+    "count": 1
+   },
+   {
+    "source": "modelcontextprotocol-servers",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 1271,
+    "count": 1
+   },
+   {
+    "source": "modelscope",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 296,
+    "count": 5
+   },
+   {
+    "source": "cline-marketplace",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 835,
+    "count": 1
+   },
+   {
+    "source": "awesome-mcp-servers",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 1379,
+    "count": 5
+   },
+   {
+    "source": "skills-sh",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 809,
+    "count": 5
+   },
+   {
+    "source": "skillsmp",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 523,
+    "count": 5
+   },
+   {
+    "source": "tencent-skillhub",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 109,
+    "count": 5
+   }
+  ],
+  "totalMs": 1383
+ },
+ {
+  "query": "github",
+  "capabilities": [
+   {
+    "id": "cline-marketplace:github.com/github/github-mcp-server",
+    "name": "GitHub",
+    "kind": "mcp-server",
+    "description": "Provides comprehensive GitHub API integration for repository management, issues, pull requests, and code operations with authentication and enterprise support.",
+    "source": {
+     "id": "cline-marketplace",
+     "tier": "curated",
+     "name": "Cline MCP Marketplace",
+     "url": "https://github.com/cline/mcp-marketplace"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/github/github-mcp-server"
+    },
+    "repoUrl": "https://github.com/github/github-mcp-server",
+    "tags": [
+     "github",
+     "repository-management",
+     "code-collaboration",
+     "git",
+     "source-control",
+     "version-control"
+    ],
+    "updatedAt": "2026-09-25T08:42:20.264314Z",
+    "stars": 33187,
+    "downloads": 51332,
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.5607103999999999,
+     "tier": "curated",
+     "evidence": {
+      "stars": 33187,
+      "downloads": 51332,
+      "monthsSinceUpdate": 0,
+      "evidenceScore": 0.700888
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "modelcontextprotocol-servers:git",
+    "name": "git",
+    "kind": "mcp-server",
+    "description": "<!-- mcp-name: io.github.modelcontextprotocol/server-git -->",
+    "source": {
+     "id": "modelcontextprotocol-servers",
+     "tier": "official",
+     "name": "modelcontextprotocol/servers",
+     "url": "https://github.com/modelcontextprotocol/servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/modelcontextprotocol/servers",
+     "subdir": "src/git"
+    },
+    "repoUrl": "https://github.com/modelcontextprotocol/servers",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+    "tags": [
+     "official"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.5,
+     "tier": "official",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:forgemeshlabs/anomaly-mcp",
+    "name": "forgemeshlabs/anomaly-mcp",
+    "kind": "mcp-server",
+    "description": "📇 ☁️ - Real-time anomaly detection with NASA-derived sequence mining across blockchain, mempool, stablecoin depeg, aviation and GitHub signals, paid via x402 on Base.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/forgemeshlabs/anomaly-mcp"
+    },
+    "repoUrl": "https://github.com/forgemeshlabs/anomaly-mcp",
+    "homepage": "https://github.com/forgemeshlabs/anomaly-mcp",
+    "tags": [
+     "🔗 <a name=\"aggregators\"></a>Aggregators"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:tadas-github/a2asearch-mcp",
+    "name": "tadas-github/a2asearch-mcp",
+    "kind": "mcp-server",
+    "description": "📇 ☁️ - Search a directory of MCP servers, AI agents, CLI tools and agent skills.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/tadas-github/a2asearch-mcp"
+    },
+    "repoUrl": "https://github.com/tadas-github/a2asearch-mcp",
+    "homepage": "https://github.com/tadas-github/a2asearch-mcp",
+    "tags": [
+     "🔗 <a name=\"aggregators\"></a>Aggregators"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:work90210/apifold",
+    "name": "Work90210/APIFold",
+    "kind": "mcp-server",
+    "description": "📇 ☁️ - Turn any REST API into a hosted MCP server, with ready-made public servers for GitHub, Stripe, Slack, OpenAI, Notion and more.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/Work90210/APIFold"
+    },
+    "repoUrl": "https://github.com/Work90210/APIFold",
+    "homepage": "https://github.com/Work90210/APIFold",
+    "tags": [
+     "🔗 <a name=\"aggregators\"></a>Aggregators"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   }
+  ],
+  "statuses": [
+   {
+    "source": "mcp-so",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 193,
+    "count": 1
+   },
+   {
+    "source": "modelcontextprotocol-servers",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 423,
+    "count": 1
+   },
+   {
+    "source": "modelscope",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 193,
+    "count": 5
+   },
+   {
+    "source": "cline-marketplace",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 668,
+    "count": 3
+   },
+   {
+    "source": "awesome-mcp-servers",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 443,
+    "count": 5
+   },
+   {
+    "source": "skills-sh",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 588,
+    "count": 5
+   },
+   {
+    "source": "skillsmp",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 454,
+    "count": 5
+   },
+   {
+    "source": "tencent-skillhub",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 44,
+    "count": 5
+   }
+  ],
+  "totalMs": 669
+ },
+ {
+  "query": "browser automation",
+  "capabilities": [
+   {
+    "id": "cline-marketplace:github.com/microsoft/playwright-mcp",
+    "name": "Browser Automation",
+    "kind": "mcp-server",
+    "description": "Provides browser automation capabilities using Playwright, enabling interaction with web pages through structured accessibility snapshots without requiring screenshots or visual models.",
+    "source": {
+     "id": "cline-marketplace",
+     "tier": "curated",
+     "name": "Cline MCP Marketplace",
+     "url": "https://github.com/cline/mcp-marketplace"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/microsoft/playwright-mcp"
+    },
+    "repoUrl": "https://github.com/microsoft/playwright-mcp",
+    "tags": [
+     "web-automation",
+     "accessibility",
+     "browser-control",
+     "playwright",
+     "testing",
+     "browser-automation"
+    ],
+    "updatedAt": "2026-09-27T10:12:00.787095Z",
+    "stars": 37607,
+    "downloads": 13972,
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.5407850666666666,
+     "tier": "curated",
+     "evidence": {
+      "stars": 37607,
+      "downloads": 13972,
+      "monthsSinceUpdate": 0,
+      "evidenceScore": 0.6759813333333332
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:34892002/bilibili-mcp-js",
+    "name": "34892002/bilibili-mcp-js",
+    "kind": "mcp-server",
+    "description": "📇 🏠 - Search Bilibili content, with LangChain integration examples.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/34892002/bilibili-mcp-js"
+    },
+    "repoUrl": "https://github.com/34892002/bilibili-mcp-js",
+    "homepage": "https://github.com/34892002/bilibili-mcp-js",
+    "tags": [
+     "📂 <a name=\"browser-automation\"></a>Browser Automation"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:achiya-automation/safari-mcp",
+    "name": "achiya-automation/safari-mcp",
+    "kind": "mcp-server",
+    "description": "📇 🏠 🍎 - Native Safari browser automation without a Chrome dependency.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/achiya-automation/safari-mcp"
+    },
+    "repoUrl": "https://github.com/achiya-automation/safari-mcp",
+    "homepage": "https://github.com/achiya-automation/safari-mcp",
+    "tags": [
+     "📂 <a name=\"browser-automation\"></a>Browser Automation"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:acunningham-ship-it/veilbrowser",
+    "name": "acunningham-ship-it/veilbrowser",
+    "kind": "mcp-server",
+    "description": "📇 🐍 🏠 - Stealth automation of unmodified Chrome over raw CDP, using accessibility-tree element refs; can attach to a running Chrome to reuse logged-in sessions.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/acunningham-ship-it/veilbrowser"
+    },
+    "repoUrl": "https://github.com/acunningham-ship-it/veilbrowser",
+    "homepage": "https://github.com/acunningham-ship-it/veilbrowser",
+    "tags": [
+     "📂 <a name=\"browser-automation\"></a>Browser Automation"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:aethynio/aethyn-browser-mcp",
+    "name": "aethynio/aethyn-browser-mcp",
+    "kind": "mcp-server",
+    "description": "📇 🏠 - Drive a local Playwright browser through residential proxies with a chosen exit country or city and a sticky identity per task.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/aethynio/aethyn-browser-mcp"
+    },
+    "repoUrl": "https://github.com/aethynio/aethyn-browser-mcp",
+    "homepage": "https://github.com/aethynio/aethyn-browser-mcp",
+    "tags": [
+     "📂 <a name=\"browser-automation\"></a>Browser Automation"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   }
+  ],
+  "statuses": [
+   {
+    "source": "mcp-so",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 133,
+    "count": 0,
+    "message": "no detail page"
+   },
+   {
+    "source": "modelcontextprotocol-servers",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 220,
+    "count": 0
+   },
+   {
+    "source": "modelscope",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 65,
+    "count": 2
+   },
+   {
+    "source": "cline-marketplace",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 434,
+    "count": 5
+   },
+   {
+    "source": "awesome-mcp-servers",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 281,
+    "count": 5
+   },
+   {
+    "source": "skills-sh",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 1077,
+    "count": 5
+   },
+   {
+    "source": "skillsmp",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 367,
+    "count": 5
+   },
+   {
+    "source": "tencent-skillhub",
+    "ok": true,
+    "degraded": false,
+    "latencyMs": 49,
+    "count": 5
+   }
+  ],
+  "totalMs": 1079
+ }
+]
