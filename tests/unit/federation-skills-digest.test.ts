@@ -11,7 +11,6 @@ import {
   skillsMpAdapter,
   skillHubAdapter,
   githubRepoFromUrl,
-  downloadSkillMd,
 } from "@/federation/adapters/skill-sources";
 import {
   digestSkillMd,
@@ -180,12 +179,5 @@ describe("1.5.3 可执行资产 vendoring + 清理", () => {
       digestAndVendor(temp, path.join(temp, "out"), { skillId: "x", sourceUrl: "https://x" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     await rm(temp, { recursive: true, force: true });
-  });
-
-  it("downloadSkillMd：本地 fixture 不依赖网络（main 分支路径命中）", async () => {
-    // 网络路径由 smoke 覆盖；此处只测契约：找不到时抛 NOT_FOUND
-    await expect(
-      downloadSkillMd("definitely/not-a-real-repo-xyz", ["a/SKILL.md"], await mkdtemp(path.join(tmpdir(), "dl-"))),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

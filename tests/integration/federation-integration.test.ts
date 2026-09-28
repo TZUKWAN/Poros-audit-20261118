@@ -109,6 +109,18 @@ describe.skipIf(!online)("阶段一集成：真实联邦检索（smoke）", () =
     await expect(readdir(tmp)).rejects.toThrow(); // 无残留
   }, 45_000);
 
+  it("downloadSkillMd 契约：不存在仓库抛 NOT_FOUND（网络类，smoke）", async () => {
+    const { downloadSkillMd } = await import("@/federation/adapters/skill-sources");
+    const tmp = await mkdtemp(path.join(tmpdir(), "dl-"));
+    try {
+      await expect(
+        downloadSkillMd("definitely/not-a-real-repo-xyz", ["a/SKILL.md"], tmp),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  }, 45_000);
+
   it("缓存命中：同 query 二次检索直接返回（适配器零调用）", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "fedcache-"));
     try {
