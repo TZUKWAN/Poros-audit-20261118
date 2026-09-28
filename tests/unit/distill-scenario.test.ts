@@ -180,6 +180,14 @@ describe("6.2 场景库", () => {
     expect(result.newVersion).toBe(1);
   });
 
+  it("R2 防回归：历史有漂移、本轮全部健康 → 版本不虚增", async () => {
+    await saveOne("sc-history");
+    await library.checkDrift("sc-history", async () => false, async () => "cap-v2"); // 第 1 轮漂移换型 → v2
+    const second = await library.checkDrift("sc-history", async () => true); // 第 2 轮全健康
+    expect(second.drifted).toBe(false);
+    expect(second.newVersion).toBe(2); // 保持 v2，不再递增
+  });
+
   it("execute 未知场景 NOT_FOUND", async () => {
     await expect(library.execute("nope", {}, async () => ({ ok: true }))).rejects.toMatchObject({ code: "NOT_FOUND" });
   });

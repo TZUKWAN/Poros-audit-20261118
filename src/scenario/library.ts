@@ -130,17 +130,20 @@ export class ScenarioLibrary {
       throw new ScenarioError({ code: ScenarioErrorCode.NOT_FOUND, message: `scenario ${scenarioId} not found`, phase: "verifying" });
     }
     const switched: Array<{ from: string; to: string }> = [];
+    let newFailures = 0;
     for (const capabilityId of scenario.capabilityIds) {
       const alive = await probe(capabilityId);
       if (alive) continue;
       scenario.stats.driftCount += 1;
+      newFailures += 1;
       const to = replacement ? await replacement(capabilityId) : undefined;
       if (to) {
         scenario.capabilityIds = scenario.capabilityIds.map((c) => (c === capabilityId ? to : c));
         switched.push({ from: capabilityId, to });
       }
     }
-    const drifted = switched.length > 0 || scenario.stats.driftCount > 0;
+    // 版本只在本轮确有新失效（换型或留痕）时递增——历史 driftCount 不得触发虚增（R2 审查修复）
+    const drifted = switched.length > 0 || newFailures > 0;
     if (drifted) {
       scenario.pinnedVersion += 1;
       await this.save(scenario);

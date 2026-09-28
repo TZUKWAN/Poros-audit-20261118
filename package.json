@@ -10,7 +10,8 @@
     "format": "prettier --write .",
     "coverage": "vitest run --coverage",
     "prepare": "husky",
-    "bundle": "esbuild src/kernel-entry.ts --bundle --platform=node --format=esm --outfile=pi-package/dist/kernel.js --external:@earendil-works/* --external:ws --external:pi-* --external:context-mode --external:typebox"
+    "bundle": "esbuild src/kernel-entry.ts --bundle --platform=node --format=esm --outfile=pi-package/dist/kernel.js --external:@earendil-works/* --external:ws --external:pi-* --external:context-mode --external:typebox",
+    "pretest": "npm run bundle"
   },
   "keywords": [],
   "author": "",

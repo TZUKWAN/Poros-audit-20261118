@@ -174,60 +174,61 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 612,
+    "latencyMs": 413,
     "count": 1
    },
    {
     "source": "modelcontextprotocol-servers",
-    "ok": true,
+    "ok": false,
     "degraded": false,
-    "latencyMs": 1880,
-    "count": 1
+    "latencyMs": 928,
+    "count": 0,
+    "message": "HTTP 403 from https://api.github.com/repos/modelcontextprotocol/servers/contents/src"
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 417,
+    "latencyMs": 288,
     "count": 5
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 870,
+    "latencyMs": 848,
     "count": 1
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1578,
+    "latencyMs": 2541,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1464,
+    "latencyMs": 824,
     "count": 5
    },
    {
     "source": "skillsmp",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1576,
+    "latencyMs": 1044,
     "count": 5
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 233,
+    "latencyMs": 125,
     "count": 5
    }
   ],
-  "totalMs": 1881
+  "totalMs": 2547
  },
  {
   "query": "github",
@@ -269,38 +270,6 @@
       "downloads": 51332,
       "monthsSinceUpdate": 0,
       "evidenceScore": 0.700888
-     },
-     "hardFilterPassed": true
-    }
-   },
-   {
-    "id": "modelcontextprotocol-servers:git",
-    "name": "git",
-    "kind": "mcp-server",
-    "description": "<!-- mcp-name: io.github.modelcontextprotocol/server-git -->",
-    "source": {
-     "id": "modelcontextprotocol-servers",
-     "tier": "official",
-     "name": "modelcontextprotocol/servers",
-     "url": "https://github.com/modelcontextprotocol/servers"
-    },
-    "install": {
-     "type": "git",
-     "repoUrl": "https://github.com/modelcontextprotocol/servers",
-     "subdir": "src/git"
-    },
-    "repoUrl": "https://github.com/modelcontextprotocol/servers",
-    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
-    "tags": [
-     "official"
-    ],
-    "requiresAuth": false,
-    "securityFlagged": false,
-    "trust": {
-     "score": 0.5,
-     "tier": "official",
-     "evidence": {
-      "evidenceScore": 0.5
      },
      "hardFilterPassed": true
     }
@@ -397,6 +366,37 @@
      },
      "hardFilterPassed": true
     }
+   },
+   {
+    "id": "awesome-mcp-servers:nimbus-agent/nimbus",
+    "name": "nimbus-agent/Nimbus",
+    "kind": "mcp-server",
+    "description": "🎖️ 📇 🏠 🍎 🪟 🐧 - Read-only search over a local index of your engineering stack (GitHub, Jira, Slack, PagerDuty, Datadog and more): incidents, PRs, deployments and DORA metrics.",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/nimbus-agent/Nimbus"
+    },
+    "repoUrl": "https://github.com/nimbus-agent/Nimbus",
+    "homepage": "https://github.com/nimbus-agent/Nimbus",
+    "tags": [
+     "🔗 <a name=\"aggregators\"></a>Aggregators"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
    }
   ],
   "statuses": [
@@ -404,60 +404,61 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1927,
+    "latencyMs": 200,
     "count": 1
    },
    {
     "source": "modelcontextprotocol-servers",
-    "ok": true,
+    "ok": false,
     "degraded": false,
-    "latencyMs": 609,
-    "count": 1
+    "latencyMs": 218,
+    "count": 0,
+    "message": "HTTP 403 from https://api.github.com/repos/modelcontextprotocol/servers/contents/src"
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 199,
+    "latencyMs": 178,
     "count": 5
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1789,
+    "latencyMs": 655,
     "count": 3
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 321,
+    "latencyMs": 350,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 859,
+    "latencyMs": 3229,
     "count": 5
    },
    {
     "source": "skillsmp",
     "ok": true,
     "degraded": false,
-    "latencyMs": 376,
+    "latencyMs": 374,
     "count": 5
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 49,
+    "latencyMs": 50,
     "count": 5
    }
   ],
-  "totalMs": 1927
+  "totalMs": 3231
  },
  {
   "query": "browser automation",
@@ -633,60 +634,61 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 128,
+    "latencyMs": 609,
     "count": 0,
     "message": "no detail page"
    },
    {
     "source": "modelcontextprotocol-servers",
-    "ok": true,
+    "ok": false,
     "degraded": false,
-    "latencyMs": 218,
-    "count": 0
+    "latencyMs": 220,
+    "count": 0,
+    "message": "HTTP 403 from https://api.github.com/repos/modelcontextprotocol/servers/contents/src"
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 100,
+    "latencyMs": 92,
     "count": 2
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 906,
+    "latencyMs": 429,
     "count": 5
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 270,
+    "latencyMs": 292,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1689,
+    "latencyMs": 611,
     "count": 5
    },
    {
     "source": "skillsmp",
     "ok": true,
     "degraded": false,
-    "latencyMs": 367,
+    "latencyMs": 377,
     "count": 5
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 51,
+    "latencyMs": 47,
     "count": 5
    }
   ],
-  "totalMs": 1690
+  "totalMs": 612
  }
 ]
