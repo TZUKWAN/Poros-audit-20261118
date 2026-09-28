@@ -20,6 +20,7 @@
     "@earendil-works/pi-ai": "^0.87.1",
     "@earendil-works/pi-tui": "^0.87.1",
     "@earendil-works/pi-web-ui": "^0.75.3",
+    "@types/ws": "^8.18.1",
     "context-mode": "^1.0.169",
     "pi-agent-loop": "^0.1.1",
     "pi-hermes-memory": "^0.9.9",
@@ -28,6 +29,7 @@
     "pi-reactor": "^0.2.3",
     "pi-subagents": "^0.73.1",
     "rpiv-todo": "^1.1.0",
+    "ws": "^8.22.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

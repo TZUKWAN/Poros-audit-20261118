@@ -16,3 +16,6 @@
 | D10 | 2026-09-29 | trust 证据分：全证据缺失时按保守 0.5（不奖不罚，由硬过滤兜底）；负值证据按缺失处理；来源档位：official=modelcontextprotocol/servers+skills.sh，curated=ModelScope/Cline/Awesome/腾讯SkillHub，aggregate=mcp.so/SkillsMP | 可解释、可测试 | 全缺失记 0（聚合源新条目被系统性压死） |
 | D11 | 2026-09-29 | 状态机 = 8 工作状态（parsing/planning/retrieving/assembling/verifying/executing/distilling/done）；闸门挂点在状态"出口"（parsing:1/planning:2/retrieving:3/verifying:4/distilling:5）；同阶段驳回=重跑该阶段（发 state:enter 重进入事件） | 清单"8 状态"与五闸门位置的最小一致解释 | 闸门作为独立状态（状态数膨胀到 13） |
 | D12 | 2026-09-29 | decide() 契约：决策送达即返回；驱动方必须 gate:pending→decide 逐闸门驱动。decide 前 waitForGate 是调用方责任（attachVirtualUser 已封装事件驱动形态） | 消除同步/异步决策方的竞态（见 phase2 修复1） | decide 阻塞到下一闸门（死锁风险） |
+| D13 | 2026-09-29 | pi-subagents 为 pi 扩展形态（default export registerSubagentExtension），无法作为独立库驱动 worker；内核以 Delegator 接口为契约，inProcessDelegator 走能力运行时真实调用；pi 运行时加载后其 delegation 接管同一接口 | 生态包形态实测 | 强行内嵌其源码（依赖 pi ExtensionAPI，脱离 pi 不可运行） |
+| D14 | 2026-09-29 | context-mode 的 exports 子路径不含 build/store（SQLite FTS5+BM25 的 ContentStore）；经 createRequire 绝对路径 require 同一编译产物消费 | exports 限制下唯一不 vendor 的复用方式 | 复制其源码（license Elastic-2.0 可但维护差） |
+| D15 | 2026-09-29 | 面板 WS 用 ws@8 官方包（清单明示 HTTP+WS；Node 内置无 WS 服务端） | 标准解、类型齐全 | 手写 RFC6455 帧（易错）/SSE（偏离清单） |
