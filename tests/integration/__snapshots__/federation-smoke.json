@@ -174,60 +174,60 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 539,
+    "latencyMs": 403,
     "count": 1
    },
    {
     "source": "modelcontextprotocol-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 2056,
+    "latencyMs": 1620,
     "count": 1
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 372,
+    "latencyMs": 279,
     "count": 5
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 874,
+    "latencyMs": 840,
     "count": 1
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1371,
+    "latencyMs": 1413,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1275,
+    "latencyMs": 1179,
     "count": 5
    },
    {
     "source": "skillsmp",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1818,
+    "latencyMs": 1924,
     "count": 5
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 206,
+    "latencyMs": 115,
     "count": 5
    }
   ],
-  "totalMs": 2057
+  "totalMs": 1932
  },
  {
   "query": "github",
@@ -404,60 +404,60 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 188,
+    "latencyMs": 321,
     "count": 1
    },
    {
     "source": "modelcontextprotocol-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 777,
+    "latencyMs": 556,
     "count": 1
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 190,
+    "latencyMs": 185,
     "count": 5
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 679,
+    "latencyMs": 669,
     "count": 3
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 334,
+    "latencyMs": 430,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1422,
+    "latencyMs": 2261,
     "count": 5
    },
    {
     "source": "skillsmp",
     "ok": true,
     "degraded": false,
-    "latencyMs": 385,
+    "latencyMs": 371,
     "count": 5
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 49,
+    "latencyMs": 47,
     "count": 5
    }
   ],
-  "totalMs": 1423
+  "totalMs": 2262
  },
  {
   "query": "browser automation",
@@ -633,7 +633,7 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 130,
+    "latencyMs": 131,
     "count": 0,
     "message": "no detail page"
    },
@@ -641,52 +641,52 @@
     "source": "modelcontextprotocol-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 217,
+    "latencyMs": 227,
     "count": 0
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 83,
+    "latencyMs": 99,
     "count": 2
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 434,
+    "latencyMs": 396,
     "count": 5
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 276,
+    "latencyMs": 275,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 589,
+    "latencyMs": 1157,
     "count": 5
    },
    {
     "source": "skillsmp",
     "ok": true,
     "degraded": false,
-    "latencyMs": 368,
+    "latencyMs": 397,
     "count": 5
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 55,
+    "latencyMs": 47,
     "count": 5
    }
   ],
-  "totalMs": 590
+  "totalMs": 1158
  }
 ]
