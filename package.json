@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "coverage": "vitest run --coverage",
-    "prepare": "husky"
+    "prepare": "husky",
+    "bundle": "esbuild src/kernel-entry.ts --bundle --platform=node --format=esm --outfile=pi-package/dist/kernel.js --external:@earendil-works/* --external:ws --external:pi-* --external:context-mode --external:typebox"
   },
   "keywords": [],
   "author": "",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@types/node": "^24.19.0",
     "@vitest/coverage-v8": "^3.2.7",
+    "esbuild": "^0.25.12",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",

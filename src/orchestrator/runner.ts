@@ -12,7 +12,7 @@ import {
 import type { BuildContext } from "./context.js";
 import type { BuildStore } from "./build-store.js";
 import type { EventBus } from "@/core/events.js";
-import type { VirtualUser } from "../../tests/virtual-user/driver.js";
+import type { VirtualUser } from "@/gates/virtual-user.js";
 
 /**
  * 编排运行器：装配 状态机 + 阶段处理器 + 断点持久化 + （可选）虚拟用户驱动。
