@@ -1,0 +1,45 @@
+{
+  "name": "pi-scenario",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "coverage": "vitest run --coverage",
+    "prepare": "husky"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.87.1",
+    "@earendil-works/pi-ai": "^0.87.1",
+    "@earendil-works/pi-tui": "^0.87.1",
+    "@earendil-works/pi-web-ui": "^0.75.3",
+    "context-mode": "^1.0.169",
+    "pi-agent-loop": "^0.1.1",
+    "pi-hermes-memory": "^0.9.9",
+    "pi-loop-designer": "^0.1.0",
+    "pi-mcp-adapter": "^3.2.0",
+    "pi-reactor": "^0.2.3",
+    "pi-subagents": "^0.73.1",
+    "rpiv-todo": "^1.1.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "madge": "^8.0.0",
+    "prettier": "^3.9.9",
+    "typescript": "5.9",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^3.2.7"
+  }
+}
