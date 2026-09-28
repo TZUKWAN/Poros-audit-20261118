@@ -174,60 +174,60 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 401,
+    "latencyMs": 426,
     "count": 1
    },
    {
     "source": "modelcontextprotocol-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1793,
+    "latencyMs": 1519,
     "count": 1
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 303,
+    "latencyMs": 290,
     "count": 5
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 2322,
+    "latencyMs": 847,
     "count": 1
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1347,
+    "latencyMs": 1500,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1162,
+    "latencyMs": 874,
     "count": 5
    },
    {
     "source": "skillsmp",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1084,
+    "latencyMs": 1889,
     "count": 5
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 137,
+    "latencyMs": 162,
     "count": 5
    }
   ],
-  "totalMs": 2328
+  "totalMs": 1899
  },
  {
   "query": "github",
@@ -404,14 +404,14 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 251,
+    "latencyMs": 288,
     "count": 1
    },
    {
     "source": "modelcontextprotocol-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 526,
+    "latencyMs": 434,
     "count": 1
    },
    {
@@ -425,39 +425,39 @@
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 2734,
+    "latencyMs": 677,
     "count": 3
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 428,
+    "latencyMs": 427,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 595,
+    "latencyMs": 682,
     "count": 5
    },
    {
     "source": "skillsmp",
     "ok": true,
     "degraded": false,
-    "latencyMs": 377,
+    "latencyMs": 379,
     "count": 5
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 48,
+    "latencyMs": 57,
     "count": 5
    }
   ],
-  "totalMs": 2735
+  "totalMs": 683
  },
  {
   "query": "browser automation",
@@ -488,17 +488,17 @@
     ],
     "updatedAt": "2026-09-27T10:12:00.787095Z",
     "stars": 37607,
-    "downloads": 13972,
+    "downloads": 13973,
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.5407850666666666,
+     "score": 0.5407856,
      "tier": "curated",
      "evidence": {
       "stars": 37607,
-      "downloads": 13972,
+      "downloads": 13973,
       "monthsSinceUpdate": 0,
-      "evidenceScore": 0.6759813333333332
+      "evidenceScore": 0.675982
      },
      "hardFilterPassed": true
     }
@@ -633,7 +633,7 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 127,
+    "latencyMs": 126,
     "count": 0,
     "message": "no detail page"
    },
@@ -641,52 +641,52 @@
     "source": "modelcontextprotocol-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 219,
+    "latencyMs": 222,
     "count": 0
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 92,
+    "latencyMs": 62,
     "count": 2
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 885,
+    "latencyMs": 435,
     "count": 5
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 2247,
+    "latencyMs": 268,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 972,
+    "latencyMs": 1123,
     "count": 5
    },
    {
     "source": "skillsmp",
     "ok": true,
     "degraded": false,
-    "latencyMs": 385,
+    "latencyMs": 365,
     "count": 5
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 49,
+    "latencyMs": 56,
     "count": 5
    }
   ],
-  "totalMs": 2248
+  "totalMs": 1124
  }
 ]
