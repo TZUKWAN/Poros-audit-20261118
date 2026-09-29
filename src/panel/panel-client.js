@@ -130,25 +130,71 @@ export function renderLoopTimeline(container, events) {
   }
 }
 
+function addLog(text, cls = "") {
+  const log = $("dialogue-log");
+  if (!log) return;
+  log.append(el("div", { class: `log-line ${cls}`, text }));
+  log.scrollTop = log.scrollHeight;
+}
+
+let metaEl;
+function setMeta(text) {
+  const log = $("dialogue-log");
+  if (!log) return;
+  if (!metaEl || !log.contains(metaEl)) {
+    metaEl = el("div", { class: "snapshot-meta" });
+    log.prepend(metaEl);
+  }
+  metaEl.textContent = text;
+}
+
 /** 主入口：连接 WS + 数据联通 */
 export function startPanel(opts = {}) {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${protocol}://${location.host}/ws`);
+  ws.addEventListener("open", () => addLog("已连接面板服务。输入需求开始一次五闸门构建。"));
   ws.addEventListener("message", (msg) => {
     let data;
     try { data = JSON.parse(msg.data); } catch { return; }
     if (data.kind === "snapshot") {
       renderSnapshot(data.snapshot);
+    } else if (data.kind === "state") {
+      addLog(`▶ 进入阶段：${data.phase}`);
+    } else if (data.kind === "gate") {
+      addLog(`⏸ 闸门 ${data.gate} 挂起：${data.title} —— 请在右侧批准/驳回`, "log-gate");
+      renderGate($("gate-view"), { gate: data.gate, title: data.title, lines: data.lines }, sendDecision);
     } else if (data.kind === "cluster") {
       renderCluster($("cluster-view"), [data.event]);
     } else if (data.kind === "loop") {
       renderLoopTimeline($("loop-timeline"), [data.event]);
-    } else if (data.kind === "gate") {
-      renderGate($("gate-view"), { gate: data.gate, title: data.title, lines: data.lines }, sendDecision);
+    } else if (data.kind === "action-result") {
+      addLog(data.ok ? "✓ 操作已受理" : `✗ ${data.error ?? "操作失败"}`, data.ok ? "log-ok" : "log-err");
+    } else if (data.kind === "run-error") {
+      addLog(`✗ 构建失败：${data.message}`, "log-err");
+    } else if (data.kind === "run-done") {
+      addLog(`✓ 构建完成：${data.buildId}（已固化场景 + 写入 Memory）`, "log-ok");
     }
   });
   function sendDecision(decision) {
     ws.send(JSON.stringify({ type: "gate-decision", decision }));
+  }
+  function startBuild() {
+    const input = $("req-input");
+    const requirement = (input?.value ?? "").trim();
+    if (requirement.length < 2) {
+      addLog("请先输入至少 2 个字符的需求", "log-err");
+      return;
+    }
+    addLog(`➤ 发起构建：${requirement}`);
+    ws.send(JSON.stringify({ type: "start-build", requirement }));
+  }
+  const go = $("req-go");
+  const input = $("req-input");
+  if (go) go.addEventListener("click", startBuild);
+  if (input) {
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") startBuild();
+    });
   }
   function renderSnapshot(snap) {
     renderDag($("dag-view"), snap.dag, snap.trace);
@@ -157,7 +203,7 @@ export function startPanel(opts = {}) {
     renderScenarios($("scenario-cards"), snap.scenarios);
     renderMemoryTree($("memory-tree"), snap.memoryTree, opts.fileLoader);
     renderLoopTimeline($("loop-timeline"), snap.loop);
-    $("dialogue-log").append(el("div", { class: "snapshot-meta", text: `阶段: ${snap.phase} · 构建: ${snap.buildId ?? "—"}` }));
+    setMeta(`阶段: ${snap.phase} · 构建: ${snap.buildId ?? "—"} · 场景: ${snap.scenarios.length}`);
   }
   return ws;
 }

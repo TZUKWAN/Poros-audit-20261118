@@ -35,6 +35,7 @@ export interface PanelSnapshot {
 export const PanelActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("gate-decision"), decision: GateDecisionSchema }),
   z.object({ type: z.literal("control"), action: z.enum(["pause", "resume", "terminate"]) }),
+  z.object({ type: z.literal("start-build"), requirement: z.string().min(2).max(500) }),
 ]);
 export type PanelAction = z.infer<typeof PanelActionSchema>;
 
@@ -46,6 +47,8 @@ export interface PanelDeps {
   loop?: GoalLoop;
   /** 页面 HTML（测试注入；生产读静态文件） */
   pageHtml?: string;
+  /** 面板发起构建（launcher 注入：装配真实联邦检索/执行/固化） */
+  onStartBuild?: (requirement: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export class PanelServer {
@@ -76,7 +79,7 @@ export class PanelServer {
     });
   }
 
-  /** 挂接编排器：状态/闸门事件镜像推送 */
+  /** 挂接编排器：状态/闸门事件镜像推送（每次新构建由 launcher 调用） */
   attachOrchestrator(orch: Orchestrator): void {
     this.deps.orchestrator = orch;
     orch.on("state:enter", ({ to }) => {
@@ -87,6 +90,11 @@ export class PanelServer {
       const view = renderGateView(request.gate, request.payload);
       this.broadcast({ kind: "gate", gate: request.gate, title: view.title, lines: view.lines });
     });
+  }
+
+  /** 构建完成后强制推送最新快照（场景库/Memory 生长可见） */
+  async refresh(): Promise<void> {
+    await this.pushSnapshot();
   }
 
   async snapshot(): Promise<PanelSnapshot> {
@@ -134,6 +142,10 @@ export class PanelServer {
       return { ok: false, error: `invalid action: ${parsed.error.issues[0]?.message ?? "unknown"}` };
     }
     const action = parsed.data;
+    if (action.type === "start-build") {
+      if (!this.deps.onStartBuild) return { ok: false, error: "面板未接入构建器" };
+      return await this.deps.onStartBuild(action.requirement.trim());
+    }
     if (action.type === "gate-decision") {
       await this.deps.orchestrator?.decide(action.decision);
       this.bus.emit("gate-decision", action.decision);
@@ -233,10 +245,50 @@ function gatePayloadFor(gate: 1 | 2 | 3 | 4 | 5, ctx: unknown): unknown {
 export function defaultPageHtml(): string {
   return `<!doctype html>
 <html lang="zh">
-<head><meta charset="utf-8"><title>场景Agent 面板</title></head>
+<head><meta charset="utf-8"><title>场景Agent 面板</title>
+<style>
+  body{font-family:system-ui,"Microsoft YaHei",sans-serif;margin:0;background:#111;color:#ddd}
+  .three-pane{display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:8px;padding:8px;height:100vh;box-sizing:border-box}
+  section{background:#1b1b1f;border:1px solid #2c2c33;border-radius:8px;padding:10px;overflow:auto}
+  h2{margin:0 0 8px;font-size:15px;color:#7fd1ff}
+  h3{margin:8px 0;font-size:13px;color:#ffd479}
+  #build-controls{display:flex;gap:6px;margin-bottom:8px}
+  #req-input{flex:1;background:#0e0e11;color:#eee;border:1px solid #3a3a44;border-radius:6px;padding:6px 8px}
+  button{background:#2b4a66;color:#cfe9ff;border:1px solid #3d6a92;border-radius:6px;padding:6px 12px;cursor:pointer}
+  button:hover{background:#39628a}
+  .log-line{padding:3px 6px;border-left:2px solid #3a3a44;margin:2px 0;font-size:12px;white-space:pre-wrap}
+  .log-gate{border-color:#ffd479;color:#ffd479}
+  .log-ok{border-color:#6fd06f;color:#9fdf9f}
+  .log-err{border-color:#e07070;color:#f0a0a0}
+  .snapshot-meta{color:#888;font-size:11px;margin:6px 0}
+  .dag-node{display:flex;gap:8px;padding:5px 8px;margin:3px 0;background:#232329;border-radius:6px;font-size:12px}
+  .status-success{border-left:3px solid #6fd06f}
+  .status-failed{border-left:3px solid #e07070}
+  .status-running{border-left:3px solid #ffd479;animation:pulse 1s infinite alternate}
+  .status-pending{border-left:3px solid #555}
+  @keyframes pulse{from{opacity:.7}to{opacity:1}}
+  .gate-lines{background:#0e0e11;border:1px solid #3a3a44;border-radius:6px;padding:8px;white-space:pre-wrap;font-size:12px}
+  .gate-actions{display:flex;gap:6px;margin-top:8px;align-items:center}
+  .gate-actions input{flex:1;background:#0e0e11;color:#eee;border:1px solid #3a3a44;border-radius:6px;padding:6px 8px}
+  .cluster-event,.loop-event{font-size:12px;padding:2px 6px;border-left:2px solid #3a3a44;margin:2px 0}
+  .scenario-card{background:#232329;border-radius:6px;padding:6px 8px;margin:4px 0;cursor:pointer;font-size:12px;display:flex;justify-content:space-between}
+  .scenario-card.degraded{border:1px solid #8a5a2b}
+  .scenario-detail{font-size:11px;color:#9ab;margin:4px 0 0 8px}
+  .mem-dir,.mem-file{display:block;font-size:12px;margin:2px 0;color:#9cd}
+  summary{cursor:pointer;color:#ccd}
+  #memory-viewer{background:#0e0e11;border:1px solid #3a3a44;border-radius:6px;padding:8px;margin-top:8px;font-size:12px}
+</style>
+</head>
 <body>
   <div id="app" class="three-pane">
-    <section id="pane-dialogue" data-pane="dialogue"><h2>对话</h2><div id="dialogue-log"></div></section>
+    <section id="pane-dialogue" data-pane="dialogue">
+      <h2>对话 · 发起构建</h2>
+      <div id="build-controls">
+        <input id="req-input" placeholder="输入一句话需求，如：整理 /data 下的数据并生成报告" />
+        <button id="req-go">构建</button>
+      </div>
+      <div id="dialogue-log"></div>
+    </section>
     <section id="pane-pipeline" data-pane="pipeline">
       <h2>流水线与集群</h2>
       <div id="dag-view"></div>
@@ -248,6 +300,7 @@ export function defaultPageHtml(): string {
       <h2>场景库 / Memory</h2>
       <div id="scenario-cards"></div>
       <div id="memory-tree"></div>
+      <div id="memory-viewer"></div>
     </section>
   </div>
   <script type="module" src="/panel.js"></script>
