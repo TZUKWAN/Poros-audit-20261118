@@ -20,5 +20,9 @@ const matrixCtor = class DOMMatrix implements MatrixLike {
 } as unknown as GlobalsWithBrowserBits["DOMMatrix"] & MatrixCtor;
 
 const g = globalThis as GlobalsWithBrowserBits;
-if (typeof g.DOMMatrix === "undefined") g.DOMMatrix = matrixCtor;
-if (typeof g.Path2D === "undefined") g.Path2D = class Path2D {};
+if (typeof g.DOMMatrix === "undefined") {
+  (g as unknown as { DOMMatrix: unknown }).DOMMatrix = matrixCtor;
+}
+if (typeof g.Path2D === "undefined") {
+  (g as unknown as { Path2D: unknown }).Path2D = class Path2D {};
+}

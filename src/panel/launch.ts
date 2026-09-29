@@ -48,11 +48,29 @@ async function main(): Promise<void> {
     pageHtml: defaultPageHtml(),
     onStartBuild: async (requirement) => {
       if (!currentDone && current) {
-        return { ok: false, error: `已有构建进行中（${current.ctx.id}，阶段 ${current.ctx.phase}）——先完成它` };
+        panel.pushChat({
+          role: "build-status", tone: "err",
+          text: `已有构建进行中（${current.ctx.id}，阶段 ${current.ctx.phase}）——先完成它（可驳回或等待）`, ts: Date.now(),
+        });
+        return { ok: false, error: "build in progress" };
       }
+      // 用户消息回显（服务端权威，重连可恢复）
+      panel.pushChat({ role: "user", content: requirement, timestamp: Date.now() });
+      panel.pushChat({
+        role: "build-status", tone: "info",
+        text: "好，开始构建。第一步：8 源联邦检索（skills.sh / SkillsMP / 腾讯SkillHub / ModelScope / Cline / Awesome / mcp.so / 官方servers）……首次约需 30-60 秒",
+        ts: Date.now(),
+      });
       // 一次真实联邦检索供本构建全部节点共用（模板 DAG 三节点查询同源；24h 缓存兜底）
-      panel.broadcast({ kind: "state", phase: "retrieving (live 8-source federation search)" });
       const baseResult = await search(requirement, 5);
+      const bySource = new Map<string, number>();
+      for (const s of baseResult.statuses) {
+        if (s.ok && s.count > 0) bySource.set(s.source, s.count);
+      }
+      const hitText = baseResult.capabilities.length
+        ? `命中 ${baseResult.capabilities.length} 个候选：${baseResult.capabilities.slice(0, 3).map((c) => c.name).join("、")}${baseResult.capabilities.length > 3 ? " 等" : ""}（来源：${[...bySource.entries()].map(([s, n]) => `${s}×${n}`).join("、") || "无"}）`
+        : "本次检索未命中候选，将使用模板流程继续";
+      panel.pushChat({ role: "build-status", tone: baseResult.capabilities.length ? "ok" : "info", text: hitText, ts: Date.now() });
 
       // play 模式执行器：跳过安装/克隆，直接真实调用（6s 超时）+ 模拟兜底（诚实标注 simulated）
       const demoExecute = async (ctx: BuildContext): Promise<void> => {
@@ -133,11 +151,19 @@ async function main(): Promise<void> {
             sessionMemoryMd(final),
             "utf8",
           );
-          panel.broadcast({ kind: "run-done", buildId, scenarioId: id });
+          panel.pushChat({
+            role: "build-status", tone: "ok",
+            text: `构建完成 ✓ 场景已固化为 ${id}（v1），会话已写入 Memory。右栏可以看到它；下次说相似的需求会直接命中复用。`,
+            ts: Date.now(),
+          });
           await panel.refresh();
         })
         .catch(async (err: unknown) => {
-          panel.broadcast({ kind: "run-error", message: err instanceof Error ? err.message : String(err) });
+          panel.pushChat({
+            role: "build-status", tone: "err",
+            text: `构建失败：${err instanceof Error ? err.message : String(err)}。可以直接输入新需求重试。`,
+            ts: Date.now(),
+          });
           await panel.refresh();
         })
         .finally(() => {

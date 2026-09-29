@@ -34,24 +34,34 @@ function deps(): HandlerDeps {
   };
 }
 
-/** WS 客户端测试帮手：收消息到队列，可等特定 kind */
+/** WS 客户端测试帮手：收消息到队列，可等特定 kind（+可选谓词），FIFO 匹配 */
 class WsClient {
   private queue: Array<Record<string, unknown>> = [];
-  private waiters: Array<{ kind: string; resolve: (m: Record<string, unknown>) => void }> = [];
+  private waiters: Array<{ kind: string; predicate?: (m: Record<string, unknown>) => boolean; resolve: (m: Record<string, unknown>) => void }> = [];
   private ws: WebSocket;
 
   constructor(url: string) {
     this.ws = new WebSocket(url);
     this.ws.on("message", (data) => {
       const msg = JSON.parse(String(data)) as Record<string, unknown>;
-      const waiter = this.waiters.find((w) => w.kind === msg.kind);
-      if (waiter) {
-        this.waiters = this.waiters.filter((w) => w !== waiter);
-        waiter.resolve(msg);
+      const idx = this.waiters.findIndex((w) => this.match(w, msg));
+      if (idx >= 0) {
+        const [waiter] = this.waiters.splice(idx, 1);
+        waiter!.resolve(msg);
       } else {
         this.queue.push(msg);
       }
     });
+  }
+
+  private match(w: { kind: string; predicate?: (m: Record<string, unknown>) => boolean }, msg: Record<string, unknown>): boolean {
+    if (w.kind !== msg.kind) return false;
+    if (!w.predicate) return true;
+    try {
+      return w.predicate(msg);
+    } catch {
+      return false;
+    }
   }
 
   async open(): Promise<void> {
@@ -61,8 +71,9 @@ class WsClient {
     });
   }
 
-  async waitFor(kind: string, timeoutMs = 8000): Promise<Record<string, unknown>> {
-    const found = this.queue.find((m) => m.kind === kind);
+  async waitFor(kind: string, predicate?: (m: Record<string, unknown>) => boolean, timeoutMs = 8000): Promise<Record<string, unknown>> {
+    const matchInQueue = (m: Record<string, unknown>): boolean => this.match({ kind, predicate }, m);
+    const found = this.queue.find((m) => matchInQueue(m));
     if (found) {
       this.queue = this.queue.filter((m) => m !== found);
       return found;
@@ -71,6 +82,7 @@ class WsClient {
       const timer = setTimeout(() => reject(new Error(`timeout waiting ${kind}`)), timeoutMs);
       this.waiters.push({
         kind,
+        predicate,
         resolve: (m) => {
           clearTimeout(timer);
           resolve(m);
@@ -116,17 +128,16 @@ afterEach(async () => {
 });
 
 describe("8.1 面板服务：连接/快照一致/断线重连", () => {
-  it("HTML 三栏骨架 + /api/snapshot 可用", async () => {
+  it("HTML 双栏骨架（左对话/右预览） + /api/snapshot 可用", async () => {
     const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
-    expect(html).toContain('data-pane="dialogue"');
-    expect(html).toContain('data-pane="pipeline"');
-    expect(html).toContain('data-pane="registry"');
-    expect(html).toContain('id="gate-view"');
+    expect(html).toContain('data-pane="chat"');
+    expect(html).toContain('id="chat-root"');
+    expect(html).toContain('data-pane="preview"');
+    expect(html).toContain('id="preview-goal"');
     expect(html).toContain('id="scenario-cards"');
     expect(html).toContain('id="memory-tree"');
-    expect(html).toContain('id="loop-timeline"');
     const js = await (await fetch(`http://127.0.0.1:${port}/panel.js`)).text();
-    expect(js).toContain("startPanel");
+    expect(js.length).toBeGreaterThan(10_000); // 打包后的 chat client（含 pi-web-ui）
     const snap = (await (await fetch(`http://127.0.0.1:${port}/api/snapshot`)).json()) as PanelSnapshot;
     expect(snap.phase).toBe("parsing"); // 初始 BuildContext 即 parsing（尚未 run）
   });
@@ -164,12 +175,11 @@ describe("8.4 Web 端完成一轮五闸门与状态机一致", () => {
     await c.open();
     await c.waitFor("snapshot");
     const runPromise = orch.run();
+    const isGateCard = (gate: number) => (m: Record<string, unknown>) =>
+      (m.message as { role?: string })?.role === "gate-card" && (m.message as { gate?: number }).gate === gate;
     for (const gate of [1, 2, 3, 4, 5]) {
-      // 等闸门视图推送
-      let msg = await c.waitFor("gate");
-      while (msg.gate !== gate) {
-        msg = await c.waitFor("gate");
-      }
+      // 等闸门卡片推送（聊天协议）
+      await c.waitFor("chat", isGateCard(gate));
       c.send({ type: "gate-decision", decision: { gate, action: "approve" } });
       const res = (await c.waitFor("action-result")) as { ok: boolean };
       expect(res.ok).toBe(true);
@@ -177,6 +187,35 @@ describe("8.4 Web 端完成一轮五闸门与状态机一致", () => {
     const final = await runPromise;
     expect(final.phase).toBe("done");
     expect(final.approvals.map((a) => a.gate).sort()).toEqual([1, 2, 3, 4, 5]);
+    c.close();
+  });
+
+  it("聊天协议：闸门卡片经 chat 推送且决策后历史回填 decided", async () => {
+    const c = new WsClient(`ws://127.0.0.1:${port}/ws`);
+    await c.open();
+    await c.waitFor("snapshot");
+    const runPromise = orch.run();
+    const isGateCard = (gate: number) => (m: Record<string, unknown>) =>
+      (m.message as { role?: string })?.role === "gate-card" && (m.message as { gate?: number }).gate === gate;
+    await c.waitFor("chat", isGateCard(1));
+    c.send({ type: "gate-decision", decision: { gate: 1, action: "approve" } });
+    await c.waitFor("action-result");
+    // 决策状态行也经 chat 推送
+    const decidedLine = (await c.waitFor("chat", (m) => (m.message as { role?: string })?.role === "build-status")) as {
+      message: { text?: string };
+    };
+    expect(decidedLine.message.text).toContain("闸门1 已批准");
+    // 快照中的 gate-card 已回填 decided
+    const snap = (await (await fetch(`http://127.0.0.1:${port}/api/snapshot`)).json()) as PanelSnapshot;
+    const card = snap.chat.find((m) => m.role === "gate-card") as { gate: number; decided?: { action: string } } | undefined;
+    expect(card?.gate).toBe(1);
+    expect(card?.decided?.action).toBe("approve");
+    for (const gate of [2, 3, 4, 5]) {
+      await c.waitFor("chat", isGateCard(gate));
+      c.send({ type: "gate-decision", decision: { gate, action: "approve" } });
+      await c.waitFor("action-result");
+    }
+    await runPromise;
     c.close();
   });
 });
@@ -229,8 +268,10 @@ describe("阶段八集成：Web 路径与 TUI 路径结果一致", () => {
       webOrch.start(requirement, "b-web");
       const runPromise = webOrch.run();
       for (const gate of [1, 2, 3, 4, 5] as const) {
-        let msg = await c.waitFor("gate");
-        while (msg.gate !== gate) msg = await c.waitFor("gate");
+        await c.waitFor("chat", (m: Record<string, unknown>) => {
+          const msg = m.message as { role?: string; gate?: number } | undefined;
+          return msg?.role === "gate-card" && msg.gate === gate;
+        });
         c.send({ type: "gate-decision", decision: { gate, action: "approve" } });
       }
       const webResult = await runPromise;
