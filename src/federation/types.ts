@@ -39,6 +39,35 @@ export const InstallSpecSchema = z.discriminatedUnion("type", [
 ]);
 export type InstallSpec = z.infer<typeof InstallSpecSchema>;
 
+/**
+ * Explicit host execution contract for CLI/git capabilities.
+ *
+ * Catalog metadata is untrusted by default, so a capability is never allowed
+ * to execute a command merely because `install.type` is `cli` or `git`.
+ * A producer must opt in with this bounded contract and the host must still
+ * provide a command allow-list and a scoped working directory.
+ */
+export const HostExecutionInputSchema = z.object({
+  flag: z.string().regex(/^--?[A-Za-z0-9][A-Za-z0-9_-]*$/),
+  type: z.enum(["string", "number", "boolean"]).default("string"),
+  required: z.boolean().default(false),
+});
+
+export const HostExecutionSpecSchema = z.object({
+  /** Executable basename; paths and shell fragments are rejected. */
+  command: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
+  /** Static argv tokens. They are passed to spawn(shell:false) verbatim. */
+  args: z.array(z.string().max(4_000).refine((value) => !value.includes("\u0000"), "NUL is not allowed")).max(64).default([]),
+  /** Explicit input-to-argv bindings. Unknown user/model inputs are ignored. */
+  inputArgs: z.record(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/), HostExecutionInputSchema).default({}),
+  /** Working directory is selected by the host, never by model-provided input. */
+  cwd: z.enum(["project", "workspace", "install"]).default("project"),
+  timeoutMs: z.number().int().min(100).max(120_000).default(30_000),
+  maxOutputBytes: z.number().int().min(1_024).max(1_000_000).default(200_000),
+});
+export type HostExecutionSpec = z.infer<typeof HostExecutionSpecSchema>;
+export type HostExecutionSpecInput = z.input<typeof HostExecutionSpecSchema>;
+
 /** 信任分：来源权重 × 证据分，[0,1] */
 export const TrustSchema = z.object({
   score: z.number().min(0).max(1),
@@ -63,6 +92,8 @@ export const CapabilitySchema = z.object({
   source: SourceSchema,
   trust: TrustSchema,
   install: InstallSpecSchema,
+  /** Optional explicit contract; absent means CLI/git remains delegated. */
+  hostExecution: HostExecutionSpecSchema.optional(),
   /** 远程运行标记（1.2 适配器须标注） */
   remoteRun: z
     .object({

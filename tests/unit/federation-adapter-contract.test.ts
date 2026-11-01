@@ -74,4 +74,25 @@ describe("1.1.2.b 适配器契约", () => {
     expect(s.degraded).toBe(true);
     expect(s.count).toBe(3);
   });
+
+  it("外部目录把可选字段写成 null 时，能力仍满足持久化 schema", () => {
+    const cap = buildCapability({
+      id: "fake:null-fields",
+      name: "null-fields",
+      kind: "skill-knowledge",
+      description: "catalog item",
+      source: fakeSource,
+      install: { type: "context", location: "https://example.com/skill" },
+      repoUrl: null as unknown as string,
+      homepage: null as unknown as string,
+      updatedAt: null as unknown as string,
+      stars: null as unknown as number,
+      downloads: null as unknown as number,
+    });
+    expect(cap.repoUrl).toBeUndefined();
+    expect(cap.homepage).toBeUndefined();
+    expect(cap.updatedAt).toBeUndefined();
+    expect(cap.stars).toBeUndefined();
+    expect(cap.downloads).toBeUndefined();
+  });
 });

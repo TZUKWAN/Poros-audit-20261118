@@ -129,7 +129,7 @@ export function jsonStore<T>(options: JsonStoreOptions): Store<T> {
         if (!parsed.success) {
           throw new ScenarioError({
             code: ScenarioErrorCode.VALIDATION,
-            message: `store.set schema violation for key ${key}`,
+            message: `store.set schema violation for key ${key}: ${parsed.error.issues[0]?.path.join(".") ?? "value"} ${parsed.error.issues[0]?.message ?? "invalid value"}`,
             phase: "infra",
             context: { key, issues: parsed.error.issues },
           });

@@ -130,9 +130,8 @@ export function renderGate5(payload: { intent: Intent | null; trace: unknown[]; 
   lines.push(`  执行步骤: ${payload.trace.length}`);
   const passed = payload.acceptance.every((a) => a.passed);
   lines.push(`  验收: ${payload.acceptance.map((a) => `${a.layer}:${a.passed ? "过" : "挂"}`).join("  ")}`);
-  lines.push("", "泛化结果: 槽位化/分支化/验收泛化/意图签名 已生成（见蒸馏产物）");
-  lines.push("", "[1] 固化入库 (pin)   [2] 重跑一次 (rerun)   [3] 丢弃 (discard)");
-  void passed;
+  lines.push("", passed ? "泛化结果: 槽位化/分支化/验收泛化/意图签名 已生成（见蒸馏产物）" : "当前执行或验收未全部通过，不能固化场景；请重跑或丢弃");
+  lines.push("", passed ? "[1] 固化入库 (pin)   [2] 重跑一次 (rerun)   [3] 丢弃 (discard)" : "[2] 重跑一次 (rerun)   [3] 丢弃 (discard)");
   return { title: GATES[5].name, lines };
 }
 

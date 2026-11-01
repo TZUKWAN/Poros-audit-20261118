@@ -1,4 +1,5 @@
-import type { Capability } from "../types.js";
+import { HostExecutionSpecSchema } from "../types.js";
+import type { Capability, HostExecutionSpecInput } from "../types.js";
 import { computeTrust } from "../trust.js";
 import { canonicalName, repoIdentity } from "../types.js";
 import { fetchJson, httpFetch, makeStatus } from "./base.js";
@@ -25,6 +26,7 @@ export function buildCapability(input: {
   description: string;
   source: Capability["source"];
   install: Capability["install"];
+  hostExecution?: HostExecutionSpecInput;
   remoteRun?: Capability["remoteRun"];
   repoUrl?: string;
   homepage?: string;
@@ -35,6 +37,12 @@ export function buildCapability(input: {
   requiresAuth?: boolean;
   securityFlagged?: boolean;
 }): Capability {
+  // External catalogs frequently encode missing optional fields as `null`.
+  // Keep the internal contract JSON-safe: zod's optional fields accept
+  // `undefined`, not `null`, and persisted build contexts validate candidates
+  // again when the panel advances to the next gate.
+  const optionalString = (value: unknown): string | undefined => (typeof value === "string" && value.length > 0 ? value : undefined);
+  const optionalNumber = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
   const cap: Omit<Capability, "trust"> = {
     id: input.id,
     name: input.name,
@@ -42,13 +50,14 @@ export function buildCapability(input: {
     description: input.description,
     source: input.source,
     install: input.install,
+    hostExecution: input.hostExecution ? HostExecutionSpecSchema.parse(input.hostExecution) : undefined,
     remoteRun: input.remoteRun,
-    repoUrl: input.repoUrl,
-    homepage: input.homepage,
+    repoUrl: optionalString(input.repoUrl),
+    homepage: optionalString(input.homepage),
     tags: input.tags ?? [],
-    updatedAt: input.updatedAt,
-    stars: input.stars,
-    downloads: input.downloads,
+    updatedAt: optionalString(input.updatedAt),
+    stars: optionalNumber(input.stars),
+    downloads: optionalNumber(input.downloads),
     requiresAuth: input.requiresAuth ?? false,
     securityFlagged: input.securityFlagged ?? false,
   };

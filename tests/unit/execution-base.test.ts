@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ClusterScheduler, inProcessDelegator, assertDelegationDepth } from "@/execution/cluster";
-import { CapabilityInstaller, CapabilityInvoker, PermissionGate } from "@/execution/capability-runtime";
+import { CapabilityInstaller, CapabilityInvoker, PermissionGate, createSafeHostCommandExecutor, readHostExecutionEnvironment } from "@/execution/capability-runtime";
 import type { CommandRunner } from "@/execution/capability-runtime";
 import { GoalLoop, loopDecisionFromGate, assertLoopParams } from "@/execution/loop";
 import { ReactorBridge, startLocalWebhook } from "@/execution/reactor-bridge";
@@ -233,6 +233,14 @@ describe("4.2.2 调用器", () => {
       req.on("data", (c) => (body += String(c)));
       req.on("end", () => {
         const parsed = JSON.parse(body) as { method: string; params: { name: string; arguments: unknown } };
+        // The production client performs the MCP initialize handshake and
+        // then falls back to this legacy bridge only when initialize is
+        // explicitly unsupported.
+        if (parsed.method === "initialize") {
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32601, message: "method not found" } }));
+          return;
+        }
         expect(parsed.method).toBe("tools/call");
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ text: `done:${parsed.params.name}` }] } }));
@@ -314,8 +322,124 @@ describe("4.2.2 调用器", () => {
     const invoker = new CapabilityInvoker();
     const c = cap({ id: "g:x", name: "git-x", install: { type: "git", repoUrl: "https://github.com/a/b" } });
     const out = await invoker.invoke(c, "run", {});
-    expect(out.ok).toBe(true);
+    expect(out.ok).toBe(false);
+    expect(out.mode).toBe("delegated");
     expect((out.output as { mode: string }).mode).toBe("context-handoff");
+  });
+
+  it("CLI 宿主执行：显式契约 + allow-list + 声明式参数才会执行", async () => {
+    const calls: Array<{ command: string; args: string[]; cwd?: string; timeoutMs?: number; maxOutputBytes?: number }> = [];
+    const executor = createSafeHostCommandExecutor({
+      allowedCommands: ["safe-tool"],
+      projectRoot: "C:/workspace/project",
+      runner: {
+        run: async (command, args, options) => {
+          calls.push({ command, args, cwd: options?.cwd, timeoutMs: options?.timeoutMs, maxOutputBytes: options?.maxOutputBytes });
+          return { code: 0, stdout: "ok", stderr: "" };
+        },
+      },
+    });
+    const invoker = new CapabilityInvoker(undefined, fetch, executor);
+    const c = cap({
+      id: "cli:safe",
+      name: "safe-tool",
+      kind: "cli-tool",
+      install: { type: "cli", command: "safe-tool", args: [] },
+      hostExecution: {
+        command: "safe-tool",
+        args: ["run"],
+        inputArgs: { target: { flag: "--target", type: "string", required: true } },
+        cwd: "project",
+        timeoutMs: 10_000,
+        maxOutputBytes: 4_000,
+      },
+    });
+    const out = await invoker.invoke(c, "run", { target: "README.md", ignored: "must-not-appear" });
+    expect(out).toMatchObject({ ok: true, mode: "executed" });
+    expect(calls).toEqual([{ command: "safe-tool", args: ["run", "--target", "README.md"], cwd: "C:\\workspace\\project", timeoutMs: 10_000, maxOutputBytes: 4_000 }]);
+  });
+
+  it("CLI 宿主执行：未 allow-list、缺 root 或缺 required input 都拒绝且不运行", async () => {
+    let invoked = 0;
+    const runner: CommandRunner = { run: async () => { invoked++; return { code: 0, stdout: "", stderr: "" }; } };
+    const base = {
+      command: "unsafe-tool",
+      args: [] as string[],
+      inputArgs: { target: { flag: "--target", type: "string" as const, required: true } },
+      cwd: "project" as const,
+      timeoutMs: 10_000,
+      maxOutputBytes: 4_000,
+    };
+    const denied = createSafeHostCommandExecutor({ allowedCommands: ["safe-tool"], projectRoot: "C:/workspace/project", runner });
+    const noRoot = createSafeHostCommandExecutor({ allowedCommands: ["safe-tool"], runner });
+    const invokerDenied = new CapabilityInvoker(undefined, fetch, denied);
+    const invokerNoRoot = new CapabilityInvoker(undefined, fetch, noRoot);
+    const unsafe = cap({ id: "cli:unsafe", name: "unsafe", kind: "cli-tool", install: { type: "cli", command: "unsafe-tool", args: [] }, hostExecution: base });
+    expect((await invokerDenied.invoke(unsafe, "run", { target: "x" })).error).toContain("allow-listed");
+    const safeMissing = cap({ id: "cli:missing", name: "safe", kind: "cli-tool", install: { type: "cli", command: "safe-tool", args: [] }, hostExecution: { ...base, command: "safe-tool" } });
+    expect((await invokerNoRoot.invoke(safeMissing, "run", { target: "x" })).error).toContain("no project root");
+    const safeRequired = createSafeHostCommandExecutor({ allowedCommands: ["safe-tool"], projectRoot: "C:/workspace/project", runner });
+    const invokerRequired = new CapabilityInvoker(undefined, fetch, safeRequired);
+    expect((await invokerRequired.invoke(safeMissing, "run", {})).error).toContain("missing required host input");
+    expect(invoked).toBe(0);
+  });
+
+  it("CLI 宿主执行：权限拒绝和 NUL 输入不会调用 runner", async () => {
+    let invoked = 0;
+    const gate = new PermissionGate();
+    gate.onRequest((_req, respond) => respond("deny"));
+    const executor = createSafeHostCommandExecutor({
+      allowedCommands: ["safe-tool"],
+      projectRoot: "C:/workspace/project",
+      permission: gate,
+      runner: { run: async () => { invoked++; return { code: 0, stdout: "", stderr: "" }; } },
+    });
+    const invoker = new CapabilityInvoker(undefined, fetch, executor);
+    const c = cap({ id: "cli:input", name: "safe", kind: "cli-tool", install: { type: "cli", command: "safe-tool", args: [] }, hostExecution: { command: "safe-tool", args: [], inputArgs: { text: { flag: "--text", type: "string", required: false } }, cwd: "project", timeoutMs: 10_000, maxOutputBytes: 4_000 } });
+    expect((await invoker.invoke(c, "run", { text: "a\u0000b" })).error).toContain("NUL");
+    expect((await invoker.invoke(c, "run", { text: "ok" })).error).toContain("denied");
+    expect(invoked).toBe(0);
+  });
+
+  it("CLI/Git 宿主策略：默认关闭且只接受显式 allow-list", () => {
+    const disabled = readHostExecutionEnvironment({});
+    expect(disabled.status.enabled).toBe(false);
+    expect(disabled.status.allowedCommands).toEqual([]);
+    expect(disabled.status.error).toContain("no allow-listed commands");
+
+    const enabled = readHostExecutionEnvironment({
+      SCENARIO_HOST_ALLOWED_COMMANDS: " safe-tool, safe-tool another-tool ",
+      SCENARIO_HOST_WORKSPACE_ROOT: "C:\\workspace",
+      SCENARIO_HOST_INSTALL_ROOT: "C:\\scenario-installs",
+      SCENARIO_HOST_MAX_TIMEOUT_MS: "12000",
+      SCENARIO_HOST_MAX_OUTPUT_BYTES: "4096",
+    });
+    expect(enabled.status).toMatchObject({
+      enabled: true,
+      allowedCommands: ["safe-tool", "another-tool"],
+      workspaceRoot: "C:\\workspace",
+      installRoot: "C:\\scenario-installs",
+      maxTimeoutMs: 12_000,
+      maxOutputBytes: 4_096,
+      error: null,
+    });
+  });
+
+  it("CLI/Git 宿主策略：错误配置整体禁用并暴露原因", () => {
+    const malformed = readHostExecutionEnvironment({
+      SCENARIO_HOST_ALLOWED_COMMANDS: "safe-tool && whoami",
+      SCENARIO_HOST_WORKSPACE_ROOT: "relative-workspace",
+    });
+    expect(malformed.status.enabled).toBe(false);
+    expect(malformed.status.allowedCommands).toEqual([]);
+    expect(malformed.status.error).toContain("invalid command");
+
+    const badRoot = readHostExecutionEnvironment({
+      SCENARIO_HOST_ALLOWED_COMMANDS: "safe-tool",
+      SCENARIO_HOST_WORKSPACE_ROOT: "relative-workspace",
+    });
+    expect(badRoot.status.enabled).toBe(false);
+    expect(badRoot.status.error).toContain("SCENARIO_HOST_WORKSPACE_ROOT");
   });
 });
 
@@ -382,6 +506,25 @@ describe("4.3.1 循环引擎（goal 模式）", () => {
     expect(events).toContain("loop:done");
   });
 
+  it("目标达成时每轮只发出一次 round:end，避免时间线重复结束事件", async () => {
+    const events: string[] = [];
+    let endedGoalMet: boolean | undefined;
+    const loop = new GoalLoop({
+      goal: "一次完成",
+      maxRounds: 1,
+      goalCheck: () => true,
+      runRound: async (round) => ({ round, summary: "完成", goalMet: false, metrics: {} }),
+    });
+    loop.on((event) => {
+      events.push(event.type);
+      if (event.type === "round:end") endedGoalMet = event.result.goalMet;
+    });
+    const result = await loop.run();
+    expect(result.reason).toBe("goal-met");
+    expect(events.filter((event) => event === "round:end")).toHaveLength(1);
+    expect(endedGoalMet).toBe(true);
+  });
+
   it("max-rounds 硬顶终止", async () => {
     const loop = new GoalLoop({
       goal: "g",
@@ -392,6 +535,50 @@ describe("4.3.1 循环引擎（goal 模式）", () => {
     const out = await loop.run();
     expect(out.reason).toBe("max-rounds");
     expect(out.rounds).toBe(3);
+  });
+
+  it("signal 在轮次边界取消，并执行 round hooks", async () => {
+    const controller = new AbortController();
+    const hooks: string[] = [];
+    const loop = new GoalLoop({
+      goal: "可取消长程目标",
+      maxRounds: 5,
+      signal: controller.signal,
+      goalCheck: () => false,
+      onRoundStart: (round) => { hooks.push(`start:${round}`); },
+      onRoundEnd: (result) => {
+        hooks.push(`end:${result.round}`);
+        if (result.round === 1) controller.abort();
+      },
+      runRound: async (round, _instruction, signal) => {
+        expect(signal).toBe(controller.signal);
+        return { round, summary: `round ${round}`, goalMet: false, metrics: {} };
+      },
+    });
+    const events: string[] = [];
+    loop.on((event) => events.push(event.type === "loop:done" ? `${event.type}:${event.reason}` : event.type));
+    const out = await loop.run();
+    expect(out).toMatchObject({ reason: "cancelled", rounds: 1 });
+    expect(hooks).toEqual(["start:1", "end:1"]);
+    expect(events).toContain("loop:done:cancelled");
+  });
+
+  it("round-start hook 取消时不再启动该轮执行", async () => {
+    const controller = new AbortController();
+    let executed = 0;
+    const loop = new GoalLoop({
+      goal: "g",
+      maxRounds: 2,
+      signal: controller.signal,
+      goalCheck: () => false,
+      onRoundStart: () => { controller.abort(); },
+      runRound: async () => {
+        executed += 1;
+        return { round: 1, summary: "不应执行", goalMet: false, metrics: {} };
+      },
+    });
+    await expect(loop.run()).resolves.toMatchObject({ reason: "cancelled", rounds: 0 });
+    expect(executed).toBe(0);
   });
 
   it("maxRounds 非法参数拒绝", () => {

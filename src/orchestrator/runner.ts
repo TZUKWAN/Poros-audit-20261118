@@ -51,8 +51,9 @@ export function createOrchestrator(options: RunnerOptions, restored?: BuildConte
 export function attachVirtualUser(orchestrator: Orchestrator, user: VirtualUser): () => void {
   return orchestrator.on("gate:pending", ({ request }) => {
     const decision: GateDecision = user.decide(request.gate, request.payload);
-    void orchestrator.decide(decision).catch(() => {
-      // 决策非法（如 reject 目标非法）：记录后不再重试——由测试断言捕获
+    void orchestrator.decide(decision, "virtual-user").catch(() => {
+      // 决策非法时主动终止，避免运行永远挂在没有决策的闸门上。
+      orchestrator.abort();
     });
   });
 }

@@ -2,7 +2,18 @@ import { EventEmitter } from "node:events";
 import { z } from "zod";
 import { ScenarioError, ScenarioErrorCode } from "@/core/errors.js";
 import type { EventBus } from "@/core/events.js";
-import { BuildContextSchema, newBuildContext, type BuildContext } from "./context.js";
+import {
+  AcceptanceRecordSchema,
+  BuildContextSchema,
+  DagSchema,
+  FinalizeChoiceSchema,
+  IntentSchema,
+  SelectionSchema,
+  newBuildContext,
+  type RuntimeContext,
+  type BuildContext,
+  type BuildClarification,
+} from "./context.js";
 
 /**
  * 2.1.2 编排内核状态机：8 工作状态 + idle 起点（DECISIONS D11）。
@@ -38,10 +49,31 @@ export function isLegalTransition(from: WorkState, to: WorkState): boolean {
 
 export const GateDecisionSchema = z.object({
   gate: z.number().int().min(1).max(5),
-  action: z.enum(["approve", "reject"]),
+  action: z.enum(["approve", "reject", "edit"]),
   /** reject 必填：回退目标阶段 */
   targetPhase: z.enum(["parsing", "planning", "retrieving", "assembling", "verifying", "executing", "distilling"]).optional(),
   comment: z.string().optional(),
+  edit: z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("intent"),
+        intent: IntentSchema,
+      }),
+      z.object({
+        kind: z.literal("dag"),
+        dag: DagSchema,
+      }),
+      z.object({
+        kind: z.literal("selections"),
+        selections: z.array(SelectionSchema),
+      }),
+      z.object({
+        kind: z.literal("acceptance"),
+        acceptance: z.array(AcceptanceRecordSchema),
+      }),
+    ])
+    .optional(),
+  choice: FinalizeChoiceSchema.optional(),
 });
 export type GateDecision = z.infer<typeof GateDecisionSchema>;
 
@@ -58,7 +90,19 @@ export interface OrchestratorEvents {
   "state:exit": { from: WorkState; to: WorkState | "done"; context: BuildContext };
   "gate:pending": { request: GateRequest };
   "gate:decided": { decision: GateDecision; context: BuildContext };
+  "gate:edited": { decision: GateDecision; context: BuildContext };
   "run:done": { context: BuildContext };
+  "user:pending": { request: BuildClarification; context: BuildContext };
+  "user:answered": { values: Record<string, string>; context: BuildContext };
+}
+
+/** A handler can suspend construction only by returning this structured signal. */
+export class BuildAwaitingUserError extends Error {
+  readonly code = "BUILD_AWAITING_USER" as const;
+  constructor(readonly request: Omit<BuildClarification, "source" | "createdAt">) {
+    super(request.question);
+    this.name = "BuildAwaitingUserError";
+  }
 }
 
 export interface OrchestratorDeps {
@@ -81,7 +125,7 @@ export interface OrchestratorDeps {
 export class Orchestrator {
   private context: BuildContext;
   private readonly emitter = new EventEmitter();
-  private decideResolve: ((d: GateDecision) => void) | undefined;
+  private decideResolve: ((d: { decision: GateDecision; decidedBy: "human" | "virtual-user" }) => void) | undefined;
   private abortController = new AbortController();
   private running = false;
 
@@ -111,17 +155,26 @@ export class Orchestrator {
     return new Orchestrator(deps, parsed.data);
   }
 
-  start(requirement: string, id?: string): void {
+  start(requirement: string, id?: string, runtimeContext: RuntimeContext | null = null, executionMode: "run" | "construction" = "run"): void {
     if (this.running) {
       throw new ScenarioError({ code: ScenarioErrorCode.CONFLICT, message: "orchestrator already running", phase: "infra" });
     }
-    this.context = newBuildContext(id ?? `build-${Date.now()}`, requirement);
+    // AbortController is one-shot. Reset it so an instance can be reused
+    // safely after a cancelled run.
+    this.abortController = new AbortController();
+    this.context = newBuildContext(id ?? `build-${Date.now()}`, requirement, new Date().toISOString(), runtimeContext, executionMode);
   }
 
   /** 驱动到下一个闸门或 done。挂起时 resolve runPromise 之前先 emit gate:pending。 */
   async run(): Promise<BuildContext> {
+    if (this.running) {
+      throw new ScenarioError({ code: ScenarioErrorCode.CONFLICT, message: "orchestrator is already running", phase: "infra" });
+    }
     this.running = true;
     try {
+      // A restored build must remain suspended until the explicit answer API
+      // clears the durable request. Never rerun a model with missing context.
+      if (this.context.awaitingUser) return this.ctx;
       while (this.context.phase !== "done") {
         this.assertNotAborted();
         const state = this.context.phase as WorkState;
@@ -129,24 +182,33 @@ export class Orchestrator {
           throw new ScenarioError({ code: ScenarioErrorCode.CONTEXT_CORRUPT, message: `unknown phase ${state}`, phase: "infra" });
         }
         // 1. 执行当前阶段处理器
-        await this.deps.handlers[state as Exclude<WorkState, "done">](this.context);
+        // 如果是从闸门挂起点恢复，阶段处理器已经成功执行过，直接重新
+        // 展示当前闸门即可；否则重跑会重复追加验收记录或重复调用能力。
+        const resumedGate = this.context.pendingGate !== null && GATE_ON_EXIT[state] === this.context.pendingGate;
+        if (!resumedGate) await this.deps.handlers[state as Exclude<WorkState, "done">](this.context);
+        else await Promise.resolve();
         this.touch();
         // 2. 出闸门检查
         const gate = GATE_ON_EXIT[state];
         if (gate !== 0) {
           this.context.pendingGate = gate;
-          // 先建决策 promise 再发事件：决策方（虚拟用户/真人 UI）可能在 emit 回调里同步 decide()
-          const decisionPromise = this.waitForDecision();
-          const request: GateRequest = {
-            gate: gate,
-            phase: state,
-            payload: gatePayload(gate, this.context),
-            context: this.ctx,
-          };
-          this.emitter.emit("gate:pending", { request });
-          await this.deps.persist(this.context);
-          const decision = await decisionPromise;
-          this.applyDecision(decision, state);
+          let decision: GateDecision;
+          do {
+            // 先建决策 promise 再发事件：决策方（虚拟用户/真人 UI）可能在 emit 回调里同步 decide()
+            const decisionPromise = this.waitForDecision();
+            const request: GateRequest = {
+              gate: gate,
+              phase: state,
+              payload: gatePayload(gate, this.context),
+              context: this.ctx,
+            };
+            this.emitter.emit("gate:pending", { request });
+            await this.deps.persist(this.context);
+            const resolved = await decisionPromise;
+            decision = resolved.decision;
+            this.applyDecision(decision, state, resolved.decidedBy);
+            await this.deps.persist(this.context);
+          } while (decision.action === "edit");
           this.context.pendingGate = null;
           await this.deps.persist(this.context);
           if (decision.action === "reject") {
@@ -160,15 +222,66 @@ export class Orchestrator {
           await this.deps.persist(this.context);
         }
       }
+      if (this.context.finalizeChoice !== "discard") {
+        const accepted = this.context.acceptance.length > 0 && this.context.acceptance.every((record) => record.passed);
+        const expectedNodes = this.context.assembly?.nodes.map((node) => node.nodeId) ?? [];
+        const executed = expectedNodes.length > 0 && expectedNodes.every((nodeId) => {
+          const step = this.context.trace.find((candidate) => candidate.nodeId === nodeId);
+          return step?.status === "success" || step?.status === "skipped" || (this.context.executionMode === "construction" && step?.status === "planned");
+        });
+        this.context.outcome = accepted && executed ? "completed" : "failed";
+      }
       this.emitter.emit("run:done", { context: this.ctx });
       return this.ctx;
+    } catch (error) {
+      if (error instanceof BuildAwaitingUserError) {
+        this.context.awaitingUser = {
+          ...error.request,
+          source: "model",
+          createdAt: (this.deps.now ?? (() => new Date()))().toISOString(),
+        };
+        this.context.outcome = "running";
+        this.touch();
+        await this.deps.persist(this.context);
+        this.emitter.emit("user:pending", { request: this.context.awaitingUser, context: this.ctx });
+        return this.ctx;
+      }
+      if (this.context.finalizeChoice !== "discard") {
+        this.context.outcome = "failed";
+        this.touch();
+        await this.deps.persist(this.context).catch(() => undefined);
+      }
+      throw error;
     } finally {
       this.running = false;
     }
   }
 
+  /**
+   * Supply an answer to a persisted model clarification. The phase remains at
+   * the point that requested it, so the next run() call retries only that
+   * phase and downstream state is not guessed or silently skipped.
+   */
+  async answerAwaitingUser(values: Record<string, string>): Promise<void> {
+    const request = this.context.awaitingUser;
+    if (!request) {
+      throw new ScenarioError({ code: ScenarioErrorCode.CONFLICT, message: "no build clarification is pending", phase: "infra" });
+    }
+    const normalized = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, String(value).trim()]));
+    const missing = request.inputs.filter((input) => !normalized[input.name]);
+    if (missing.length > 0) {
+      throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: `missing clarification input: ${missing.map((input) => input.name).join(", ")}`, phase: request.phase });
+    }
+    this.context.clarificationAnswers = { ...this.context.clarificationAnswers, ...normalized };
+    this.context.awaitingUser = null;
+    this.context.outcome = "running";
+    this.touch();
+    await this.deps.persist(this.context);
+    this.emitter.emit("user:answered", { values: normalized, context: this.ctx });
+  }
+
   /** 闸门决策（挂起/恢复机制 2.1.3） */
-  async decide(decision: GateDecision): Promise<void> {
+  async decide(decision: GateDecision, decidedBy: "human" | "virtual-user" = "human"): Promise<void> {
     const parsed = GateDecisionSchema.safeParse(decision);
     if (!parsed.success) {
       throw new ScenarioError({
@@ -176,6 +289,13 @@ export class Orchestrator {
         message: "invalid GateDecision",
         phase: "infra",
         context: { issues: parsed.error.issues.slice(0, 3) },
+      });
+    }
+    if (parsed.data.gate !== this.context.pendingGate) {
+      throw new ScenarioError({
+        code: ScenarioErrorCode.CONFLICT,
+        message: `decision gate ${parsed.data.gate} does not match pending gate ${this.context.pendingGate ?? "none"}`,
+        phase: "infra",
       });
     }
     if (parsed.data.action === "reject") {
@@ -192,12 +312,26 @@ export class Orchestrator {
         });
       }
     }
+    if (parsed.data.action === "edit") {
+      if (!parsed.data.edit) {
+        throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "edit requires edit payload", phase: "infra" });
+      }
+      if (parsed.data.gate === 5) {
+        throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "gate 5 does not support edits", phase: "infra" });
+      }
+    }
+    if (parsed.data.choice && parsed.data.gate !== 5) {
+      throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "finalize choice is only valid for gate 5", phase: "infra" });
+    }
+    if (parsed.data.gate === 5 && parsed.data.action === "approve" && parsed.data.choice === "rerun") {
+      throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "rerun must use reject action", phase: "infra" });
+    }
     const resolve = this.decideResolve;
     if (!resolve) {
       throw new ScenarioError({ code: ScenarioErrorCode.CONFLICT, message: "no gate pending", phase: "infra" });
     }
     this.decideResolve = undefined;
-    resolve(parsed.data);
+    resolve({ decision: parsed.data, decidedBy });
   }
 
   on<K extends keyof OrchestratorEvents>(event: K, handler: (data: OrchestratorEvents[K]) => void): () => void {
@@ -206,6 +340,15 @@ export class Orchestrator {
   }
 
   waitForGate(): Promise<GateRequest> {
+    // Consumers may subscribe just after the synchronous `gate:pending`
+    // emission. If the decision waiter is already installed, expose the
+    // current request instead of waiting forever for an event that already
+    // happened. Do not use pendingGate alone: during decide() it remains set
+    // until the state-machine loop has persisted the decision.
+    if (this.context.pendingGate !== null && this.decideResolve) {
+      const gate = this.context.pendingGate as 1 | 2 | 3 | 4 | 5;
+      return Promise.resolve({ gate, phase: this.context.phase as WorkState, payload: gatePayload(gate, this.context), context: this.ctx });
+    }
     return new Promise((resolve) => this.emitter.once("gate:pending", (r: { request: GateRequest }) => resolve(r.request)));
   }
 
@@ -213,17 +356,31 @@ export class Orchestrator {
     this.abortController.abort();
   }
 
-  private applyDecision(decision: GateDecision, fromState: WorkState): void {
+  private applyDecision(decision: GateDecision, fromState: WorkState, decidedBy: "human" | "virtual-user"): void {
     this.context.approvals.push({
       gate: decision.gate,
       action: decision.action,
       targetPhase: decision.targetPhase,
       comment: decision.comment,
-      decidedBy: "virtual-user",
+      edit: decision.edit,
+      choice: decision.choice,
+      decidedBy,
       decidedAt: (this.deps.now ?? (() => new Date()))().toISOString(),
     });
+    if (decision.edit) {
+      this.applyEdit(decision.gate as 1 | 2 | 3 | 4 | 5, decision.edit);
+    }
+    if (decision.choice) {
+      this.context.finalizeChoice = decision.choice;
+      if (decision.choice === "discard") this.context.outcome = "discarded";
+    }
+    if (decision.action === "edit") {
+      this.emitter.emit("gate:edited", { decision, context: this.ctx });
+      return;
+    }
     if (decision.action === "reject") {
       const target = decision.targetPhase as WorkState;
+      this.invalidateAfter(target);
       if (target !== fromState) {
         this.transition(fromState, target, `rejected gate ${decision.gate}: ${decision.comment ?? ""}`);
       } else {
@@ -233,6 +390,78 @@ export class Orchestrator {
     } else {
       this.emitter.emit("gate:decided", { decision, context: this.ctx });
     }
+  }
+
+  private applyEdit(gate: 1 | 2 | 3 | 4 | 5, edit: NonNullable<GateDecision["edit"]>): void {
+    if (gate === 1 && edit.kind !== "intent") {
+      throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "gate 1 requires intent edit", phase: "infra" });
+    }
+    if (gate === 2 && edit.kind !== "dag") {
+      throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "gate 2 requires dag edit", phase: "infra" });
+    }
+    if (gate === 3 && edit.kind !== "selections") {
+      throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "gate 3 requires selection edit", phase: "infra" });
+    }
+    if (gate === 4 && edit.kind !== "acceptance") {
+      throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "gate 4 requires acceptance edit", phase: "infra" });
+    }
+    switch (edit.kind) {
+      case "intent":
+        this.context.intent = edit.intent;
+        break;
+      case "dag":
+        this.context.dag = edit.dag;
+        break;
+      case "selections": {
+        const candidates = this.context.candidates;
+        for (const selection of edit.selections) {
+          const set = candidates.find((candidate) => candidate.nodeId === selection.nodeId);
+          if (!set?.candidates.some((candidate) => candidate.id === selection.capabilityId)) {
+            throw new ScenarioError({
+              code: ScenarioErrorCode.NOT_FOUND,
+              message: `selection ${selection.capabilityId} is not a candidate for ${selection.nodeId}`,
+              phase: "infra",
+            });
+          }
+        }
+        this.context.selections = edit.selections;
+        break;
+      }
+      case "acceptance":
+        this.context.acceptance = edit.acceptance;
+        break;
+    }
+    this.touch();
+  }
+
+  /** Clear downstream artifacts before a rejected phase is run again. */
+  private invalidateAfter(target: WorkState): void {
+    const index = WORK_STATES.indexOf(target);
+    if (index <= WORK_STATES.indexOf("parsing")) {
+      this.context.intent = null;
+      this.context.planner = null;
+    }
+    if (index <= WORK_STATES.indexOf("planning")) this.context.dag = null;
+    if (index <= WORK_STATES.indexOf("retrieving")) {
+      this.context.candidates = [];
+      this.context.skillNotes = [];
+    }
+    if (index <= WORK_STATES.indexOf("assembling")) {
+      this.context.selections = [];
+      this.context.assembly = null;
+    }
+    if (index <= WORK_STATES.indexOf("verifying")) {
+      this.context.acceptance = [];
+    } else if (index <= WORK_STATES.indexOf("executing")) {
+      this.context.acceptance = this.context.acceptance.filter((record) => record.layer === "component");
+    } else if (index <= WORK_STATES.indexOf("distilling")) {
+      this.context.acceptance = this.context.acceptance.filter((record) => record.layer !== "generalization");
+    }
+    if (index <= WORK_STATES.indexOf("executing")) this.context.trace = [];
+    this.context.distilled = null;
+    this.context.finalizeChoice = null;
+    this.context.outcome = "running";
+    this.touch();
   }
 
   private transition(from: WorkState, to: WorkState, reason?: string): void {
@@ -250,8 +479,8 @@ export class Orchestrator {
     this.emitter.emit("state:enter", { from, to, context: this.ctx });
   }
 
-  private async waitForDecision(): Promise<GateDecision> {
-    return await new Promise<GateDecision>((resolve, reject) => {
+  private async waitForDecision(): Promise<{ decision: GateDecision; decidedBy: "human" | "virtual-user" }> {
+    return await new Promise<{ decision: GateDecision; decidedBy: "human" | "virtual-user" }>((resolve, reject) => {
       const onAbort = () => {
         reject(new ScenarioError({ code: ScenarioErrorCode.CANCELLED, message: "orchestrator aborted while waiting for gate decision", phase: "infra" }));
       };

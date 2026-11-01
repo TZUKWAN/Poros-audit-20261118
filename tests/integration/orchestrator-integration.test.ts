@@ -60,8 +60,8 @@ describe("阶段二集成", () => {
     expect(final.assembly).toBeTruthy();
     // 五道闸门全部批准记录
     expect(final.approvals.filter((a) => a.action === "approve").map((a) => a.gate).sort()).toEqual([1, 2, 3, 4, 5]);
-    // 组件级验收（verifying 产出）
-    expect(final.acceptance.some((a) => a.layer === "component" && a.passed)).toBe(true);
+    // 未注入探活器且候选是 npx 时不得伪造组件通过
+    expect(final.acceptance.some((a) => a.layer === "component" && a.passed)).toBe(false);
     // 断点持久化多次
     expect(store.saves).toBeGreaterThanOrEqual(5);
   });

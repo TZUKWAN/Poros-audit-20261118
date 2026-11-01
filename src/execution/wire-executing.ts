@@ -16,7 +16,7 @@ import type { FederatedResult } from "@/federation/search.js";
 
 export interface ExecutingDeps {
   /** 节点真实执行：给定能力与输入产出输出（生产=invoker.invoke；测试可注入） */
-  invoke: (cap: Capability, action: string, inputs: Record<string, unknown>) => Promise<{ ok: boolean; output?: unknown; error?: string }>;
+  invoke: (cap: Capability, action: string, inputs: Record<string, unknown>) => Promise<{ ok: boolean; output?: unknown; error?: string; mode?: "executed" | "context" | "delegated" }>;
   /** 任务级验收判定（阶段五替换为完整体系；缺省=invoke ok） */
   taskAcceptance?: (nodeId: string, result: DelegationResult) => boolean;
   controller?: RunController;
@@ -43,6 +43,15 @@ export async function handleExecutingReal(ctx: BuildContext, deps: ExecutingDeps
   if (!ctx.dag || !ctx.assembly) {
     throw new ScenarioError({ code: ScenarioErrorCode.CONTEXT_CORRUPT, message: "executing without dag/assembly", phase: "executing" });
   }
+  const glueEdges = ctx.assembly.edges.filter((edge) => edge.alignment === "glue-needed");
+  if (glueEdges.length > 0) {
+    throw new ScenarioError({
+      code: ScenarioErrorCode.ACCEPTANCE_FAILED,
+      message: `execution requires interface glue for ${glueEdges.length} edge(s)`,
+      phase: "executing",
+      context: { edges: glueEdges },
+    });
+  }
   const controller = deps.controller ?? new RunController();
   const capsById = new Map<string, Capability>();
   for (const set of ctx.candidates as Array<{ nodeId: string; candidates: Capability[] }>) {
@@ -57,7 +66,8 @@ export async function handleExecutingReal(ctx: BuildContext, deps: ExecutingDeps
     // 远程优先免安装；其余先安装（权限门控在 installer 内）
     await installer.install(req.capability, deps.permission);
     const invoked = await invoke(req.capability, nodeAction(req.capability, req.title), req.inputs);
-    const passed = deps.taskAcceptance ? deps.taskAcceptance(req.nodeId, { nodeId: req.nodeId, ok: invoked.ok, output: invoked.output, error: invoked.error, durationMs: 0 }) : invoked.ok;
+    const physicallyExecuted = invoked.ok && invoked.mode !== "context" && invoked.mode !== "delegated";
+    const passed = deps.taskAcceptance ? deps.taskAcceptance(req.nodeId, { nodeId: req.nodeId, ok: physicallyExecuted, output: invoked.output, error: invoked.error, durationMs: 0 }) : physicallyExecuted;
     return {
       nodeId: req.nodeId,
       ok: passed,
@@ -65,12 +75,13 @@ export async function handleExecutingReal(ctx: BuildContext, deps: ExecutingDeps
       error: invoked.error,
       durationMs: 0,
       params: req.inputs,
+      mode: invoked.mode,
     };
   });
 
   // 节点间放行：checkpoint 在 delegator 前由调度层调用 —— 这里包装 onEvent 不可行，
   // 直接在执行前对每个节点 checkpoint（ClusterScheduler 的并发层内逐 worker 执行）
-  const scheduler = new ClusterScheduler(
+  const makeScheduler = () => new ClusterScheduler(
     {
       delegate: async (req) => {
         await controller.checkpoint();
@@ -80,39 +91,69 @@ export async function handleExecutingReal(ctx: BuildContext, deps: ExecutingDeps
     ctx,
   );
 
-  const summary = await scheduler.run({ onEvent: deps.onClusterEvent });
-  const failedNode = summary.steps.find((s) => s.status === "failed");
+  const summary = await makeScheduler().run({ onEvent: deps.onClusterEvent });
+  const failedNodes = [...new Map(summary.steps.filter((step) => step.status === "failed").map((step) => [step.nodeId, step])).values()];
 
-  if (failedNode && summary.allPassed === false) {
+  if (failedNodes.length > 0 && summary.allPassed === false) {
     // 3.3.1 自动修复回路：trust 次优换型重试（每失败节点一次 repair 会话）
-    const repair = new RepairLoop({
-      candidatesFor: (nodeId) => {
-        const set = (ctx.candidates as Array<{ nodeId: string; candidates: Capability[] }>).find((s) => s.nodeId === nodeId);
-        return set?.candidates ?? [];
-      },
-      runNode: async (nodeId, capabilityId) => {
-        const cap = capsById.get(capabilityId);
-        if (!cap) return { passed: false, error: "missing capability" };
-        await controller.checkpoint();
-        const r = await deps.invoke(cap, nodeAction(cap, nodeId), {});
-        return { passed: r.ok, error: r.error };
-      },
-      maxRounds: 3,
-    });
-    const outcome = await repair.repairNode(ctx, failedNode.nodeId);
+    const outcomes: Array<{ nodeId: string; repaired: boolean; escalated: boolean; attempts: unknown[] }> = [];
+    for (const failedNode of failedNodes) {
+      const repair = new RepairLoop({
+        candidatesFor: (nodeId) => {
+          const set = (ctx.candidates as Array<{ nodeId: string; candidates: Capability[] }>).find((s) => s.nodeId === nodeId);
+          return set?.candidates ?? [];
+        },
+        runNode: async (nodeId, capabilityId) => {
+          const cap = capsById.get(capabilityId);
+          if (!cap) return { passed: false, error: "missing capability" };
+          await controller.checkpoint();
+          const failedStep = summary.steps.find((step) => step.nodeId === nodeId);
+          const r = await deps.invoke(cap, nodeAction(cap, nodeId), failedStep?.params ?? {});
+          return { passed: r.ok, error: r.error };
+        },
+        maxRounds: 3,
+      });
+      const outcome = await repair.repairNode(ctx, failedNode.nodeId);
+      outcomes.push({ nodeId: failedNode.nodeId, repaired: outcome.repaired, escalated: outcome.escalated, attempts: outcome.attempts });
+      if (!outcome.repaired) {
+        ctx.acceptance.push({
+          layer: "task",
+          passed: false,
+          detail: { repaired: false, nodeId: failedNode.nodeId, escalated: outcome.escalated, attempts: outcome.attempts },
+          at: new Date().toISOString(),
+        });
+        // 自主模式：记录并终止该次执行（不挂死）
+        throw new ScenarioError({
+          code: ScenarioErrorCode.ACCEPTANCE_FAILED,
+          message: `node ${failedNode.nodeId} failed after repair escalation`,
+          phase: "executing",
+        context: { attempts: outcomes.length },
+        });
+      }
+    }
+
+    // Repairing one node is not enough when later nodes depend on it. Resume
+    // the scheduler from the existing trace: successful nodes are reused and
+    // failed/blocked nodes execute with the repaired selection and fresh
+    // upstream outputs.
+    const retry = await makeScheduler().run({ onEvent: deps.onClusterEvent, resumeFromTrace: true });
     ctx.acceptance.push({
       layer: "task",
-      passed: outcome.repaired,
-      detail: { repaired: outcome.repaired, escalated: outcome.escalated, attempts: outcome.attempts },
+      passed: retry.allPassed,
+      detail: {
+        repaired: true,
+        escalated: false,
+        attempts: outcomes,
+        retry: retry.steps.map((s) => ({ nodeId: s.nodeId, status: s.status })),
+      },
       at: new Date().toISOString(),
     });
-    if (!outcome.repaired) {
-      // 自主模式：记录并终止该次执行（不挂死）
+    if (!retry.allPassed) {
       throw new ScenarioError({
         code: ScenarioErrorCode.ACCEPTANCE_FAILED,
-        message: `node ${failedNode.nodeId} failed after repair escalation`,
+        message: "execution remained incomplete after repair retry",
         phase: "executing",
-        context: { attempts: outcome.attempts.length },
+        context: { attempts: outcomes.length },
       });
     }
     return;

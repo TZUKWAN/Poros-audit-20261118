@@ -10,7 +10,7 @@
     "format": "prettier --write .",
     "coverage": "vitest run --coverage",
     "prepare": "husky",
-    "bundle": "node scripts-launch-build.mjs",
+    "bundle": "node scripts-kernel-build.mjs && node scripts-launch-build.mjs",
     "pretest": "npm run panel-client && npm run bundle",
     "panel": "npm run panel-client && esbuild src/panel/launch.ts --bundle --platform=node --format=esm --outfile=dist/panel-launcher.js --external:@earendil-works/* --external:ws --external:pi-* --external:context-mode --external:typebox && node dist/panel-launcher.js",
     "panel-client": "node scripts-panel-build.mjs"
@@ -24,17 +24,13 @@
     "@earendil-works/pi-ai": "^0.87.1",
     "@earendil-works/pi-tui": "^0.87.1",
     "@earendil-works/pi-web-ui": "^0.75.3",
-    "@types/ws": "^8.18.1",
+    "@types/ws": "8.18.2",
     "context-mode": "^1.0.169",
-    "pi-agent-loop": "^0.1.1",
-    "pi-hermes-memory": "^0.9.9",
-    "pi-loop-designer": "^0.1.0",
-    "pi-mcp-adapter": "^3.2.0",
+    "pi-mcp-adapter": "5.3.1",
     "pi-reactor": "^0.2.3",
-    "pi-subagents": "^0.73.1",
-    "rpiv-todo": "^1.1.0",
+    "pi-subagents": "0.78.0",
     "ws": "^8.22.0",
-    "zod": "^4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
@@ -44,9 +40,15 @@
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "madge": "^8.0.0",
-    "prettier": "^3.9.9",
+    "prettier": "3.9.10",
     "typescript": "5.9",
-    "typescript-eslint": "^8.71.0",
+    "typescript-eslint": "8.71.2",
     "vitest": "^3.2.7"
+  },
+  "overrides": {
+    "undici": "8.12.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }

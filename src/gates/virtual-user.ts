@@ -32,7 +32,7 @@ export class VirtualUser {
 
     switch (strategy.kind) {
       case "approve-all":
-        return { gate, action: "approve" };
+        return gate === 5 ? { gate, action: "approve", choice: "pin" } : { gate, action: "approve" };
 
       case "reject": {
         if (gate === strategy.gate && seen <= strategy.times) {
@@ -43,7 +43,7 @@ export class VirtualUser {
             comment: strategy.comment ?? `virtual-user scripted rejection #${seen}`,
           };
         }
-        return { gate, action: "approve" };
+        return gate === 5 ? { gate, action: "approve", choice: "pin" } : { gate, action: "approve" };
       }
 
       case "reject-cycle": {
@@ -51,21 +51,20 @@ export class VirtualUser {
         if (gate === strategy.gate && seen <= strategy.cycles) {
           return { gate, action: "reject", targetPhase: strategy.targetPhase, comment: `cycle ${seen}` };
         }
-        return { gate, action: "approve" };
+          return gate === 5 ? { gate, action: "approve", choice: "pin" } : { gate, action: "approve" };
       }
 
       case "edit-gate1": {
         // 闸门1：改槽位后批准
         if (gate === 1) {
           this.state.editsApplied++;
-          const intent = payload as { slots?: Array<{ name: string; value: string }> } | null;
-          if (intent && Array.isArray(intent.slots)) {
-            const slot = intent.slots.find((s) => s.name === strategy.slotName);
-            if (slot) slot.value = strategy.slotValue;
-          }
-          return { gate: 1, action: "approve", comment: `edited slot ${strategy.slotName}` };
+          const intent = payload as { goal: string; domain: string; slots: Array<{ name: string; value: string }>; keywords: string[]; via: "llm" | "template" };
+          const slot = intent.slots.find((s) => s.name === strategy.slotName);
+          if (slot) slot.value = strategy.slotValue;
+          else intent.slots.push({ name: strategy.slotName, value: strategy.slotValue });
+          return { gate: 1, action: "approve", edit: { kind: "intent", intent: structuredClone(intent) }, comment: `edited slot ${strategy.slotName}` };
         }
-        return { gate, action: "approve" };
+        return gate === 5 ? { gate, action: "approve", choice: "pin" } : { gate, action: "approve" };
       }
 
       case "edit-gate3": {
@@ -75,13 +74,20 @@ export class VirtualUser {
           const sets = payload as Array<{ nodeId: string; candidates: Array<{ id: string }> }>;
           const set = strategy.nodeId ? sets.find((s) => s.nodeId === strategy.nodeId) : sets[0];
           const picked = set?.candidates[strategy.pickIndex];
+          if (!set || !picked) return { gate: 3, action: "approve", comment: "edit requested but candidate missing" };
+          const selections = sets.map((candidateSet) => ({
+            nodeId: candidateSet.nodeId,
+            capabilityId: candidateSet.nodeId === set.nodeId ? picked.id : candidateSet.candidates[0]?.id ?? "",
+            overridden: candidateSet.nodeId === set.nodeId,
+          })).filter((selection) => selection.capabilityId.length > 0);
           return {
             gate: 3,
             action: "approve",
-            comment: picked ? `switched ${set?.nodeId} → ${picked.id}` : "edit requested but candidate missing",
+            edit: { kind: "selections", selections },
+            comment: `switched ${set.nodeId} → ${picked.id}`,
           };
         }
-        return { gate, action: "approve" };
+        return gate === 5 ? { gate, action: "approve", choice: "pin" } : { gate, action: "approve" };
       }
     }
   }

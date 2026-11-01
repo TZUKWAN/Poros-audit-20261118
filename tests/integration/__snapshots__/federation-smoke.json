@@ -27,48 +27,48 @@
      "file-systems",
      "recommended"
     ],
-    "updatedAt": "2026-09-25T15:25:47.692241Z",
-    "stars": 90589,
-    "downloads": 162611,
+    "updatedAt": "2026-10-25T23:50:42.369726Z",
+    "stars": 91559,
+    "downloads": 162663,
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.6200592,
+     "score": 0.6200869333333334,
      "tier": "curated",
      "evidence": {
-      "stars": 90589,
-      "downloads": 162611,
+      "stars": 91559,
+      "downloads": 162663,
       "monthsSinceUpdate": 0,
-      "evidenceScore": 0.775074
+      "evidenceScore": 0.7751086666666667
      },
      "hardFilterPassed": true
     }
    },
    {
-    "id": "skillsmp:openclaw-openclaw-agents-skills-agent-transcript-skill-md",
-    "name": "agent-transcript",
-    "kind": "skill-knowledge",
-    "description": "Add a redacted agent transcript section to GitHub PR or issue bodies during OpenClaw agent-created PR/issue workflows.",
+    "id": "awesome-mcp-servers:qualienai/qualien-mcp",
+    "name": "qualienai/qualien-mcp",
+    "kind": "mcp-server",
+    "description": "📇 🏠 🍎 🪟 🐧 - Gateway for QA/SDET work: Playwright, filesystem, GitHub, Jira, Postgres and 15+ more MCP servers behind one connection, with per-tool allow/deny and read-only-by-default databases.",
     "source": {
-     "id": "skillsmp",
-     "tier": "aggregate",
-     "name": "SkillsMP",
-     "url": "https://skillsmp.com"
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
     },
     "install": {
-     "type": "context",
-     "location": "https://github.com/openclaw/openclaw/tree/main/.agents/skills/agent-transcript"
+     "type": "git",
+     "repoUrl": "https://github.com/qualienai/qualien-mcp"
     },
-    "repoUrl": "https://github.com/openclaw/openclaw/tree/main/.agents/skills/agent-transcript",
+    "repoUrl": "https://github.com/qualienai/qualien-mcp",
+    "homepage": "https://github.com/qualienai/qualien-mcp",
     "tags": [
-     "skill",
-     "en"
+     "🔗 <a name=\"aggregators\"></a>Aggregators"
     ],
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.3,
-     "tier": "aggregate",
+     "score": 0.4,
+     "tier": "curated",
      "evidence": {
       "evidenceScore": 0.5
      },
@@ -76,112 +76,94 @@
     }
    },
    {
-    "id": "tencent-skillhub:[object Object]/clawdbot-filesystem",
-    "name": "Filesystem Management",
-    "kind": "skill-knowledge",
-    "description": "高级文件系统操作——为Clawdbot提供列表、搜索、批处理及目录分析功能。",
+    "id": "awesome-mcp-servers:apireno/domshell",
+    "name": "apireno/DOMShell",
+    "kind": "mcp-server",
+    "description": "📇 🏠 - Browse the web with filesystem commands (ls, cd, grep, click) by mapping Chrome's accessibility tree to a virtual filesystem via an extension.",
     "source": {
-     "id": "tencent-skillhub",
+     "id": "awesome-mcp-servers",
      "tier": "curated",
-     "name": "腾讯 SkillHub",
-     "url": "https://skillhub.cloud.tencent.com"
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
     },
     "install": {
-     "type": "context",
-     "location": "https://clawhub.ai/gtrusler/clawdbot-filesystem"
+     "type": "git",
+     "repoUrl": "https://github.com/apireno/DOMShell"
     },
-    "repoUrl": "https://clawhub.ai/gtrusler/clawdbot-filesystem",
-    "homepage": "https://api.skillhub.cn/clawhub_gtrusler/clawdbot-filesystem",
+    "repoUrl": "https://github.com/apireno/DOMShell",
+    "homepage": "https://github.com/apireno/DOMShell",
     "tags": [
-     "skill"
+     "📂 <a name=\"browser-automation\"></a>Browser Automation"
     ],
-    "updatedAt": "2026-09-29T11:00:37.023Z",
-    "stars": 77,
-    "downloads": 2582,
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.26907040000000004,
+     "score": 0.4,
      "tier": "curated",
      "evidence": {
-      "stars": 77,
-      "downloads": 2582,
-      "monthsSinceUpdate": 0,
-      "evidenceScore": 0.336338
+      "evidenceScore": 0.5
      },
      "hardFilterPassed": true
     }
    },
    {
-    "id": "tencent-skillhub:[object Object]/filesystem",
-    "name": "Filesystem",
-    "kind": "skill-knowledge",
-    "description": "执行高级文件系统任务，包括列出文件、按名称或内容递归搜索、批量复制/移动/删除文件以及分析目录大小。",
+    "id": "awesome-mcp-servers:lukelamb/claude-terminal-mcp",
+    "name": "LukeLamb/claude-terminal-mcp",
+    "kind": "mcp-server",
+    "description": "📇 🏠 🐧 🍎 - Terminal, filesystem and background-job tools for Linux and macOS.",
     "source": {
-     "id": "tencent-skillhub",
+     "id": "awesome-mcp-servers",
      "tier": "curated",
-     "name": "腾讯 SkillHub",
-     "url": "https://skillhub.cloud.tencent.com"
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
     },
     "install": {
-     "type": "context",
-     "location": "https://clawhub.ai/amaofx/filesystem"
+     "type": "git",
+     "repoUrl": "https://github.com/LukeLamb/claude-terminal-mcp"
     },
-    "repoUrl": "https://clawhub.ai/amaofx/filesystem",
-    "homepage": "https://api.skillhub.cn/clawhub_amaofx/filesystem",
+    "repoUrl": "https://github.com/LukeLamb/claude-terminal-mcp",
+    "homepage": "https://github.com/LukeLamb/claude-terminal-mcp",
     "tags": [
-     "skill"
+     "🖥️ <a name=\"command-line\"></a>Command Line"
     ],
-    "updatedAt": "2026-09-29T11:00:44.171Z",
-    "stars": 9,
-    "downloads": 1967,
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.2678357333333333,
+     "score": 0.4,
      "tier": "curated",
      "evidence": {
-      "stars": 9,
-      "downloads": 1967,
-      "monthsSinceUpdate": 0,
-      "evidenceScore": 0.33479466666666663
+      "evidenceScore": 0.5
      },
      "hardFilterPassed": true
     }
    },
    {
-    "id": "tencent-skillhub:[object Object]/clawdstrike-test",
-    "name": "clawdstrike-test",
-    "kind": "skill-knowledge",
-    "description": "针对 OpenClaw 网关主机的安全审计与威胁建模。用于验证配置、暴露面、技能/插件及文件系统卫生状况，并生成包含证据与修复建议的 OK/VULNERABLE 报告。",
+    "id": "awesome-mcp-servers:marin1321/mcp-devtools",
+    "name": "marin1321/mcp-devtools",
+    "kind": "mcp-server",
+    "description": "📇 🏠 🍎 🪟 🐧 - Scoped access to local dev environments (filesystem, databases, processes, OpenAPI) with a command allowlist and read-only database mode.",
     "source": {
-     "id": "tencent-skillhub",
+     "id": "awesome-mcp-servers",
      "tier": "curated",
-     "name": "腾讯 SkillHub",
-     "url": "https://skillhub.cloud.tencent.com"
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
     },
     "install": {
-     "type": "context",
-     "location": "https://clawhub.ai/misirov/clawdstrike-test"
+     "type": "git",
+     "repoUrl": "https://github.com/marin1321/mcp-devtools"
     },
-    "repoUrl": "https://clawhub.ai/misirov/clawdstrike-test",
-    "homepage": "https://api.skillhub.cn/clawhub_misirov/clawdstrike-test",
+    "repoUrl": "https://github.com/marin1321/mcp-devtools",
+    "homepage": "https://github.com/marin1321/mcp-devtools",
     "tags": [
-     "skill"
+     "💻 <a name=\"developer-tools\"></a>Developer Tools"
     ],
-    "updatedAt": "2026-09-29T11:00:37.249Z",
-    "stars": 0,
-    "downloads": 99,
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.2667194666666667,
+     "score": 0.4,
      "tier": "curated",
      "evidence": {
-      "stars": 0,
-      "downloads": 99,
-      "monthsSinceUpdate": 0,
-      "evidenceScore": 0.3333993333333333
+      "evidenceScore": 0.5
      },
      "hardFilterPassed": true
     }
@@ -192,61 +174,61 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 541,
+    "latencyMs": 231,
     "count": 1
    },
    {
     "source": "modelcontextprotocol-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 15967,
+    "latencyMs": 1314,
     "count": 1
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 428,
+    "latencyMs": 303,
     "count": 5
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 902,
+    "latencyMs": 911,
     "count": 1
    },
    {
     "source": "awesome-mcp-servers",
-    "ok": false,
+    "ok": true,
     "degraded": false,
-    "latencyMs": 33343,
-    "count": 0,
-    "message": "fetch failed"
+    "latencyMs": 2001,
+    "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1198,
+    "latencyMs": 668,
     "count": 5
    },
    {
     "source": "skillsmp",
-    "ok": true,
+    "ok": false,
     "degraded": false,
-    "latencyMs": 763,
-    "count": 5
+    "latencyMs": 183,
+    "count": 0,
+    "message": "HTTP 403 from https://skillsmp.com/api/skills?q=filesystem"
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 205,
+    "latencyMs": 117,
     "count": 5
    }
   ],
-  "totalMs": 33349
+  "totalMs": 2009
  },
  {
   "query": "github",
@@ -275,19 +257,19 @@
      "source-control",
      "version-control"
     ],
-    "updatedAt": "2026-09-25T08:42:20.264314Z",
-    "stars": 33187,
-    "downloads": 51332,
+    "updatedAt": "2026-10-24T23:48:10.36249Z",
+    "stars": 33925,
+    "downloads": 51422,
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.5607103999999999,
+     "score": 0.5607584,
      "tier": "curated",
      "evidence": {
-      "stars": 33187,
-      "downloads": 51332,
+      "stars": 33925,
+      "downloads": 51422,
       "monthsSinceUpdate": 0,
-      "evidenceScore": 0.700888
+      "evidenceScore": 0.700948
      },
      "hardFilterPassed": true
     }
@@ -296,7 +278,7 @@
     "id": "modelcontextprotocol-servers:git",
     "name": "git",
     "kind": "mcp-server",
-    "description": "git — official MCP server (modelcontextprotocol/servers)",
+    "description": "<!-- mcp-name: io.github.modelcontextprotocol/server-git -->",
     "source": {
      "id": "modelcontextprotocol-servers",
      "tier": "official",
@@ -325,30 +307,30 @@
     }
    },
    {
-    "id": "skillsmp:openclaw-openclaw-agents-skills-agent-transcript-skill-md",
-    "name": "agent-transcript",
-    "kind": "skill-knowledge",
-    "description": "Add a redacted agent transcript section to GitHub PR or issue bodies during OpenClaw agent-created PR/issue workflows.",
+    "id": "awesome-mcp-servers:forgemeshlabs/anomaly-mcp",
+    "name": "forgemeshlabs/anomaly-mcp",
+    "kind": "mcp-server",
+    "description": "📇 ☁️ - Real-time anomaly detection with NASA-derived sequence mining across blockchain, mempool, stablecoin depeg, aviation and GitHub signals, paid via x402 on Base.",
     "source": {
-     "id": "skillsmp",
-     "tier": "aggregate",
-     "name": "SkillsMP",
-     "url": "https://skillsmp.com"
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
     },
     "install": {
-     "type": "context",
-     "location": "https://github.com/openclaw/openclaw/tree/main/.agents/skills/agent-transcript"
+     "type": "git",
+     "repoUrl": "https://github.com/forgemeshlabs/anomaly-mcp"
     },
-    "repoUrl": "https://github.com/openclaw/openclaw/tree/main/.agents/skills/agent-transcript",
+    "repoUrl": "https://github.com/forgemeshlabs/anomaly-mcp",
+    "homepage": "https://github.com/forgemeshlabs/anomaly-mcp",
     "tags": [
-     "skill",
-     "en"
+     "🔗 <a name=\"aggregators\"></a>Aggregators"
     ],
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.3,
-     "tier": "aggregate",
+     "score": 0.4,
+     "tier": "curated",
      "evidence": {
       "evidenceScore": 0.5
      },
@@ -356,83 +338,63 @@
     }
    },
    {
-    "id": "cline-marketplace:github.com/graphlit/graphlit-mcp-server",
-    "name": "Graphlit",
+    "id": "awesome-mcp-servers:tadas-github/a2asearch-mcp",
+    "name": "tadas-github/a2asearch-mcp",
     "kind": "mcp-server",
-    "description": "Create a personalized knowledge base from tools like Linear, GitHub, Jira, and Discord, and empower AI Agents to retrieve associated content with built-in reranking for enhanced relevance.",
+    "description": "📇 ☁️ - Search a directory of MCP servers, AI agents, CLI tools and agent skills.",
     "source": {
-     "id": "cline-marketplace",
+     "id": "awesome-mcp-servers",
      "tier": "curated",
-     "name": "Cline MCP Marketplace",
-     "url": "https://github.com/cline/mcp-marketplace"
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
     },
     "install": {
      "type": "git",
-     "repoUrl": "https://github.com/graphlit/graphlit-mcp-server"
+     "repoUrl": "https://github.com/tadas-github/a2asearch-mcp"
     },
-    "repoUrl": "https://github.com/graphlit/graphlit-mcp-server",
+    "repoUrl": "https://github.com/tadas-github/a2asearch-mcp",
+    "homepage": "https://github.com/tadas-github/a2asearch-mcp",
     "tags": [
-     "content-management",
-     "data-ingestion",
-     "document-processing",
-     "search-retrieval",
-     "multi-platform",
-     "knowledge-memory"
+     "🔗 <a name=\"aggregators\"></a>Aggregators"
     ],
-    "updatedAt": "2026-09-23T19:23:59.286847Z",
-    "stars": 381,
-    "downloads": 1941,
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.27278186666666665,
+     "score": 0.4,
      "tier": "curated",
      "evidence": {
-      "stars": 381,
-      "downloads": 1941,
-      "monthsSinceUpdate": 0,
-      "evidenceScore": 0.3409773333333333
+      "evidenceScore": 0.5
      },
      "hardFilterPassed": true
     }
    },
    {
-    "id": "cline-marketplace:github.com/cline/cline-community",
-    "name": "Cline Community",
+    "id": "awesome-mcp-servers:work90210/apifold",
+    "name": "Work90210/APIFold",
     "kind": "mcp-server",
-    "description": "Streamlines Cline issue reporting with automatic system information collection, preview functionality, and direct submission via GitHub CLI integration.",
+    "description": "📇 ☁️ - Turn any REST API into a hosted MCP server, with ready-made public servers for GitHub, Stripe, Slack, OpenAI, Notion and more.",
     "source": {
-     "id": "cline-marketplace",
+     "id": "awesome-mcp-servers",
      "tier": "curated",
-     "name": "Cline MCP Marketplace",
-     "url": "https://github.com/cline/mcp-marketplace"
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
     },
     "install": {
      "type": "git",
-     "repoUrl": "https://github.com/cline/cline-community"
+     "repoUrl": "https://github.com/Work90210/APIFold"
     },
-    "repoUrl": "https://github.com/cline/cline-community",
+    "repoUrl": "https://github.com/Work90210/APIFold",
+    "homepage": "https://github.com/Work90210/APIFold",
     "tags": [
-     "github-integration",
-     "issue-tracking",
-     "bug-reporting",
-     "automation",
-     "cli-tools",
-     "developer-tools"
+     "🔗 <a name=\"aggregators\"></a>Aggregators"
     ],
-    "updatedAt": "2026-09-24T16:08:25.016148Z",
-    "stars": 23,
-    "downloads": 3171,
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.26866453333333334,
+     "score": 0.4,
      "tier": "curated",
      "evidence": {
-      "stars": 23,
-      "downloads": 3171,
-      "monthsSinceUpdate": 0,
-      "evidenceScore": 0.33583066666666667
+      "evidenceScore": 0.5
      },
      "hardFilterPassed": true
     }
@@ -443,61 +405,61 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 1087,
+    "latencyMs": 89,
     "count": 1
    },
    {
     "source": "modelcontextprotocol-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 15671,
+    "latencyMs": 1130,
     "count": 1
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 280,
+    "latencyMs": 196,
     "count": 5
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 873,
+    "latencyMs": 721,
     "count": 3
    },
    {
     "source": "awesome-mcp-servers",
-    "ok": false,
+    "ok": true,
     "degraded": false,
-    "latencyMs": 33674,
-    "count": 0,
-    "message": "fetch failed"
+    "latencyMs": 1273,
+    "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 994,
+    "latencyMs": 979,
     "count": 5
    },
    {
     "source": "skillsmp",
-    "ok": true,
+    "ok": false,
     "degraded": false,
-    "latencyMs": 579,
-    "count": 5
+    "latencyMs": 177,
+    "count": 0,
+    "message": "HTTP 403 from https://skillsmp.com/api/skills?q=github"
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 148,
+    "latencyMs": 52,
     "count": 5
    }
   ],
-  "totalMs": 33676
+  "totalMs": 1275
  },
  {
   "query": "browser automation",
@@ -526,19 +488,19 @@
      "testing",
      "browser-automation"
     ],
-    "updatedAt": "2026-09-27T10:12:00.787095Z",
-    "stars": 37607,
-    "downloads": 13975,
+    "updatedAt": "2026-10-31T18:14:23.438187Z",
+    "stars": 38902,
+    "downloads": 14024,
     "requiresAuth": false,
     "securityFlagged": false,
     "trust": {
-     "score": 0.5407866666666666,
+     "score": 0.5408128000000001,
      "tier": "curated",
      "evidence": {
-      "stars": 37607,
-      "downloads": 13975,
+      "stars": 38902,
+      "downloads": 14024,
       "monthsSinceUpdate": 0,
-      "evidenceScore": 0.6759833333333333
+      "evidenceScore": 0.6760160000000001
      },
      "hardFilterPassed": true
     }
@@ -560,6 +522,37 @@
     },
     "repoUrl": "https://github.com/34892002/bilibili-mcp-js",
     "homepage": "https://github.com/34892002/bilibili-mcp-js",
+    "tags": [
+     "📂 <a name=\"browser-automation\"></a>Browser Automation"
+    ],
+    "requiresAuth": false,
+    "securityFlagged": false,
+    "trust": {
+     "score": 0.4,
+     "tier": "curated",
+     "evidence": {
+      "evidenceScore": 0.5
+     },
+     "hardFilterPassed": true
+    }
+   },
+   {
+    "id": "awesome-mcp-servers:77777r7/octocrawl",
+    "name": "77777R7/Octocrawl",
+    "kind": "mcp-server",
+    "description": "🎖️ 📇 ☁️ 🏠 🍎 🪟 🐧 - Web scraping for AI agents: scrape, map, crawl and batch public pages into Markdown, tables and JSON, each with an Evidence Record (final URL, HTTP status, robots.txt decision, content hashes); a blocked or empty page comes back with the reason. Hosted at `https://mcp.octocra",
+    "source": {
+     "id": "awesome-mcp-servers",
+     "tier": "curated",
+     "name": "Awesome MCP Servers",
+     "url": "https://github.com/punkpeye/awesome-mcp-servers"
+    },
+    "install": {
+     "type": "git",
+     "repoUrl": "https://github.com/77777R7/Octocrawl"
+    },
+    "repoUrl": "https://github.com/77777R7/Octocrawl",
+    "homepage": "https://github.com/77777R7/Octocrawl",
     "tags": [
      "📂 <a name=\"browser-automation\"></a>Browser Automation"
     ],
@@ -606,10 +599,10 @@
     }
    },
    {
-    "id": "awesome-mcp-servers:acunningham-ship-it/veilbrowser",
-    "name": "acunningham-ship-it/veilbrowser",
+    "id": "awesome-mcp-servers:aceatdev/ascended-browser",
+    "name": "AceAtDev/ascended-browser",
     "kind": "mcp-server",
-    "description": "📇 🐍 🏠 - Stealth automation of unmodified Chrome over raw CDP, using accessibility-tree element refs; can attach to a running Chrome to reuse logged-in sessions.",
+    "description": "🐍 🏠 🐧 - Local browser MCP for coding-agent QA with verified actions, screenshots, read-only network and console inspection, and interruption recovery warnings.",
     "source": {
      "id": "awesome-mcp-servers",
      "tier": "curated",
@@ -618,41 +611,10 @@
     },
     "install": {
      "type": "git",
-     "repoUrl": "https://github.com/acunningham-ship-it/veilbrowser"
+     "repoUrl": "https://github.com/AceAtDev/ascended-browser"
     },
-    "repoUrl": "https://github.com/acunningham-ship-it/veilbrowser",
-    "homepage": "https://github.com/acunningham-ship-it/veilbrowser",
-    "tags": [
-     "📂 <a name=\"browser-automation\"></a>Browser Automation"
-    ],
-    "requiresAuth": false,
-    "securityFlagged": false,
-    "trust": {
-     "score": 0.4,
-     "tier": "curated",
-     "evidence": {
-      "evidenceScore": 0.5
-     },
-     "hardFilterPassed": true
-    }
-   },
-   {
-    "id": "awesome-mcp-servers:aethynio/aethyn-browser-mcp",
-    "name": "aethynio/aethyn-browser-mcp",
-    "kind": "mcp-server",
-    "description": "📇 🏠 - Drive a local Playwright browser through residential proxies with a chosen exit country or city and a sticky identity per task.",
-    "source": {
-     "id": "awesome-mcp-servers",
-     "tier": "curated",
-     "name": "Awesome MCP Servers",
-     "url": "https://github.com/punkpeye/awesome-mcp-servers"
-    },
-    "install": {
-     "type": "git",
-     "repoUrl": "https://github.com/aethynio/aethyn-browser-mcp"
-    },
-    "repoUrl": "https://github.com/aethynio/aethyn-browser-mcp",
-    "homepage": "https://github.com/aethynio/aethyn-browser-mcp",
+    "repoUrl": "https://github.com/AceAtDev/ascended-browser",
+    "homepage": "https://github.com/AceAtDev/ascended-browser",
     "tags": [
      "📂 <a name=\"browser-automation\"></a>Browser Automation"
     ],
@@ -673,7 +635,7 @@
     "source": "mcp-so",
     "ok": true,
     "degraded": false,
-    "latencyMs": 382,
+    "latencyMs": 257,
     "count": 0,
     "message": "no detail page"
    },
@@ -681,52 +643,53 @@
     "source": "modelcontextprotocol-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 660,
+    "latencyMs": 220,
     "count": 0
    },
    {
     "source": "modelscope",
     "ok": true,
     "degraded": false,
-    "latencyMs": 181,
+    "latencyMs": 98,
     "count": 2
    },
    {
     "source": "cline-marketplace",
     "ok": true,
     "degraded": false,
-    "latencyMs": 818,
+    "latencyMs": 529,
     "count": 5
    },
    {
     "source": "awesome-mcp-servers",
     "ok": true,
     "degraded": false,
-    "latencyMs": 14476,
+    "latencyMs": 875,
     "count": 5
    },
    {
     "source": "skills-sh",
     "ok": true,
     "degraded": false,
-    "latencyMs": 2511,
+    "latencyMs": 1754,
     "count": 5
    },
    {
     "source": "skillsmp",
-    "ok": true,
+    "ok": false,
     "degraded": false,
-    "latencyMs": 1273,
-    "count": 5
+    "latencyMs": 188,
+    "count": 0,
+    "message": "HTTP 403 from https://skillsmp.com/api/skills?q=browser%20automation"
    },
    {
     "source": "tencent-skillhub",
     "ok": true,
     "degraded": false,
-    "latencyMs": 189,
+    "latencyMs": 51,
     "count": 5
    }
   ],
-  "totalMs": 14478
+  "totalMs": 1756
  }
 ]

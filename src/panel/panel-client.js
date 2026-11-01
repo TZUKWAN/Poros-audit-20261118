@@ -125,7 +125,7 @@ export function renderLoopTimeline(container, events) {
     const text = e.type === "round:start" ? `轮 ${e.round} 开始`
       : e.type === "round:end" ? `轮 ${e.result.round} 结束（${e.result.summary || "无摘要"}）`
       : e.type === "round:gate" ? `轮 ${e.result.round} 放行：${e.decision.action}`
-      : `循环结束：${e.reason}（${e.rounds} 轮）`;
+      : `循环结束：${e.reason === "cancelled" ? "已取消" : e.reason}（${e.rounds} 轮）`;
     container.append(el("div", { class: `loop-event loop-${e.type.replace(":", "-")}`, text }));
   }
 }

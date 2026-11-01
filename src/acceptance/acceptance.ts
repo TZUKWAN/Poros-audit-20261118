@@ -60,8 +60,8 @@ export class ComponentAcceptance {
       capabilityId: cap.id,
       available: true,
       latencyMs: smoke.latencyMs,
-      schemaOk: parsed.success,
-      schemaError: parsed.success ? undefined : parsed.error.issues[0]?.message,
+      schemaOk: smoke.ok && parsed.success,
+      schemaError: smoke.ok ? (parsed.success ? undefined : parsed.error.issues[0]?.message) : (smoke.error ?? "smoke invocation failed"),
       message: smoke.error,
     };
   }
@@ -88,6 +88,8 @@ export interface TaskAcceptanceDeps {
   judge?: (criterion: TaskCriterion, output: unknown) => Promise<JudgeScore>;
   /** judge 通过阈值（可配，默认 0.7） */
   judgeThreshold?: number;
+  /** 仅在调用方明确接受降级时允许无 judge 通过；默认 false。 */
+  allowDegradedJudge?: boolean;
 }
 
 export interface TaskVerdict {
@@ -119,9 +121,12 @@ export class TaskAcceptance {
         }
       } else if (c.needsJudge) {
         if (!this.deps.judge) {
-          // 无 judge（降级）：视为通过但记录——LLM 不可达时模板化降级路径
-          judgeScores.push({ criterionId: c.id, score: 1, reason: "judge unavailable → degrade pass" });
-          continue;
+          if (this.deps.allowDegradedJudge) {
+            judgeScores.push({ criterionId: c.id, score: 0, reason: "judge unavailable → explicitly degraded" });
+            continue;
+          }
+          judgeScores.push({ criterionId: c.id, score: 0, reason: "judge unavailable" });
+          return { passed: false, ruleResults, judgeScores, failedAt: `judge:${c.id}` };
         }
         try {
           const s = await this.deps.judge(c, output);
@@ -246,7 +251,11 @@ export class AcceptanceReporter {
   }): Promise<AcceptanceReport> {
     const failedComp = params.componentResults.find((r) => !r.available || !r.schemaOk);
     const failedTask = params.taskVerdicts.find((v) => !v.passed);
+    const missingComp = params.componentResults.length === 0;
+    const missingTask = params.taskVerdicts.length === 0;
     const attribution: string[] = [];
+    if (missingComp) attribution.push("L1 组件级验收缺失");
+    if (missingTask) attribution.push("L2 任务级验收缺失");
     if (failedComp) {
       attribution.push(
         `L1 组件级失败: ${failedComp.capabilityId}${!failedComp.available ? "（不可达）" : ""}${!failedComp.schemaOk ? ` schema=${failedComp.schemaError ?? "invalid"}` : ""}`,
@@ -268,18 +277,18 @@ export class AcceptanceReporter {
       buildId: params.ctx.id,
       at: new Date().toISOString(),
       component: {
-        passed: !failedComp,
+        passed: !missingComp && !failedComp,
         results: params.componentResults,
         failedCapability: failedComp?.capabilityId,
       },
       task: {
-        passed: !failedTask,
+        passed: !missingTask && !failedTask,
         verdicts: params.taskVerdicts,
         failedNode: failedTask?.nodeId,
       },
       generalization: params.generalization,
       attribution,
-      allPassed: !failedComp && !failedTask && params.generalization.passed,
+      allPassed: !missingComp && !failedComp && !missingTask && !failedTask && params.generalization.passed,
     };
     this.events.emit("report", report);
     return report;

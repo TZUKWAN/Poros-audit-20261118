@@ -10,12 +10,13 @@ import {
   handleExecuting,
   handleDistilling,
   alignInterfaces,
-  type HandlerDeps,
 } from "@/orchestrator/handlers";
+import type { HandlerDeps } from "@/orchestrator/handlers";
 import { newBuildContext, type BuildContext } from "@/orchestrator/context";
 import { buildCapability } from "@/federation/adapters/adapter-utils";
 import type { Capability, Source } from "@/federation/types";
 import type { FederatedResult } from "@/federation/search";
+import type { BuildAwaitingUserError } from "@/orchestrator/state-machine";
 
 const src: Source = { id: "modelscope", tier: "curated", name: "t", url: "https://t" };
 
@@ -64,6 +65,15 @@ describe("2.3.1 parsing", () => {
       llm: { parseIntent: async () => { throw new Error("LLM_UNAVAILABLE"); }, planTasks: async () => null },
     });
     expect(c.intent?.via).toBe("template");
+    expect(c.planner).toMatchObject({ requested: "llm", actual: "template", fallbackReason: "LLM_UNAVAILABLE", attempts: 1 });
+  });
+  it("模型明确返回 clarification 时保留结构化问题，不降级成猜测", async () => {
+    const c = ctx("整理项目");
+    await expect(handleParsing(c, {
+      search: fakeSearch([]),
+      llm: { parseIntent: async () => ({ clarification: { question: "哪个目录？", inputs: [{ name: "path", type: "path", description: "项目根目录" }] } }), planTasks: async () => null },
+    })).rejects.toMatchObject({ name: "BuildAwaitingUserError", request: { phase: "parsing", question: "哪个目录？" } } as Partial<BuildAwaitingUserError>);
+    expect(c.intent).toBeNull();
   });
   it("无 LLM → 模板直出", async () => {
     const c = ctx("批量下载图片并压缩");
@@ -91,6 +101,15 @@ describe("2.3.2 planning", () => {
       },
     });
     expect(c.dag?.nodes).toHaveLength(3);
+  });
+  it("规划模型可在没有 DAG 时请求结构化澄清", async () => {
+    const c = ctx();
+    c.intent = templateIntent("整理项目");
+    await expect(handlePlanning(c, {
+      search: fakeSearch([]),
+      llm: { parseIntent: async () => null, planTasks: async () => ({ clarification: { question: "要输出什么格式？", inputs: [{ name: "format", type: "string", description: "交付格式" }] } }) },
+    })).rejects.toMatchObject({ name: "BuildAwaitingUserError", request: { phase: "planning", question: "要输出什么格式？" } } as Partial<BuildAwaitingUserError>);
+    expect(c.dag).toBeNull();
   });
   it("环被拒：LLM 给出带环 DAG → 上抛 VALIDATION（不放行）", async () => {
     const c = ctx();
@@ -237,10 +256,10 @@ describe("2.3.5 verifying", () => {
     await handleVerifying(c, { search: fakeSearch([]), probe: async () => ({ available: false, latencyMs: 5, message: "refused" }) });
     expect(c.acceptance.find((a) => a.layer === "component")?.passed).toBe(false);
   });
-  it("无探活器（dev 桩）默认过", async () => {
+  it("无探活器不得伪造通过", async () => {
     const c = verifyCtx();
     await handleVerifying(c, { search: fakeSearch([]) });
-    expect(c.acceptance.find((a) => a.layer === "component")?.passed).toBe(true);
+    expect(c.acceptance.find((a) => a.layer === "component")?.passed).toBe(false);
   });
 });
 
@@ -252,12 +271,12 @@ describe("2.3.6/2.3.7 executing 与 distilling 桩", () => {
     await handleExecuting(c, { search: fakeSearch([]), execute: async () => { executed = true; } });
     expect(executed).toBe(true);
   });
-  it("无注入 execute → 桩假成功落 trace", async () => {
+  it("无注入 execute → 明确记录失败而非假成功", async () => {
     const c = ctx();
     c.assembly = { nodes: [{ nodeId: "n1", capabilityId: "a", glueNeeded: false }], edges: [] };
     await handleExecuting(c, { search: fakeSearch([]) });
     expect(c.trace).toHaveLength(1);
-    expect((c.trace[0] as { status: string }).status).toBe("success");
+    expect((c.trace[0] as { status: string }).status).toBe("failed");
     expect(c.acceptance.some((a) => a.layer === "task")).toBe(true);
   });
   it("distilling 桩", async () => {

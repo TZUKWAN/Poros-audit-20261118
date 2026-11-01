@@ -147,7 +147,8 @@ describe("1.4.4 缓存 TTL 24h", () => {
     const second = await fsSearch.search({ text: "fs" });
     expect(calls).toBe(1);
     expect(second.capabilities).toHaveLength(1);
-    expect(second.statuses).toHaveLength(0); // 缓存命中无状态报告
+    expect(second.statuses).toHaveLength(1); // 缓存命中仍返回来源状态（degraded=缓存）
+    expect(second.statuses[0]?.degraded).toBe(true);
   });
 });
 

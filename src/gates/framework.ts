@@ -1,8 +1,7 @@
-import { z } from "zod";
 import { ScenarioError, ScenarioErrorCode } from "@/core/errors.js";
 import { GateDecisionSchema } from "@/orchestrator/state-machine.js";
 import type { GateDecision } from "@/orchestrator/state-machine.js";
-import type { ApprovalRecord } from "@/orchestrator/context.js";
+import { FinalizeChoiceSchema, type ApprovalRecord, type FinalizeChoice } from "@/orchestrator/context.js";
 
 export { GateDecisionSchema };
 export type { GateDecision };
@@ -40,10 +39,8 @@ export const GATES: Record<GateId, GateDefinition> = {
 };
 
 /** 闸门5 三选一（固化评审的专属决策动作） */
-export const FinalizeChoiceSchema = z.object({
-  choice: z.enum(["pin", "rerun", "discard"]),
-});
-export type FinalizeChoice = z.infer<typeof FinalizeChoiceSchema>;
+export { FinalizeChoiceSchema };
+export type { FinalizeChoice };
 
 /** 决策记录器：approvals[] 已由状态机写入；此处补 Memory 写入接口（阶段七接真实现） */
 export interface DecisionMemory {

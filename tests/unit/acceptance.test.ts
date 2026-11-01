@@ -43,6 +43,17 @@ describe("5.1 组件级验收器（过/schema挂/超时三例）", () => {
     expect(r.schemaError).toBeTruthy();
   });
 
+  it("冒烟调用失败即使返回形状正确也不能通过", async () => {
+    const acc = new ComponentAcceptance({
+      probe: async () => ({ available: true, latencyMs: 1 }),
+      smokeInvoke: async () => ({ ok: false, output: { ok: true }, error: "tool refused", latencyMs: 2 }),
+      outputSchema: OutputSchema,
+    });
+    const r = await acc.check(cap);
+    expect(r.schemaOk).toBe(false);
+    expect(r.schemaError).toContain("tool refused");
+  });
+
   it("超时：冒烟挂起被硬顶", async () => {
     const acc = new ComponentAcceptance({
       probe: async () => ({ available: true, latencyMs: 1 }),
@@ -113,11 +124,18 @@ describe("5.2 任务级验收器（全过/规则挂/LLM挂/双挂四例）", () 
     expect(v.judgeScores[0]?.reason).toContain("LLM down");
   });
 
-  it("无 judge 降级通过（模板化降级路径）", async () => {
+  it("无 judge 默认失败，避免把未验收当成通过", async () => {
     const acc = new TaskAcceptance();
     const v = await acc.check({ result: "x" }, [{ id: "j1", description: "", needsJudge: true }]);
+    expect(v.passed).toBe(false);
+    expect(v.judgeScores[0]?.reason).toContain("unavailable");
+  });
+
+  it("只有显式允许时才走 judge 降级", async () => {
+    const acc = new TaskAcceptance({ allowDegradedJudge: true });
+    const v = await acc.check({ result: "x" }, [{ id: "j1", description: "", needsJudge: true }]);
     expect(v.passed).toBe(true);
-    expect(v.judgeScores[0]?.reason).toContain("degrade");
+    expect(v.judgeScores[0]?.reason).toContain("explicitly degraded");
   });
 
   it("阈值可配（0.95 下 0.9 分不过）", async () => {

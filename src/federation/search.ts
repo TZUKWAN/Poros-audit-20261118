@@ -26,7 +26,12 @@ export class FederatedSearch {
 
     const cached = this.cache ? await this.cache.get(key) : undefined;
     if (cached) {
-      return { query: key, capabilities: cached.slice(0, this.topN), statuses: [], totalMs: Math.round(performance.now() - started) };
+      return {
+        query: key,
+        capabilities: cached.slice(0, this.topN),
+        statuses: this.adapters.map((adapter) => ({ source: adapter.source.id, ok: true, degraded: true, message: "registry cache", latencyMs: 0, count: cached.length })),
+        totalMs: Math.round(performance.now() - started),
+      };
     }
 
     // 1.4.1 八源并行扇出（Promise.allSettled），单源失败折叠为状态报告
@@ -53,8 +58,10 @@ export class FederatedSearch {
     const all = results.flatMap((r) => r.capabilities);
     // 1.4.2 去重：规范名 + 底层仓库 归并，保留 trust 最高
     const deduped = dedupeCapabilities(all);
-    // 1.4.3 排序截断：trust 降序 top-N（仅保留过硬过滤的候选优先）
+    // 1.4.3 排序截断：先按查询相关性，再按硬过滤与可信度。
     deduped.sort((a, b) => {
+      const relevanceDelta = lexicalRelevance(b, key) - lexicalRelevance(a, key);
+      if (Math.abs(relevanceDelta) > 0.15) return relevanceDelta;
       if (a.trust.hardFilterPassed !== b.trust.hardFilterPassed) return a.trust.hardFilterPassed ? -1 : 1;
       return b.trust.score - a.trust.score;
     });
@@ -71,6 +78,15 @@ export class FederatedSearch {
       totalMs: Math.round(performance.now() - started),
     };
   }
+}
+
+function lexicalRelevance(capability: Capability, query: string): number {
+  const tokens = query.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((token) => token.length >= 2);
+  if (tokens.length === 0) return 0;
+  const text = `${capability.name} ${capability.description} ${capability.tags.join(" ")}`.toLowerCase();
+  let hits = 0;
+  for (const token of tokens) if (text.includes(token)) hits++;
+  return hits / tokens.length;
 }
 
 export interface DedupeGroup {
@@ -184,10 +200,7 @@ export async function probeRemote(cap: Capability, timeoutMs = 8_000): Promise<P
       signal: AbortSignal.timeout(timeoutMs),
     });
     const latencyMs = Math.round(performance.now() - started);
-    if (resp.status < 500) {
-      // 4xx（如需鉴权）也证明端点存活
-      return { capabilityId: cap.id, available: true, latencyMs, message: `HTTP ${resp.status}` };
-    }
+    if (resp.ok) return { capabilityId: cap.id, available: true, latencyMs };
     return { ...base, latencyMs, message: `HTTP ${resp.status}` };
   } catch (err) {
     return { ...base, latencyMs: Math.round(performance.now() - started), message: err instanceof Error ? err.message : String(err) };

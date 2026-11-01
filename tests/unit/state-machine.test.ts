@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Orchestrator, GATE_ON_EXIT, isLegalTransition, WORK_STATES, type OrchestratorDeps } from "@/orchestrator/state-machine";
+import { BuildAwaitingUserError, Orchestrator, GATE_ON_EXIT, isLegalTransition, WORK_STATES, type OrchestratorDeps } from "@/orchestrator/state-machine";
 import { memoryBuildStore } from "@/orchestrator/build-store";
 import type { BuildContext } from "@/orchestrator/context";
 
@@ -47,6 +47,12 @@ async function driveThrough(
 }
 
 describe("2.1.2 状态机转换（≥15 用例）", () => {
+  it("start 冻结项目/Memory 运行时上下文并可序列化", () => {
+    const orch = new Orchestrator(noopDeps());
+    orch.start("测试需求", "build-context", { projectId: "p1", projectInstructions: "中文 Markdown", files: [], memories: [{ id: "m1", name: "偏好", scope: "project", content: "先给结论", sourceType: "user", sourceId: null }], connectors: [], desktopContexts: [], provider: { id: null, baseUrl: "http://127.0.0.1:1/v1", model: "m", timeoutMs: 1000 } });
+    expect(orch.ctx.runtimeContext?.projectInstructions).toBe("中文 Markdown");
+    expect(orch.ctx.runtimeContext?.memories[0]?.content).toBe("先给结论");
+  });
   it("合法主干全序列", () => {
     for (let i = 0; i < WORK_STATES.length - 1; i++) {
       expect(isLegalTransition(WORK_STATES[i]!, WORK_STATES[i + 1]!)).toBe(true);
@@ -79,6 +85,46 @@ describe("2.1.2 状态机转换（≥15 用例）", () => {
 });
 
 describe("2.1.3 闸门挂起/恢复", () => {
+  it("模型结构化澄清会持久化为 awaiting-user，回答后从原阶段恢复", async () => {
+    const store = memoryBuildStore();
+    const deps = noopDeps({ persist: (ctx) => store.save(ctx) });
+    let parsingRuns = 0;
+    deps.handlers.parsing = async (ctx: BuildContext) => {
+      parsingRuns += 1;
+      if (parsingRuns === 1) {
+        throw new BuildAwaitingUserError({
+          phase: "parsing",
+          question: "要处理哪个目录？",
+          inputs: [{ name: "path", type: "path", description: "项目目录" }],
+        });
+      }
+      ctx.intent = { goal: ctx.requirement, domain: "general", slots: [{ name: "path", value: ctx.clarificationAnswers.path! }], keywords: [], via: "template" };
+    };
+    const orch = new Orchestrator(deps);
+    orch.start("整理项目");
+    const waiting = await orch.run();
+    expect(waiting.awaitingUser).toMatchObject({ phase: "parsing", question: "要处理哪个目录？", source: "model" });
+    expect(waiting.outcome).toBe("running");
+    expect(waiting.pendingGate).toBeNull();
+    expect((await store.load(waiting.id))?.awaitingUser?.inputs[0]?.name).toBe("path");
+    const restored = Orchestrator.restore(await store.load(waiting.id), deps);
+    // A refresh/restart cannot silently rerun the model while the answer is missing.
+    expect((await restored.run()).awaitingUser?.question).toBe("要处理哪个目录？");
+    await restored.answerAwaitingUser({ path: "/workspace/project" });
+    const resumed = restored.run();
+    await driveThrough(restored, [
+      { gate: 1, action: "approve" },
+      { gate: 2, action: "approve" },
+      { gate: 3, action: "approve" },
+      { gate: 4, action: "approve" },
+      { gate: 5, action: "approve" },
+    ]);
+    const final = await resumed;
+    expect(parsingRuns).toBe(2);
+    expect(final.clarificationAnswers).toMatchObject({ path: "/workspace/project" });
+    expect(final.awaitingUser).toBeNull();
+  });
+
   it("parsing 完成后挂起在闸门1，payload 为 intent", async () => {
     const deps = noopDeps();
     deps.handlers.parsing = async (ctx: BuildContext) => {
@@ -179,6 +225,54 @@ describe("2.1.3 闸门挂起/恢复", () => {
       { gate: 4, action: "approve" },
       { gate: 5, action: "approve" },
     ]);
+  });
+
+  it("错闸门决策被拒，当前闸门仍保持挂起", async () => {
+    const { orch } = await runUntilGate();
+    await expect(orch.decide({ gate: 2, action: "approve" })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(orch.ctx.pendingGate).toBe(1);
+    await orch.decide({ gate: 1, action: "approve" });
+  });
+
+  it("编辑动作重新发出同一闸门，不重跑已生成阶段", async () => {
+    const deps = noopDeps();
+    deps.handlers.parsing = async (ctx: BuildContext) => {
+      if (!ctx.intent) ctx.intent = { goal: "原目标", domain: "general", slots: [], keywords: [], via: "template" };
+    };
+    const orch = new Orchestrator(deps);
+    orch.start("需求");
+    const runP = orch.run();
+    await orch.waitForGate();
+    await orch.decide({ gate: 1, action: "edit", edit: { kind: "intent", intent: { goal: "新目标", domain: "general", slots: [], keywords: ["新目标"], via: "template" } } });
+    const editedGate = await orch.waitForGate();
+    expect(editedGate.gate).toBe(1);
+    expect((editedGate.payload as { goal: string }).goal).toBe("新目标");
+    await orch.decide({ gate: 1, action: "approve" });
+    await driveThrough(orch, [
+      { gate: 2, action: "approve" },
+      { gate: 3, action: "approve" },
+      { gate: 4, action: "approve" },
+      { gate: 5, action: "approve" },
+    ]);
+    await runP;
+  });
+
+  it("闸门5 discard 记录为 discarded，不进入固化成功语义", async () => {
+    const orch = new Orchestrator(noopDeps());
+    orch.start("r");
+    const runP = orch.run();
+    await driveThrough(orch, [
+      { gate: 1, action: "approve" },
+      { gate: 2, action: "approve" },
+      { gate: 3, action: "approve" },
+      { gate: 4, action: "approve" },
+    ]);
+    const gate5 = await orch.waitForGate();
+    expect(gate5.gate).toBe(5);
+    await orch.decide({ gate: 5, action: "approve", choice: "discard" });
+    const final = await runP;
+    expect(final.outcome).toBe("discarded");
+    expect(final.finalizeChoice).toBe("discard");
   });
 
   it("reject 目标不得晚于当前阶段", async () => {

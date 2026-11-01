@@ -28,6 +28,8 @@ export interface RepairDeps {
   candidatesFor(nodeId: string): Capability[];
   /** 单节点执行试跑（返回是否通过任务级验收） */
   runNode(nodeId: string, capabilityId: string): Promise<{ passed: boolean; error?: string }>;
+  /** Inputs captured from the failed execution, when a repair needs context. */
+  inputsFor?(nodeId: string): Record<string, unknown>;
   maxRounds?: number;
 }
 
@@ -121,7 +123,10 @@ export interface ControlEvents {
 export class RunController {
   private state: RunControlState = "running";
   private readonly emitter = new EventEmitter();
-  private resumeResolve: (() => void) | undefined;
+  // Cluster execution can have several workers paused at the same boundary.
+  // Keep all waiters so one resume/terminate releases every worker.
+  private readonly resumeWaiters = new Set<() => void>();
+  private readonly guidanceQueue: string[] = [];
   private onTerminate: Array<() => void> = [];
 
   get currentState(): RunControlState {
@@ -148,24 +153,38 @@ export class RunController {
       throw new ScenarioError({ code: ScenarioErrorCode.CONFLICT, message: `cannot resume from ${this.state}`, phase: "executing" });
     }
     this.transition("running");
-    const r = this.resumeResolve;
-    this.resumeResolve = undefined;
-    r?.();
+    this.releaseWaiters();
   }
 
   terminate(): void {
     if (this.state === "terminated") return;
     const from = this.state;
     this.state = "terminated";
-    const r = this.resumeResolve;
-    this.resumeResolve = undefined;
-    r?.(); // 暂停中被终止 → checkpoint 返回，随后 checkpoint 抛 CANCELLED
+    this.releaseWaiters(); // 暂停中被终止 → checkpoint 返回，随后 checkpoint 抛 CANCELLED
     this.emitter.emit("control:changed", { from, to: "terminated" });
-    for (const fn of this.onTerminate) fn();
+    for (const fn of this.onTerminate) {
+      try {
+        fn();
+      } catch {
+        // One integration callback must not prevent the remaining termination
+        // hooks (including the abort hook) from running.
+      }
+    }
   }
 
   onTerminateCallback(fn: () => void): void {
     this.onTerminate.push(fn);
+  }
+
+  /** Queue a user correction for the next executable step. It never mutates
+   * an in-flight provider response, so the current step remains auditable. */
+  guide(instruction: string): void {
+    const value = instruction.trim();
+    if (value) this.guidanceQueue.push(value.slice(0, 8_000));
+  }
+
+  takeGuidance(): string[] {
+    return this.guidanceQueue.splice(0, this.guidanceQueue.length);
   }
 
   /** 执行底座在节点边界调用：暂停则等待；终止则抛 CANCELLED */
@@ -175,7 +194,7 @@ export class RunController {
     }
     if (this.state === "paused") {
       await new Promise<void>((resolve) => {
-        this.resumeResolve = resolve;
+        this.resumeWaiters.add(resolve);
       });
       if (this.stateNow() === "terminated") {
         throw new ScenarioError({ code: ScenarioErrorCode.CANCELLED, message: "run terminated while paused", phase: "executing" });
@@ -187,6 +206,12 @@ export class RunController {
     const from = this.state;
     this.state = to;
     this.emitter.emit("control:changed", { from, to });
+  }
+
+  private releaseWaiters(): void {
+    const waiters = [...this.resumeWaiters];
+    this.resumeWaiters.clear();
+    for (const resolve of waiters) resolve();
   }
 
   private assertRunning(): void {

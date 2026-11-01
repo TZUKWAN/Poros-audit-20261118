@@ -133,7 +133,7 @@ describe("阶段三集成：全五闸门联测", () => {
     expect(rendered[3]).toContain("候选");
     expect(rendered[3]).toContain("[策展]");
     expect(rendered[4]).toContain("流水线图");
-    expect(rendered[5]).toContain("固化入库");
+    expect(rendered[5]).toContain("不能固化");
   });
 });
 

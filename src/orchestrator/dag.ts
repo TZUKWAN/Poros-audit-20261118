@@ -3,6 +3,13 @@ import type { Dag, TaskNode } from "./context.js";
 
 /** 2.3.2 拓扑排序 + 环检测 */
 export function topoSort(dag: Dag): TaskNode[] {
+  if (dag.nodes.length === 0) {
+    throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "DAG must contain at least one node", phase: "planning" });
+  }
+  const ids = dag.nodes.map((node) => node.id);
+  if (new Set(ids).size !== ids.length) {
+    throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "DAG node ids must be unique", phase: "planning" });
+  }
   const byId = new Map(dag.nodes.map((n) => [n.id, n]));
   for (const n of dag.nodes) {
     for (const dep of n.deps) {

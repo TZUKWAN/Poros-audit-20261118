@@ -12,15 +12,17 @@ export default function (pi: ScenarioExtensionAPI) {
     handler: async (args?: string) => {
       const requirement = (args ?? "").trim();
       if (!requirement) return "用法：/scenario:build <一句话需求>";
-      const result = (await runScenario({ requirement, buildId: `pi-${Date.now()}`, autoApprove: true })) as {
+      const result = (await runScenario({ requirement, buildId: `pi-${Date.now()}`, autoApprove: true, constructionOnly: true })) as {
         id: string;
         phase: string;
         selections: unknown[];
         approvals: number;
+        verification: "untested" | "verified" | "failed";
       };
       return [
-        `场景构建完成：${result.id}`,
+        `场景定义构建完成：${result.id}`,
         `阶段：${result.phase}　选型：${result.selections.length} 项　闸门决策：${result.approvals} 次`,
+        result.verification === "untested" ? "外部能力未执行：请在工作模式中运行场景并查看真实产出。" : `外部验证：${result.verification}`,
       ].join("\n");
     },
   });

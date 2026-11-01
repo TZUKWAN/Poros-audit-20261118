@@ -3,12 +3,16 @@ import { ScenarioError, ScenarioErrorCode } from "@/core/errors.js";
 import type { Store } from "@/core/store.js";
 import type { BuildContext } from "@/orchestrator/context.js";
 import { cosineSimilarity, type DistilledScenario, type IntentSignature, type SlotDef } from "@/distill/distill.js";
+import { ScenarioDefinitionSchema, type ScenarioDefinition } from "./definition.js";
 
 /**
  * 6.2 场景库：持久化 + 命中三档 + 填槽执行 + 漂移检测 + 治理指标。
  */
 
 export const ScenarioRecordSchema = z.object({
+  /** Workspace/project folder ownership. Null keeps legacy globally reusable scenes visible. */
+  workspaceId: z.string().min(1).nullable().default(null),
+  projectId: z.string().min(1).nullable().default(null),
   id: z.string().min(1),
   name: z.string().min(1),
   goal: z.string(),
@@ -23,6 +27,7 @@ export const ScenarioRecordSchema = z.object({
   }),
   /** 能力选型快照（漂移检测逐能力探活的对象） */
   capabilityIds: z.array(z.string()),
+  definition: ScenarioDefinitionSchema.optional(),
   source: z.string().default("built"),
   approvals: z.array(z.any()).default([]),
   stats: z.object({
@@ -33,9 +38,63 @@ export const ScenarioRecordSchema = z.object({
   }),
   /** 低成功率标"降级" */
   degraded: z.boolean().default(false),
+  status: z.enum(["active", "archived", "deleted"]).default("active"),
+  tags: z.array(z.string().max(40)).default([]),
+  versionHistory: z.array(z.object({ version: z.number().int().min(1), capabilityIds: z.array(z.string()), createdAt: z.string(), reason: z.string().default("updated") })).default([]),
   createdAt: z.string(),
 });
-export type ScenarioRecord = z.infer<typeof ScenarioRecordSchema>;
+// Keep the public record input backwards-compatible with pre-scope callers:
+// persisted parses always materialize null, while hand-authored legacy
+// records may omit the new ownership fields.
+export type ScenarioRecord = Omit<z.infer<typeof ScenarioRecordSchema>, "workspaceId" | "projectId"> & { workspaceId?: string | null; projectId?: string | null };
+export type ScenarioScope = { workspaceId?: string | null; projectId?: string | null };
+
+/** A legacy null-scoped scenario remains globally reusable; scoped scenarios never leak to another workspace/project. */
+export function scenarioMatchesScope(scenario: Pick<ScenarioRecord, "workspaceId" | "projectId">, scope: ScenarioScope = {}): boolean {
+  const workspaceId = scope.workspaceId ?? null;
+  const projectId = scope.projectId ?? null;
+  if ((scenario.workspaceId ?? null) !== null && scenario.workspaceId !== workspaceId) return false;
+  if ((scenario.projectId ?? null) !== null && scenario.projectId !== projectId) return false;
+  return true;
+}
+
+/**
+ * Turn a free-form request into a short, human-readable scenario title.
+ *
+ * Scenario ids are intentionally opaque and are useful for storage, but they
+ * should never leak into the navigation or completion copy. Keep this helper
+ * deterministic so the same request is easy to recognise after a restart and
+ * add a small suffix when a workspace already has the same title.
+ */
+export function scenarioNameFromRequirement(requirement: string, existingNames: string[] = []): string {
+  const cleaned = requirement
+    .replace(/\r?\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^\s*(?:请帮我|帮我|请|需要|我要|我想(?:要)?|麻烦)\s*/i, "")
+    .replace(/^[：:、,，。.!！?？\-—\s]+|[：:、,，。.!！?？\-—\s]+$/g, "")
+    .trim();
+  const firstSentence = cleaned.split(/[。！？!?；;]+/u)[0]?.trim() ?? "";
+  const base = (firstSentence || cleaned || "未命名场景").slice(0, 36).trim() || "未命名场景";
+  const used = new Set(existingNames.map((name) => name.trim()).filter(Boolean));
+  if (!used.has(base)) return base;
+  for (let index = 2; index < 1000; index += 1) {
+    const suffix = `（${index}）`;
+    const candidate = `${base.slice(0, Math.max(1, 36 - suffix.length)).trim()}${suffix}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${base.slice(0, 30)}（${Date.now()}）`;
+}
+
+/** Normalize names written by pre-panel builds while preserving custom labels. */
+export function migratedScenarioName(currentName: string, goal: string, existingNames: string[] = []): string {
+  const rawName = currentName.trim();
+  const requestShaped = rawName === goal.trim()
+    || /^(?:请帮我|帮我|请|需要|我要|我想(?:要)?|麻烦)\s*/u.test(rawName);
+  const preferred = requestShaped ? scenarioNameFromRequirement(goal || rawName) : rawName;
+  return existingNames.some((name) => name.trim() === preferred)
+    ? scenarioNameFromRequirement(goal || preferred, existingNames)
+    : preferred;
+}
 
 export interface ScenarioStoreDeps {
   store: Store<ScenarioRecord>;
@@ -66,23 +125,54 @@ export class ScenarioLibrary {
         context: { issues: parsed.error.issues.slice(0, 3) },
       });
     }
-    await this.deps.store.set(record.id, record);
+    const previous = await this.deps.store.get(record.id);
+    const next = parsed.data;
+    if (previous && next.pinnedVersion > previous.pinnedVersion) {
+      next.versionHistory = [...previous.versionHistory, { version: previous.pinnedVersion, capabilityIds: previous.capabilityIds, createdAt: previous.createdAt, reason: "superseded" }];
+    }
+    await this.deps.store.set(record.id, next);
   }
 
   async get(id: string): Promise<ScenarioRecord | undefined> {
-    return await this.deps.store.get(id);
+    const value = await this.deps.store.get(id);
+    return value ? ScenarioRecordSchema.parse(value) : undefined;
   }
 
   async list(): Promise<ScenarioRecord[]> {
-    return await this.deps.store.entries().then((entries) => entries.map(([, v]) => v));
+    return await this.deps.store.entries().then((entries) => entries.map(([, v]) => ScenarioRecordSchema.parse(v)));
   }
 
-  /** 6.2.2 命中三档：hit（≥0.82）复用 / partial（≥0.55）派生 / miss 从零构建 */
-  async match(signature: IntentSignature): Promise<{ tier: "hit" | "partial" | "miss"; scenario?: ScenarioRecord; score: number }> {
+  async archive(id: string): Promise<boolean> {
+    const scenario = await this.get(id);
+    if (!scenario) return false;
+    await this.save({ ...scenario, status: "archived" });
+    return true;
+  }
+
+  async restore(id: string): Promise<boolean> {
+    const scenario = await this.get(id);
+    if (!scenario) return false;
+    await this.save({ ...scenario, status: "active" });
+    return true;
+  }
+
+  async delete(id: string): Promise<boolean> {
+    const scenario = await this.get(id);
+    if (!scenario) return false;
+    await this.save({ ...scenario, status: "deleted" });
+    return true;
+  }
+
+  /** 6.2.2 命中三档：当前默认词袋签名阈值为 hit=0.7 / partial=0.3。 */
+  async match(signature: IntentSignature, scope?: ScenarioScope): Promise<{ tier: "hit" | "partial" | "miss"; scenario?: ScenarioRecord; score: number }> {
     let best: { scenario: ScenarioRecord; score: number } | undefined;
     for (const scenario of await this.list()) {
+      if (scope && !scenarioMatchesScope(scenario, scope)) continue;
+      if (scenario.degraded || scenario.status !== "active") continue;
       const score = this.scoreMatch(signature, scenario.distilled.signature as unknown as IntentSignature);
-      if (!best || score > best.score) best = { scenario, score };
+      const rank = scope?.projectId && scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && scenario.workspaceId === scope.workspaceId ? 1 : 0;
+      const bestRank = best ? (scope?.projectId && best.scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && best.scenario.workspaceId === scope.workspaceId ? 1 : 0) : -1;
+      if (!best || rank > bestRank || (rank === bestRank && score > best.score)) best = { scenario, score };
     }
     if (!best) return { tier: "miss", score: 0 };
     if (best.score >= this.matchThresholds.hit) return { tier: "hit", scenario: best.scenario, score: best.score };
@@ -102,7 +192,12 @@ export class ScenarioLibrary {
     if (!scenario) {
       throw new ScenarioError({ code: ScenarioErrorCode.NOT_FOUND, message: `scenario ${scenarioId} not found`, phase: "executing" });
     }
-    const result = await runner(scenario, slots);
+    let result: { ok: boolean };
+    try {
+      result = await runner(scenario, slots);
+    } catch {
+      result = { ok: false };
+    }
     const now = (this.deps.now ?? (() => new Date()))().toISOString();
     scenario.stats.uses += 1;
     if (result.ok) scenario.stats.successes += 1;
@@ -110,6 +205,18 @@ export class ScenarioLibrary {
     this.applyGovernance(scenario);
     await this.save(scenario);
     return { ok: result.ok, scenario };
+  }
+
+  /** Persist the independently verified execution state on the definition. */
+  async updateExecutionValidation(scenarioId: string, validation: ScenarioDefinition["validation"]["execution"], lastRunId: string | null, definition?: ScenarioDefinition): Promise<ScenarioRecord> {
+    const scenario = await this.get(scenarioId);
+    if (!scenario) throw new ScenarioError({ code: ScenarioErrorCode.NOT_FOUND, message: `scenario ${scenarioId} not found`, phase: "verifying" });
+    const current = definition ?? scenario.definition;
+    if (!current) return scenario;
+    const nextDefinition = ScenarioDefinitionSchema.parse({ ...current, validation: { ...current.validation, definition: "passed", execution: validation, lastRunId } });
+    scenario.definition = nextDefinition;
+    await this.save(scenario);
+    return scenario;
   }
 
   /** 6.2.5 治理：成功率 <50%（≥2 次）标降级 */
@@ -168,9 +275,13 @@ export function recordFromDistilled(params: {
   ctx: BuildContext;
   distilled: DistilledScenario;
   capabilityIds: string[];
+  workspaceId?: string | null;
+  projectId?: string | null;
   now?: Date;
 }): ScenarioRecord {
   return {
+    workspaceId: params.workspaceId ?? null,
+    projectId: params.projectId ?? null,
     id: params.id,
     name: params.name,
     goal: params.ctx.intent?.goal ?? params.ctx.requirement,
@@ -188,6 +299,9 @@ export function recordFromDistilled(params: {
     approvals: params.ctx.approvals,
     stats: { uses: 0, successes: 0, lastUsedAt: null, driftCount: 0 },
     degraded: false,
+    status: "active",
+    tags: [],
+    versionHistory: [],
     createdAt: (params.now ?? new Date()).toISOString(),
   };
 }

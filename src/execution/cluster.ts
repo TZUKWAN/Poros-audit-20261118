@@ -28,6 +28,7 @@ export interface DelegationResult {
   durationMs: number;
   /** worker 实际使用的参数（蒸馏槽位化原料） */
   params?: Record<string, unknown>;
+  mode?: "executed" | "context" | "delegated";
 }
 
 export interface Delegator {
@@ -80,6 +81,8 @@ export interface ClusterRunOptions {
   concurrency?: number;
   onEvent?: ClusterEventListener;
   signal?: AbortSignal;
+  /** Re-run only failed/blocked nodes while reusing successful outputs. */
+  resumeFromTrace?: boolean;
 }
 
 export interface ClusterRunSummary {
@@ -104,6 +107,9 @@ export class ClusterScheduler {
     if (!this.ctx.dag || !this.ctx.assembly) {
       throw new ScenarioError({ code: ScenarioErrorCode.CONTEXT_CORRUPT, message: "cluster run without dag/assembly", phase: "executing" });
     }
+    if (this.ctx.dag.nodes.length === 0 || this.ctx.assembly.nodes.length === 0) {
+      throw new ScenarioError({ code: ScenarioErrorCode.VALIDATION, message: "cluster run requires at least one DAG node", phase: "executing" });
+    }
     const capsById = new Map<string, Capability>();
     for (const set of this.ctx.candidates as Array<{ nodeId: string; candidates: Capability[] }>) {
       for (const c of set.candidates) capsById.set(c.id, c);
@@ -113,8 +119,13 @@ export class ClusterScheduler {
       const sel = this.ctx.selections.find((s) => s.nodeId === nodeId);
       return sel ? capsById.get(sel.capabilityId) : undefined;
     };
+    const previousTrace = options.resumeFromTrace ? [...(this.ctx.trace as ExecutionStep[])] : [];
     const outputs = new Map<string, unknown>();
-    const steps: ExecutionStep[] = this.ctx.trace as ExecutionStep[];
+    for (const step of previousTrace) {
+      if (step.status === "success") outputs.set(step.nodeId, step.output);
+    }
+    const steps: ExecutionStep[] = options.resumeFromTrace ? [] : (this.ctx.trace as ExecutionStep[]);
+    if (options.resumeFromTrace) this.ctx.trace = steps;
 
     for (const group of parallelGroups(this.ctx.dag)) {
       if (options.signal?.aborted) break;
@@ -128,6 +139,29 @@ export class ClusterScheduler {
           const node = this.ctx.dag?.nodes.find((n) => n.id === nodeId);
           if (!capability || !node) {
             steps.push({ nodeId, startedAt: new Date().toISOString(), status: "skipped" });
+            continue;
+          }
+          const prior = previousTrace.find((step) => step.nodeId === nodeId && step.status === "success" && step.capabilityId === capability.id);
+          if (options.resumeFromTrace && prior) {
+            // Preserve the successful result and avoid repeating an external
+            // side effect while retrying a downstream failure.
+            steps.push({ ...prior });
+            options.onEvent?.({ type: "worker:finished", nodeId, ok: true, durationMs: 0 });
+            continue;
+          }
+          // Never run a dependent node when an upstream node failed or was
+          // skipped. Passing `undefined` as an upstream result can trigger
+          // destructive side effects and used to make a run look partially
+          // successful even though its DAG was broken.
+          const blockedBy = node.deps.find((dep) => {
+            const upstream = steps.find((step) => step.nodeId === dep);
+            return !upstream || upstream.status !== "success";
+          });
+          if (blockedBy) {
+            const blockedAt = new Date().toISOString();
+            const error = `upstream node ${blockedBy} did not complete successfully`;
+            steps.push({ nodeId, startedAt: blockedAt, finishedAt: blockedAt, status: "failed", error });
+            options.onEvent?.({ type: "worker:failed", nodeId, ok: false, error, willRetry: false });
             continue;
           }
           // 上游输出按边收集
@@ -149,7 +183,7 @@ export class ClusterScheduler {
               depth: 1,
             });
             step.finishedAt = new Date().toISOString();
-            step.status = result.ok ? "success" : "failed";
+            step.status = result.mode === "delegated" ? "delegated" : result.ok ? "success" : "failed";
             step.output = result.output;
             step.error = result.error;
             step.params = result.params ?? inputs;
