@@ -1,4 +1,33 @@
-# R3 复验记录（完成）
+# R3/R4 复验记录
+
+## R4（2026-11-02，双 Explore 审计：pi 12 项 + ares/metis 10 项，全部修复）
+
+| # | 级别 | 仓库 | 问题 | 修复 |
+|---|------|------|------|------|
+| 1 | P1 | ares/metis | snapshot() backfill 用 find() 把「驳回→重跑」后的新 pending 卡片误标已决 → 按钮消失构建挂死 | 按「第 N 张 gate-G 卡片 ↔ 第 N 个 gate-G 审批」序号配对 |
+| 2 | P1 | ares/metis | terminate 从未接线 orch.abort()——Abort 按钮无效，gate 等待永久挂起锁死面板 | attachOrchestrator 后 controller.onTerminateCallback(() => orch.abort()) |
+| 3 | P1 | pi | pushSnapshot() 无 catch，~35 处调用点任一 fs 抖动 = unhandledRejection 崩面板 | pushSnapshot 本体 try/catch 一处兜底全部 |
+| 4 | P1 | pi | finishBuild 链（launch.ts:855/1313）reject 未处理——构建成功后固化 IO 失败崩进程 | 链中插 .catch → failBuild（内层再 .catch 防爆） |
+| 5 | P2 | ares/metis | start-build 被拒/启动失败时 isStreaming 不重置，Enter 永久失效 | catch 路径广播 run-error + 客户端 action-result ok:false 本地重置 |
+| 6 | P2 | ares/metis | WS 断线无重连——服务器一重启面板永久失能 | close → 指数退避重连（1s 起 30s 封顶） |
+| 7 | P2 | 三仓 | decide() 不校验 pendingGate——错误 gate 决策静默 resolve 挂起等待 | 校验失败抛 CONFLICT 且不清 decideResolve（等待继续存活） |
+| 8 | P2 | pi | scheduler stop() 是空操作——inFlight 存 task id 字符串，allSettled(["t1"]) 立即 settle | inFlight 改 Map<string, Promise> 存 operation；shutdown 加 10s 总超时 |
+| 9 | P3 | 三仓 | abort 泄漏 decideResolve/pendingGate；迟到 decide 静默 resolve 死等待 | onAbort 清理两者；resolve wrapper 自清 |
+| 10 | P3 | pi | fetch 重试不消费响应体——undici socket 占用耗尽连接池 | 重试前 resp.body?.cancel() |
+| 11 | P3 | ares/metis | invokeRemote/stdio 响应体无上限 | readBodyCapped 流式 5MB 预算；stdio 行缓冲 5MB 熔断 |
+| 12 | P3 | ares/metis | 乐观 decided 标记不还原（双击 CONFLICT 后卡片假已决） | action-result 带动作类型；gate-decision 拒绝时还原该 gate 卡片 |
+| 13 | P3 | ares/metis | 无 orchestrator 时 decide 假确认 | handleAction 前置守卫返回错误 |
+
+### R4 实测抓出并修复的回归
+
+**RunController 单例中毒**：terminate 接线后暴露——controller 是全局单例且 terminate 单次语义，terminate 一次后所有后续构建在首个 checkpoint 抛 CANCELLED。修复：每次 start-build 新建 RunController + panel.setController 同步 control 路由（抄 pi 语义）。ares/metis 同改。
+
+### R4 三场景实测（WS 机器人，ares 4520 / metis 4521 各一轮）
+
+- 场景A（P1-1）：gate1 驳回→重跑→新 gate1 卡片 **decided 为 undefined**（可操作）→ 走完五闸门 run-done ✓
+- 场景B（P1-2）：gate1 pending 时 terminate → 收到 run-error（abort reject 挂起等待 → 锁释放）✓
+- 场景C：terminate 后立即再 start-build → 受理并完整走完 → run-done ✓
+- R3 双构建回归：ares/metis 双双全绿（无 R4 修复破坏 R3 行为）
 
 ## R1-F 三面板完整构建实测（2026-11-02）
 - PI 4517: done ✓ 固化「整理 /data/audit-final 的数据并生成审计简报」v1，检索进度 8/8 分源反馈正常
