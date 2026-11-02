@@ -137,6 +137,8 @@ function focusModalControl(modalId: string, preferredId?: string): void {
 }
 let ws: WebSocket | undefined;
 let reconnectTimer: number | undefined;
+let reconnectAttempts = 0;
+const RECONNECT_MAX_DELAY_MS = 30_000;
 let panelMode: PanelMode = "work";
 let busy = false;
 let currentSnapshot: PanelSnapshot | null = null;
@@ -1725,6 +1727,18 @@ function pushMessage(message: Record<string, unknown>): void {
     }
   }
   messages.push(message);
+  // R3 审计：长会话内存上限——超限裁掉最旧的普通消息（保留 model-stream
+  // 连续段由 normalize 逻辑处理；裁剪只从数组头部移除已完成消息）
+  if (messages.length > 500) {
+    let excess = messages.length - 500;
+    for (let index = 0; index < messages.length && excess > 0; index += 1) {
+      const role = String(messages[index]?.role ?? "");
+      if (role === "model-stream" || role === "model-thinking") continue;
+      messages.splice(index, 1);
+      excess -= 1;
+      index -= 1;
+    }
+  }
   scheduleChatRender();
 }
 
@@ -1910,7 +1924,16 @@ function connect(): void {
   ws = new WebSocket(`${protocol}://${location.host}/ws`);
   ws.addEventListener("open", () => { setConnection(true); if (!messages.length) pushMessage({ role: "build-status", tone: "info", text: "已连接。工作模式会先复用场景，构建模式会生成新场景。" }); });
   ws.addEventListener("error", () => setConnection(false));
-  ws.addEventListener("close", () => { setConnection(false); if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer); reconnectTimer = window.setTimeout(connect, 1000); });
+  ws.addEventListener("open", () => { reconnectAttempts = 0; setConnection(true); if (!messages.length) pushMessage({ role: "build-status", tone: "info", text: "已连接。工作模式会先复用场景，构建模式会生成新场景。" }); });
+  ws.addEventListener("error", () => setConnection(false));
+  // R3 审计：指数退避重连（1s 起、×2、封顶 30s），避免服务器重启期间的重连风暴
+  ws.addEventListener("close", () => {
+    setConnection(false);
+    if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+    const delay = Math.min(1000 * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS);
+    reconnectAttempts += 1;
+    reconnectTimer = window.setTimeout(connect, delay);
+  });
   ws.addEventListener("message", (event) => {
     let payload: Record<string, unknown>; try { payload = JSON.parse(String(event.data)) as Record<string, unknown>; } catch { return; }
     if (payload.kind === "snapshot") {
