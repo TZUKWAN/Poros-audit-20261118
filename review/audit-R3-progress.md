@@ -96,3 +96,24 @@ ares 4520 / metis 4521 各跑两轮完整构建（start-build → 逐 gate 批�
 - ares-scenario: 239 passed
 - metis-scenario: 232 passed
 - tsc --noEmit 三仓全零
+
+## R5+ 残留清账（2026-11-03，回答"是否完全零风险"时补齐的最后一批 P3）
+
+R5 终验后仍遗留 7 项已记录 P3，本轮全部修复：
+
+| 项 | 仓库 | 内容 |
+|----|------|------|
+| sync-server GET 无兜底 | pi | 外层 .catch → 500（原来 socket 悬挂 + unhandledRejection） |
+| worker.run catch 内层 await 裸奔 | pi | 内层 try/catch 降级日志 |
+| library save 读改写竞态 | pi | per-id 串行队列；versionHistory 封顶 20 |
+| builds.json 无限增长 | pi | 每 25 次 save 修剪：保留最近 100、只驱逐终态 |
+| 适配器响应体无上限 | pi | base.ts readBodyCapped(5MB)，替换 5 处 text()/json() |
+| post-start 假失败消息 | pi | orchestratorStarted 标志（outer 作用域，catch 可见） |
+| backfill 正向序号在历史裁剪后错位 | ares/metis | 改尾部锚定（倒数 N ↔ 倒数 N）；metis adapters 目录 60s 缓存 |
+
+修复后：三仓测试 541/239/232 全绿 + 四组机器人场景（R3 双构建 × 2、R4 三场景 × 2）全部退出码 0。
+
+**诚实的边界声明**（什么是"已验证"覆盖不到的）：
+- 测试与机器人覆盖面板主流程（构建/闸门/终止/重连/恢复），未逐路径实测：长程运行真实恢复、定时任务真跑、分享链接过期、sync server 双向同步——这些有单元/集成测试在但未做本轮实机演练。
+- 静态审计的发现率随轮次递减（15→12→22→5→0 已记录项），但不能数学证明零缺陷；本声明的含义是"已知清单清空 + 主流程实测通过"，不是形式化验证。
+- 设计取舍保留：闸门等待无超时（terminate 已生效，用户可主动终止——挂起不再是死锁）；chatHistory 200 条裁剪属正常滚存。
