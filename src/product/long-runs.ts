@@ -57,11 +57,23 @@ export class LongRunRepository {
     const recovered: LongRun[] = [];
     for (const run of await this.listAll(workspaceId)) {
       if (run.status !== "running") continue;
-      recovered.push(await this.update(run.id, {
-        status: "paused",
-        pauseRequested: false,
-        lastError: "面板重启，长程运行已在安全轮次边界暂停；可继续恢复。",
-      }, run.revision));
+      // R1 审计#14：启动窗口可能与调度器首个 tick / WS 动作并发，乐观锁
+      // 冲突需重读重试（3 次），否则一次冲突即阻塞整个面板恢复流程。
+      let done = false;
+      let last: LongRun | undefined = run;
+      for (let attempt = 0; attempt < 3 && !done; attempt += 1) {
+        try {
+          recovered.push(await this.update(last!.id, {
+            status: "paused",
+            pauseRequested: false,
+            lastError: "面板重启，长程运行已在安全轮次边界暂停；可继续恢复。",
+          }, last!.revision));
+          done = true;
+        } catch {
+          last = await this.get(run.id).catch(() => undefined);
+          if (!last || last.status !== "running") done = true; // 已被并发路径处理或终态
+        }
+      }
     }
     return recovered;
   }
