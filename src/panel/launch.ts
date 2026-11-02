@@ -14,6 +14,8 @@ import { fileBuildStore } from "@/orchestrator/build-store.js";
 import { CapabilityInvoker, createSafeHostCommandExecutor, mcpHttpRequest, readHostExecutionEnvironment, type HostExecutionStatus } from "@/execution/capability-runtime.js";
 import { RunController } from "@/execution/repair.js";
 import { federatedSearchFactory } from "@/federation/factory.js";
+import { routeDomain, profileOf } from "@/domains/profile.js";
+import { migrateDomainLibraries } from "@/domains/migrate.js";
 import { PanelServer, defaultPageHtml } from "@/panel/server.js";
 import { PanelHistory, PanelSessionSchema } from "@/panel/history.js";
 import { PanelSettingsSchema, PanelSettingsStore } from "@/panel/settings.js";
@@ -134,6 +136,9 @@ async function main(): Promise<void> {
   const library = new ScenarioLibrary({
     store: jsonStore({ filePath: path.join(dataRoot, "scenarios.json"), schema: ScenarioRecordSchema }),
   });
+  // SceneFlow 领域合并：把 ares/metis 两仓遗留场景库一次性迁入统一库（非破坏，
+  // 原数据根不动；幂等——来源根场景数与已迁移标记比对，无新增即跳过）。
+  await migrateDomainLibraries(library);
   // Older panel builds used the raw request as the scenario name and could
   // leave several identical labels in the library. Normalize those legacy
   // request-shaped names first, then add readable suffixes so selection
@@ -838,7 +843,8 @@ async function main(): Promise<void> {
       attachVirtualUser(orch, new VirtualUser({ kind: "approve-all" }));
       current = orch;
       currentDone = false;
-      const buildId = `panel-${Date.now()}`;
+      const domain = routeDomain(requirement);
+      const buildId = `${profileOf(domain)?.buildIdPrefix ?? "panel"}-${Date.now()}`;
       let buildAwaitingUser = false;
       let buildWasClarified = false;
       orch.on("user:pending", () => {

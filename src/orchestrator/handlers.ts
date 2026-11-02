@@ -8,6 +8,7 @@ import type { BuildContext, Dag, Intent, RuntimeContext } from "./context.js";
 import { BuildAwaitingUserError } from "./state-machine.js";
 import { topoSort, parallelGroups } from "./dag.js";
 import { canonicalName } from "@/federation/types.js";
+import { routeDomain, profileOf } from "@/domains/profile.js";
 
 /**
  * 2.3 阶段处理器。所有外部依赖（LLM/检索器/探活器/执行/蒸馏）可注入 —— 测试用桩，
@@ -140,6 +141,13 @@ const DagSchema2 = z.object({
 });
 
 export function templateDag(intent: Intent): Dag {
+  // SceneFlow 领域路由：需求文本带竞赛/学术信号时落对应领域 DAG 模板，
+  // 否则通用 3 节点。LLM planTasks 失败降级到这里，同样自动落域。
+  const domain = routeDomain(`${intent.domain ?? ""} ${intent.goal}`);
+  if (domain !== "core") {
+    const profile = profileOf(domain);
+    if (profile) return profile.templateDag(intent);
+  }
   return {
     nodes: [
       { id: "n1", title: `为「${intent.goal.slice(0, 30)}」检索能力`, deps: [], expectedOutput: "候选能力列表" },

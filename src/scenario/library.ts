@@ -40,13 +40,15 @@ export const ScenarioRecordSchema = z.object({
   degraded: z.boolean().default(false),
   status: z.enum(["active", "archived", "deleted"]).default("active"),
   tags: z.array(z.string().max(40)).default([]),
+  /** SceneFlow 领域归属：core 通用 / ares 竞赛 / metis 学术（迁移自领域仓的记录带上原域标记） */
+  domain: z.enum(["core", "ares", "metis"]).default("core"),
   versionHistory: z.array(z.object({ version: z.number().int().min(1), capabilityIds: z.array(z.string()), createdAt: z.string(), reason: z.string().default("updated") })).default([]),
   createdAt: z.string(),
 });
 // Keep the public record input backwards-compatible with pre-scope callers:
 // persisted parses always materialize null, while hand-authored legacy
-// records may omit the new ownership fields.
-export type ScenarioRecord = Omit<z.infer<typeof ScenarioRecordSchema>, "workspaceId" | "projectId"> & { workspaceId?: string | null; projectId?: string | null };
+// records may omit the new ownership fields. Same for domain (default "core").
+export type ScenarioRecord = Omit<z.infer<typeof ScenarioRecordSchema>, "workspaceId" | "projectId" | "domain"> & { workspaceId?: string | null; projectId?: string | null; domain?: "core" | "ares" | "metis" };
 export type ScenarioScope = { workspaceId?: string | null; projectId?: string | null };
 
 /** A legacy null-scoped scenario remains globally reusable; scoped scenarios never leak to another workspace/project. */

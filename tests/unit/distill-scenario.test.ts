@@ -119,7 +119,8 @@ describe("6.2 场景库", () => {
   it("6.2.1 存取往返", async () => {
     const record = await saveOne("sc-1");
     const loaded = await library.get("sc-1");
-    expect(loaded).toEqual(record);
+    // SceneFlow：schema 增加 domain（缺省 core），parse 后回填
+    expect(loaded).toEqual({ ...record, domain: "core" });
   });
 
   it("6.2.2 命中三档路由（阈值标定）", async () => {

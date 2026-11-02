@@ -48,7 +48,8 @@ describe("1.1.1.b Capability schema 校验", () => {
   });
 
   it("SourceId/Tier 枚举", () => {
-    expect(SourceIdSchema.options).toHaveLength(8);
+    // SceneFlow 合并：8 远程市场源 + 6 领域本地源（ares×3 / metis×3）
+    expect(SourceIdSchema.options).toHaveLength(14);
     expect(SourceTierSchema.options).toEqual(["official", "curated", "aggregate"]);
   });
 });

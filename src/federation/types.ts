@@ -14,6 +14,13 @@ export const SourceIdSchema = z.enum([
   "skills-sh",
   "skillsmp",
   "tencent-skillhub",
+  // SceneFlow 领域本地源（ares 竞赛库 / metis 研究脊柱，全部 local:// 无网络）
+  "ares-competitions",
+  "ares-rubrics",
+  "ares-pipeline-skills",
+  "metis-spine",
+  "metis-engine",
+  "metis-adapters",
 ]);
 export type SourceId = z.infer<typeof SourceIdSchema>;
 
