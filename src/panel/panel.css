@@ -1607,178 +1607,123 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .utility-menu:not(.hidden) { display: block !important; }
 
-/* ── SceneFlow 进度卡：构建过程唯一的过程性 UI，原地更新 ── */
 
-.progress-message { align-items: stretch; }
-.progress-card { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(180deg, rgba(139, 124, 255, .07), rgba(18, 27, 49, .5) 42%); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
-.progress-card-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
-.progress-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 0 0 rgba(79, 209, 197, .5); animation: sceneflow-pulse 1.6s ease-out infinite; }
-.progress-card.finished .progress-pulse { animation: none; background: var(--success); box-shadow: none; }
-@keyframes sceneflow-pulse { 0% { box-shadow: 0 0 0 0 rgba(79, 209, 197, .45); } 70% { box-shadow: 0 0 0 8px rgba(79, 209, 197, 0); } 100% { box-shadow: 0 0 0 0 rgba(79, 209, 197, 0); } }
-.progress-phase { color: var(--accent-2); font-weight: 700; letter-spacing: .04em; }
-.progress-title { color: var(--text); font-weight: 600; }
-.progress-source-count { margin-left: auto; font-variant-numeric: tabular-nums; }
-.progress-narration { font-size: 13px; line-height: 1.7; color: var(--text); white-space: pre-wrap; min-height: 0; }
-.progress-narration.empty { display: none; }
-.progress-line { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-.progress-line::before { content: ""; width: 14px; height: 1px; background: var(--accent); flex: 0 0 14px; }
-.progress-source-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.progress-source-chips:empty { display: none; }
-.progress-source-chip { font-size: 10px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--subtle); }
-.progress-source-chip.ok { color: var(--accent-2); border-color: rgba(79, 209, 197, .35); }
-.progress-source-chip.err { color: var(--danger); border-color: rgba(241, 127, 155, .35); }
-.progress-details { font-size: 12px; }
-.progress-details-summary { cursor: pointer; color: var(--subtle); user-select: none; }
-.progress-details-summary:hover { color: var(--muted); }
-.progress-steps { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow: auto; }
-.progress-step-row { display: flex; gap: 8px; align-items: baseline; }
-.progress-step-time { color: var(--subtle); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
-.progress-step-text { color: var(--muted); }
-.progress-card.finished { border-color: rgba(101, 214, 165, .25); }
+/* ═══ SceneFlow 对话流（DeepSeek 版式，绑定 claude 主题变量，双主题一致） ═══ */
 
-/* ── SceneFlow 构建/工作分离：构建模式不显示工作空间 ── */
+/* 0) 主题内聊天变量（light 默认段 + dark 段各自取值） */
+:root {
+  --sf-user-bubble: #e9e7e2;
+  --sf-think-rule: color-mix(in srgb, var(--claude-accent, #c46a4a) 42%, transparent);
+  --sf-caret: var(--claude-accent, #c46a4a);
+}
+:root[data-theme="dark"] {
+  --sf-user-bubble: var(--claude-user);
+}
 
-.app-shell[data-mode="build"] .rail-workspace-section { display: none; }
-.app-shell[data-mode="build"] .work-only { display: none; }
-
-/* ── SceneFlow Phase D 打磨：流式光标 / 入场动画 / 微交互 ── */
-
-/* 构建中：叙述区尾部流式光标 */
-.progress-card:not(.finished) .progress-narration:not(.empty)::after { content: "▍"; margin-left: 2px; color: var(--accent-2); animation: sceneflow-caret 1s steps(1) infinite; }
-@keyframes sceneflow-caret { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0; } }
-
-/* 消息入场：轻浮入（120ms，不喧宾） */
-@keyframes sceneflow-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.chat-stream .message { animation: sceneflow-enter 160ms ease-out both; }
-@media (prefers-reduced-motion: reduce) { .chat-stream .message, .progress-pulse { animation: none !important; } .progress-card:not(.finished) .progress-narration:not(.empty)::after { animation: none; } }
-
-/* 进度卡完成态：收束为安静的摘要 */
-.progress-card.finished { background: rgba(18, 27, 49, .5); }
-.progress-card.finished .progress-line { color: var(--subtle); }
-
-/* 闸门卡片：待决时边框呼吸，已决后安静 */
-.message-gate-card { transition: border-color .4s ease, opacity .3s ease; }
-@keyframes sceneflow-gate { 0%, 100% { border-color: rgba(139, 124, 255, .45); } 50% { border-color: rgba(139, 124, 255, .18); } }
-.message-gate-card:has(.sc-gate-actions) { animation: sceneflow-gate 2.6s ease-in-out infinite; }
-
-/* 发送按钮：悬停轻抬 */
-.send-btn { transition: transform .15s ease, box-shadow .15s ease; }
-.send-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(105, 104, 255, .25); }
-.send-btn:active { transform: translateY(0); }
-
-/* ═══ DeepSeek 式对话流（UI 复刻）：居中窄列 · 无头像 · 思考块 · 安静闸门 ═══ */
-
-/* 1) 去头像、去消息头标签——内容即对话 */
+/* 1) 对话列居中、无头像、无消息头 */
 .chat-stream .message { display: block; }
 .chat-stream .message .avatar { display: none !important; }
 .chat-stream .message .message-head { display: none !important; }
 
-/* 2) 用户消息：右对齐中性浅气泡（去彩色渐变） */
+/* 2) 用户消息：右对齐主题色浅气泡 */
 .chat-stream .message.message-user.user { display: flex; justify-content: flex-end; }
-.chat-stream .message.message-user.user .message-body { max-width: 82%; padding: 10px 16px; border: 0; border-radius: 18px; background: #232f4d; }
-.chat-stream .message.message-user.user .message-content { margin: 0; padding: 0; border: 0; background: transparent; border-radius: 0; width: auto; max-width: none; }
-.chat-stream .message.message-user.user .message-actions-user { justify-content: flex-end; margin-top: 6px; opacity: 0; transition: opacity .15s ease; }
+.chat-stream .message.message-user.user .message-body {
+  max-width: 78%; padding: 10px 16px; border: 0; border-radius: 18px;
+  background: var(--sf-user-bubble); color: var(--claude-ink);
+}
+.chat-stream .message.message-user.user .message-content {
+  margin: 0; padding: 0; border: 0; background: transparent; border-radius: 0;
+  width: auto; max-width: none; color: inherit; font-size: 14px; line-height: 1.7;
+}
+.chat-stream .message.message-user.user .message-actions-user { justify-content: flex-end; margin-top: 4px; opacity: 0; transition: opacity .15s ease; }
 .chat-stream .message.message-user.user:hover .message-actions-user { opacity: 1; }
 
-/* 3) AI 消息：无框纯文本块，操作按钮悬停浮现 */
-.chat-stream .message.assistant .message-body { padding: 2px 2px 0; }
-.chat-stream .message.assistant .message-content { line-height: 1.75; }
-.chat-stream .message.assistant .message-actions { opacity: 0; transition: opacity .15s ease; }
-.chat-stream .message.assistant:hover .message-actions { opacity: 1; }
-
-/* 4) 进度卡 = DeepSeek 思考块：细左线 muted；live 时展开流式，完成折叠一行 */
-.progress-message .progress-card { border: 0 !important; background: transparent !important; border-left: 2px solid rgba(139, 124, 255, .32) !important; border-radius: 0 !important; padding: 2px 0 2px 14px !important; box-shadow: none !important; }
-.progress-message .progress-card-head { color: var(--subtle); font-size: 12px; }
-.progress-message .progress-pulse { width: 6px; height: 6px; background: var(--accent); }
-.progress-message .progress-title { color: var(--muted); font-weight: 500; }
-.progress-message .progress-narration { color: var(--text); font-size: 13.5px; }
-.progress-message .progress-line { color: var(--subtle); }
-.progress-message .progress-source-chip { border: 0 !important; padding: 0 !important; background: transparent !important; color: var(--subtle) !important; }
-.progress-message .progress-source-chip.ok { color: var(--accent-2) !important; }
-.progress-message .progress-source-chip.err { color: var(--danger) !important; }
-.progress-message .progress-details-summary { color: var(--subtle); font-size: 12px; cursor: pointer; list-style: none; }
-.progress-message .progress-details-summary::before { content: "▸ "; display: inline-block; transition: transform .15s ease; }
-.progress-message .progress-details[open] .progress-details-summary::before { transform: rotate(90deg); }
-.progress-message .progress-steps { border: 0; max-height: 240px; }
-
-/* 5) 闸门卡：极简安静（去渐变、去呼吸、去重阴影） */
-.message-gate-card .gate-card { border: 1px solid var(--line); border-radius: 14px; background: rgba(21, 31, 56, .72); box-shadow: none; animation: none; }
-.message-gate-card:has(.gate-actions) { animation: none !important; }
-.gate-approve { background: var(--accent) !important; color: #0b1020 !important; }
-.gate-reject { background: transparent !important; border: 1px solid var(--line) !important; color: var(--muted) !important; }
-.gate-approve:hover { filter: brightness(1.08); }
-.gate-reject:hover { color: var(--text); border-color: var(--muted); }
-
-/* 6) 执行过程 run-group：同思考块语言 */
-.chat-stream .run-group-card { border: 0; background: transparent; border-left: 2px solid rgba(139, 124, 255, .22); border-radius: 0; padding: 2px 0 2px 14px; box-shadow: none; }
-
-/* 7) 输入区：DeepSeek 大圆角浮岛 */
-.chat-stream .composer .composer, .composer { border-radius: 22px !important; padding: 12px 12px 12px 16px !important; }
-.send-btn { border-radius: 50% !important; width: 38px; height: 38px; }
-.composer-hint { color: var(--subtle); font-size: 11px; }
-
-/* 8) 对话头部：安静化 */
-.chat-head { border-bottom: 0; padding: 18px 30px 4px; }
-.chat-title { font-size: 18px; font-weight: 700; }
-.chat-description { color: var(--subtle); font-size: 12.5px; }
-.chat-kicker { font-size: 10.5px; letter-spacing: .12em; }
-
-/* ═══ DeepSeek 输出排版（最终层）：AI 输出全部为纯文字排版，无卡无框无底色 ═══ */
-
-/* 1) status-card 全家 → 纯文本块 */
+/* 3) AI 输出：全部压平为纯排版 */
 .chat-stream .status-card,
 .chat-stream .stream-card,
 .chat-stream .event-card,
 .chat-stream .ui-command-card {
   padding: 0 !important; border: 0 !important; border-left: 0 !important; border-radius: 0 !important;
   background: transparent !important; box-shadow: none !important;
-  color: var(--text) !important; font-size: 14px !important; line-height: 1.75 !important;
+  color: var(--claude-ink) !important; font-size: 14px !important; line-height: 1.75 !important;
 }
-.chat-stream .status-card.ok { color: var(--text) !important; }
-.chat-stream .status-card.err { color: var(--danger) !important; }
-.chat-stream .status-card.warning { color: var(--warning) !important; }
+.chat-stream .status-card.err { color: var(--claude-danger) !important; }
+.chat-stream .status-card.warning { color: var(--claude-accent-strong) !important; }
+.chat-stream .message.assistant .message-actions { opacity: 0; transition: opacity .15s ease; }
+.chat-stream .message.assistant:hover .message-actions { opacity: 1; }
 
-/* 2) 执行过程（activity）→ 思考块语言：细左线 + muted 小字 */
-.chat-stream .activity-card {
-  border: 0 !important; background: transparent !important; border-left: 2px solid rgba(139, 124, 255, .28) !important;
-  border-radius: 0 !important; padding: 2px 0 2px 14px !important; box-shadow: none !important;
-}
-.chat-stream .activity-card .activity-header { color: var(--subtle); }
-.chat-stream .activity-card .activity-title { font-size: 12px; color: var(--subtle); font-weight: 500; }
-.chat-stream .activity-card .activity-count { font-size: 11px; color: var(--subtle); }
-.chat-stream .activity-card .activity-row { border: 0; }
-.chat-stream .activity-card .activity-text { color: var(--muted); font-size: 12.5px; }
-
-/* 3) run-group 容器压平：只有折叠行 */
+/* 4) 执行过程 run-timeline：思考块（细左线 + muted），无框 */
 .chat-stream .run-group-card { border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; }
+.chat-stream .run-timeline { border: 0 !important; background: transparent !important; border-left: 2px solid var(--sf-think-rule) !important; border-radius: 0 !important; padding: 2px 0 2px 14px !important; }
+.chat-stream .run-timeline-summary { border: 0 !important; background: transparent !important; padding: 2px 0 !important; color: var(--claude-faint) !important; font-size: 12px; cursor: pointer; }
+.chat-stream .run-timeline-summary:hover { color: var(--claude-muted); }
+.chat-stream .run-timeline-label { color: var(--claude-muted); font-weight: 500; }
+.chat-stream .run-timeline-result, .chat-stream .run-timeline-count { color: var(--claude-faint); }
+.chat-stream .run-timeline-items .status-card { padding: 1px 0 !important; font-size: 12.5px !important; color: var(--claude-muted) !important; }
+.chat-stream .run-timeline-items .activity-card { border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 2px 0 !important; }
+.chat-stream .activity-card .activity-title { font-size: 12px; color: var(--claude-muted); font-weight: 500; }
+.chat-stream .activity-card .activity-text { color: var(--claude-muted); font-size: 12.5px; }
 
-/* 4) 闸门卡 → 无框分区：小标题 + 正文 + 静按钮 */
-.chat-stream .gate-card {
-  padding: 4px 0 0 0 !important; border: 0 !important; border-radius: 0 !important;
-  background: transparent !important; box-shadow: none !important;
+/* 5) 进度卡 = 思考块主体 */
+.progress-message .progress-card {
+  border: 0 !important; background: transparent !important; border-left: 2px solid var(--sf-think-rule) !important;
+  border-radius: 0 !important; padding: 2px 0 2px 14px !important; box-shadow: none !important; gap: 6px !important;
 }
-.chat-stream .gate-card .gate-step { color: var(--subtle); font-size: 11.5px; letter-spacing: .08em; }
-.chat-stream .gate-card .gate-title { color: var(--text); font-size: 15px; font-weight: 650; }
-.chat-stream .gate-card .gate-pending { color: var(--accent-2); font-size: 11.5px; }
-.chat-stream .gate-card .gate-guidance { color: var(--muted); font-size: 13px; line-height: 1.7; margin-top: 4px; }
-.chat-stream .gate-card .gate-field { background: rgba(255, 255, 255, .04) !important; border: 1px solid var(--line) !important; border-radius: 10px !important; }
-.chat-stream .gate-card .receipt { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; color: var(--success) !important; font-size: 13px; margin-top: 8px; }
-.chat-stream .gate-approve { border-radius: 999px !important; padding: 8px 18px !important; font-size: 12.5px !important; }
-.chat-stream .gate-reject { border-radius: 999px !important; padding: 8px 18px !important; font-size: 12.5px !important; }
+.progress-card-head { color: var(--claude-faint); font-size: 12px; }
+.progress-pulse { width: 6px; height: 6px; background: var(--claude-accent); }
+.progress-card.finished .progress-pulse { background: var(--claude-success); }
+.progress-phase { color: var(--claude-accent-strong); font-weight: 600; }
+.progress-title { color: var(--claude-muted); font-weight: 500; }
+.progress-narration { color: var(--claude-ink); font-size: 13.5px; line-height: 1.7; }
+.progress-line { color: var(--claude-muted); font-size: 12.5px; }
+.progress-source-count { color: var(--claude-faint); }
+.progress-source-chip { border: 0 !important; padding: 0 !important; background: transparent !important; color: var(--claude-faint) !important; font-size: 11px; }
+.progress-source-chip.ok { color: var(--claude-success) !important; }
+.progress-source-chip.err { color: var(--claude-danger) !important; }
+.progress-details-summary { color: var(--claude-faint) !important; font-size: 12px; cursor: pointer; list-style: none; }
+.progress-steps { border: 0 !important; max-height: 240px; }
+.progress-step-time { color: var(--claude-faint); }
+.progress-step-text { color: var(--claude-muted); }
+.progress-card:not(.finished) .progress-narration:not(.empty)::after { content: "▍"; margin-left: 2px; color: var(--sf-caret); animation: sf-caret 1s steps(1) infinite; }
+@keyframes sf-caret { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0; } }
 
-/* 5) awaiting-user → 无框提问 + 输入 */
-.chat-stream .awaiting-user-card {
-  border: 0 !important; background: transparent !important; border-left: 2px solid rgba(243, 187, 114, .5) !important;
-  border-radius: 0 !important; padding: 2px 0 2px 14px !important; box-shadow: none !important;
-}
-.chat-stream .awaiting-user-question { color: var(--text) !important; font-size: 14px; }
+/* 6) 闸门：无框分区 + 主题按钮 */
+.chat-stream .gate-card { padding: 4px 0 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+.chat-stream .gate-card .gate-step { color: var(--claude-faint); font-size: 11.5px; letter-spacing: .08em; }
+.chat-stream .gate-card .gate-title { color: var(--claude-ink); font-size: 15px; font-weight: 650; }
+.chat-stream .gate-card .gate-pending { color: var(--claude-accent-strong); font-size: 11.5px; }
+.chat-stream .gate-card .gate-guidance { color: var(--claude-muted); font-size: 13px; line-height: 1.7; margin-top: 4px; }
+.chat-stream .gate-card .gate-field { background: transparent !important; border: 1px solid var(--claude-line) !important; border-radius: 10px !important; color: var(--claude-ink); }
+.chat-stream .gate-card .receipt { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; color: var(--claude-success) !important; font-size: 13px; margin-top: 8px; }
+.chat-stream .gate-approve { background: var(--claude-accent) !important; color: #fff8f3 !important; border-radius: 999px !important; padding: 8px 18px !important; font-size: 12.5px !important; }
+.chat-stream .gate-approve:hover { background: var(--claude-accent-strong) !important; }
+.chat-stream .gate-reject { background: transparent !important; border: 1px solid var(--claude-line) !important; color: var(--claude-muted) !important; border-radius: 999px !important; padding: 8px 18px !important; font-size: 12.5px !important; }
+.chat-stream .gate-reject:hover { color: var(--claude-ink); border-color: var(--claude-muted); }
 
-/* 6) thinking / tool / help / memory 提议 → 全部压平 */
-.chat-stream .thinking-block, .chat-stream .tool-activity, .chat-stream .help-card,
-.chat-stream .memory-proposal-card {
-  border: 0 !important; background: transparent !important; box-shadow: none !important; border-radius: 0 !important;
-}
+/* 7) awaiting-user / thinking / tool / help：压平 */
+.chat-stream .awaiting-user-card { border: 0 !important; background: transparent !important; border-left: 2px solid var(--sf-think-rule) !important; border-radius: 0 !important; padding: 2px 0 2px 14px !important; box-shadow: none !important; }
+.chat-stream .awaiting-user-question { color: var(--claude-ink) !important; font-size: 14px; }
+.chat-stream .thinking-block, .chat-stream .tool-activity, .chat-stream .help-card, .chat-stream .memory-proposal-card { border: 0 !important; background: transparent !important; box-shadow: none !important; border-radius: 0 !important; }
 
-/* 7) 正文排版统一到 DeepSeek 字号节奏 */
+/* 8) 输入区与对话头 */
+.chat-head { border-bottom: 0 !important; padding: 18px 30px 4px !important; }
+.chat-title { font-size: 18px !important; font-weight: 700 !important; }
+.chat-description { color: var(--claude-faint) !important; font-size: 12.5px !important; }
+.chat-kicker { color: var(--claude-faint) !important; font-size: 10.5px !important; letter-spacing: .12em; }
+.chat-context-strip .context-chip { border-color: var(--claude-line-soft); }
+.composer { border-radius: 22px !important; }
+.composer-hint { color: var(--claude-faint) !important; font-size: 11px !important; }
 .chat-stream .message-content { font-size: 14px !important; line-height: 1.75 !important; }
-.chat-stream .rich-content { font-size: 14px; line-height: 1.75; }
+
+/* 9) 入场动画（reduced-motion 尊重） */
+@keyframes sf-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.chat-stream .message { animation: sf-enter 150ms ease-out both; }
+@media (prefers-reduced-motion: reduce) { .chat-stream .message, .progress-pulse { animation: none !important; } .progress-card:not(.finished) .progress-narration:not(.empty)::after { animation: none; } }
+
+/* 10) 模式分离：构建模式不显示工作区区块与工作专属项（D-1 截断丢失，此处恢复） */
+.app-shell[data-mode="build"] .rail-workspace-section { display: none !important; }
+.app-shell[data-mode="build"] .work-only { display: none !important; }
+
+/* 11) kicker 用 ID 级选择器压制主题橙 */
+#chat-kicker.chat-kicker { color: var(--claude-faint) !important; }
+.chat-kicker { color: var(--claude-faint) !important; }

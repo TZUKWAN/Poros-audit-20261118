@@ -236,10 +236,15 @@ function applyTheme(theme: "light" | "dark"): void {
 }
 
 function initializeTheme(): void {
+  // ?theme=dark|light 优先（自动化验收/分享链接用），其次用户保存的偏好
   let theme: "light" | "dark" = "light";
   try {
-    const saved = window.localStorage.getItem("scenario-panel-theme");
-    if (saved === "dark" || saved === "light") theme = saved;
+    const param = new URLSearchParams(window.location.search).get("theme");
+    if (param === "dark" || param === "light") theme = param;
+    else {
+      const saved = window.localStorage.getItem("scenario-panel-theme");
+      if (saved === "dark" || saved === "light") theme = saved;
+    }
   } catch { /* use the product default */ }
   applyTheme(theme);
 }
@@ -590,7 +595,12 @@ function renderPreview(snap: PanelSnapshot): void {
   const sel = $("sel-view"); if (sel) {
     sel.replaceChildren();
     if (!snap.preview.selections.length) sel.append(textBlock("尚未选择能力", "inspector-subtitle"));
+    // 同名能力去重（7 个节点常选同一规划器，重复 5 行没有信息量）
+    const seen = new Set<string>();
     for (const item of snap.preview.selections) {
+      const key = `${item.name}|${item.source}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const row = node("div", "selection-row");
       const pill = textBlock(item.tier === "official" ? "官方" : item.tier === "curated" ? "策展" : "聚合", "tier-pill");
       const name = textBlock(item.name);
