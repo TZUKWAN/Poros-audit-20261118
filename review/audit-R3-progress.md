@@ -1,4 +1,22 @@
-# R3/R4 复验记录
+# R3/R4/R5 复验记录（终审完成）
+
+## R5 终验（2026-11-02，单 Explore close-read：R4 修复质量 + 最后角落）
+
+发现 5 项（1 P2 + 4 P3），全部修复；关键疑点 verified-ok：
+
+| # | 级别 | 仓库 | 问题 | 修复 |
+|---|------|------|------|------|
+| 1 | P2 | ares/metis | R4 重连窗口内三处 ws.send 无 readyState 守卫——断线期间 Enter/decide/abort 抛 InvalidStateError，乐观消息静默消失 | 三处守卫（decide 守卫置于乐观标记之前）；onSend 守卫通过后才本地推送 |
+| 2 | P3 | ares/metis | lastLocalDecisionGate 单槽——双击 CONFLICT 误还原已成功的首击卡片 | 服务端 CONFLICT 回显 decisionGate，客户端精确还原（快照 backfill 毫秒级自愈兜底） |
+| 3 | P3 | pi | shares getByToken/list 对全表 parse——一行坏数据致所有分享链接 500 | 逐行 safeParse 跳过坏行 |
+| 4 | P3 | pi | recoverAfterRestart 3 次失败静默——坏记录永远卡 running 每次启动重试 | 失败留痕 console.error |
+| 5 | P3 | pi | decide() 重复 gate 校验死代码（294 行已有） | 删除 R4 重复段 |
+
+**R5 verified-ok（关键疑点）**：
+- pi abort 清理 vs 恢复路径：abort 后 outcome="failed" 被 restore 过滤正确排除；crash 路径 pendingGate 保留且 run():187 正确重呈现 gate——双向安全。
+- ares/metis backfill 序号配对：驳回重跑（新卡片 ordinal 1 无配对 → 保持未决 ✓）；双构建各批准（mark 先于快照，配对不承担已决卡片 ✓）。
+- pi finishBuild 无双执行（run:done handler 与 .then 内联 finish 互斥路径验证）。
+- scheduler inFlight 无泄漏；decide 校验不会误伤虚拟用户；per-build RunController 闭包/GC 正确；commit message 与 diff 三仓一致。
 
 ## R4（2026-11-02，双 Explore 审计：pi 12 项 + ares/metis 10 项，全部修复）
 
