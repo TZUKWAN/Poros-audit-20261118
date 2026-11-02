@@ -529,7 +529,9 @@ export class PanelServer {
   /** 执行底座事件接入（集群监控视图 8.5） */
   attachClusterEvents(subscribe: (h: (e: ClusterEvent) => void) => void): void {
     subscribe((e) => {
+      // R3 审计#11：上限 500 条，防长跑内存膨胀
       this.clusterEvents.push(e);
+      if (this.clusterEvents.length > 500) this.clusterEvents.splice(0, this.clusterEvents.length - 500);
       this.broadcast({ kind: "cluster", event: e });
     });
   }
@@ -538,7 +540,9 @@ export class PanelServer {
   attachLoopEvents(loop: GoalLoop): void {
     this.deps.loop = loop;
     loop.on((e) => {
+      // R3 审计#11：上限 500 条，防长跑内存膨胀
       this.loopEvents.push(e);
+      if (this.loopEvents.length > 500) this.loopEvents.splice(0, this.loopEvents.length - 500);
       this.broadcast({ kind: "loop", event: e });
     });
   }

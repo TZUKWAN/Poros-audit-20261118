@@ -27,9 +27,17 @@ export class TaskScheduler {
     void this.tick().catch(report);
   }
 
-  stop(): void {
+  /** R3 审计#8：停止定时器并等待 in-flight 任务收尾（上限 30s，超时不强杀），
+   *  避免 shutdown 后后台仍在写 runs/artifacts。 */
+  async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    const pending = [...this.inFlight.values()];
+    if (pending.length === 0) return;
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise((r) => setTimeout(r, 30_000)),
+    ]);
   }
 
   async tick(now = new Date()): Promise<void> {

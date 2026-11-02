@@ -91,8 +91,19 @@ export function startLocalWebhook(options: LocalWebhookOptions): Promise<LocalWe
         res.writeHead(401).end();
         return;
       }
+      // R3 审计#9：请求体 1MB 上限——超大 POST 直接 413 并断开，防内存膨胀
       let body = "";
-      req.on("data", (c) => (body += String(c)));
+      let bodyBytes = 0;
+      const MAX_BODY_BYTES = 1_000_000;
+      req.on("data", (c) => {
+        bodyBytes += (c as Buffer).byteLength;
+        if (bodyBytes > MAX_BODY_BYTES) {
+          res.writeHead(413).end();
+          req.destroy();
+          return;
+        }
+        body += String(c);
+      });
       req.on("end", () => {
         res.writeHead(202, { "content-type": "application/json" });
         res.end(JSON.stringify({ accepted: true, alreadyFired: fired }));
@@ -104,9 +115,13 @@ export function startLocalWebhook(options: LocalWebhookOptions): Promise<LocalWe
         } catch {
           payload = body;
         }
-        void Promise.resolve(options.onStart(payload)).finally(() => {
-          setTimeout(() => server.close(), 50);
-        });
+        // R3 审计#9：onStart 可 reject（如能力调用失败），必须 catch——否则链尾
+        // unhandledRejection 在 Node 15+ 直接崩宿主进程。
+        void Promise.resolve(options.onStart(payload))
+          .catch((err: unknown) => console.error("[reactor-bridge] onStart failed:", err instanceof Error ? err.message : String(err)))
+          .finally(() => {
+            setTimeout(() => server.close(), 50);
+          });
       });
     });
     server.listen(options.port ?? 0, "127.0.0.1", () => {

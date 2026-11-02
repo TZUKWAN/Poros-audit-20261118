@@ -1364,7 +1364,14 @@ async function main(): Promise<void> {
     return { ok: false, runId, error: "任务运行未在规定时间内结束" };
   }) : undefined;
   scheduler?.start();
-  const shutdown = (): void => { scheduler?.stop(); void Promise.all([panel.stop(), syncServer?.stop()]).finally(() => process.exit(0)); };
+  // R3 审计#8：scheduler.stop 现在等待 in-flight 任务收尾，并入 shutdown 链
+  const shutdown = (): void => {
+    void Promise.all([
+      scheduler?.stop() ?? Promise.resolve(),
+      panel.stop(),
+      syncServer?.stop() ?? Promise.resolve(),
+    ]).finally(() => process.exit(0));
+  };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
   const banner = [
