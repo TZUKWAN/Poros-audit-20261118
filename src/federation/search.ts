@@ -14,6 +14,9 @@ export interface FederatedResult {
 }
 
 export class FederatedSearch {
+  /** R2 体验：分源完成回调（面板显示 "n/8 源完成" 进度） */
+  onSourceSettled?: (sourceId: SourceId, ok: boolean, completed: number, total: number) => void;
+
   constructor(
     private adapters: CapabilityAdapter[],
     private cache?: RegistryCache,
@@ -36,12 +39,29 @@ export class FederatedSearch {
 
     // 1.4.1 八源并行扇出（Promise.allSettled），单源失败折叠为状态报告
     const activeAdapters = this.adapters.filter((a) => a.supports(query));
+    // R2 体验：分源完成即回调（面板可在检索中显示"n/8 源完成"进度）
+    let completedSources = 0;
+    const markDone = (sourceId: SourceId, ok: boolean): void => {
+      completedSources += 1;
+      this.onSourceSettled?.(sourceId, ok, completedSources, activeAdapters.length);
+    };
     const settled = await Promise.allSettled(
-      activeAdapters.map((a) => a.search({ ...query, limit: query.limit ?? this.topN })),
+      activeAdapters.map(async (a) => {
+        try {
+          return await a.search({ ...query, limit: query.limit ?? this.topN });
+        } catch (err) {
+          markDone(a.source.id, false);
+          throw err;
+        }
+      }),
     );
     const results: AdapterResult[] = settled.map((s, i) => {
       const adapter = activeAdapters[i] as CapabilityAdapter;
-      if (s.status === "fulfilled") return s.value;
+      if (s.status === "fulfilled") {
+        markDone(adapter.source.id, s.value.status.ok);
+        return s.value;
+      }
+      markDone(adapter.source.id, false);
       return {
         capabilities: [],
         status: makeStatus(

@@ -53,7 +53,7 @@ export interface ScenarioRunResult {
 }
 
 export async function runScenario(options: RunScenarioOptions): Promise<ScenarioRunResult> {
-  const search = await federatedSearchFactory();
+  const { search } = await federatedSearchFactory();
   const invoker = new CapabilityInvoker();
   const planner = createConfiguredPlanner();
   const library = options.library ?? new ScenarioLibrary({ store: jsonStore({ filePath: path.join(scenarioDataRoot(), "scenarios.json"), schema: ScenarioRecordSchema }) });

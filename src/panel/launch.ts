@@ -265,7 +265,11 @@ async function main(): Promise<void> {
     };
     return { tools: definitions, executor };
   };
-  const search = await federatedSearchFactory();
+  const { search, instance: searchInstance } = await federatedSearchFactory();
+  // R2 体验：分源完成进度直接进聊天流（检索阶段不再静默 30-60s）
+  searchInstance.onSourceSettled = (sourceId: string, ok: boolean, completed: number, total: number) => {
+    panel.pushChat({ role: "build-status", tone: "info", text: `检索进度 ${completed}/${total}：${sourceId} ${ok ? "完成" : "失败（已跳过）"}`, ts: Date.now() });
+  };
   const searchForBuild = async (query: string, limit = 5): Promise<Awaited<ReturnType<typeof search>>> => {
     // 构建阶段必须有一个可验证的本地基线能力。外部联邦源主要返回
     // git/cli/MCP 目录条目，它们不能在面板进程内直接执行；如果把它们
