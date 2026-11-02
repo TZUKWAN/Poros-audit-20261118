@@ -46,24 +46,29 @@ export class TaskScheduler {
       try {
         const result = await withTimeout(operation, task.timeoutMs);
         if (result.skipped) return;
+        // R1 审计#11：回写前重读最新值做增量合并（tick 期间用户可能并发
+        // update-task 修改 failureCount/runCount/lastRunId，直接用起点快照会互相覆盖）
+        const latest = await this.repo.get(task.id);
         await this.repo.update(task.id, {
           lastRunId: result.runId ?? null,
           lastRunAt: new Date().toISOString(),
           lastRunStatus: result.ok ? "succeeded" : "failed",
           lastError: result.ok ? null : (result.error ?? "任务执行失败").slice(0, 500),
-          failureCount: result.ok ? task.failureCount : task.failureCount + 1,
-          runCount: task.runCount + 1,
+          failureCount: result.ok ? (latest?.failureCount ?? task.failureCount) : (latest?.failureCount ?? task.failureCount) + 1,
+          runCount: (latest?.runCount ?? task.runCount) + 1,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         timedOut = message === "scheduled task timeout";
+        const latest = await this.repo.get(task.id).catch(() => undefined);
         await this.repo.update(task.id, {
-          lastRunId: null,
+          // 超时路径保留 operation 实际产出的 runId（若有）；仅在确认无产出时清空
+          lastRunId: latest?.lastRunId ?? null,
           lastRunAt: new Date().toISOString(),
           lastRunStatus: message === "scheduled task timeout" ? "timeout" : "failed",
           lastError: message.slice(0, 500),
-          failureCount: task.failureCount + 1,
-          runCount: task.runCount + 1,
+          failureCount: (latest?.failureCount ?? task.failureCount) + 1,
+          runCount: (latest?.runCount ?? task.runCount) + 1,
         });
       } finally {
         if (timedOut) {

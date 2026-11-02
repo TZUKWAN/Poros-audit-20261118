@@ -271,8 +271,9 @@ async function readAuthorizedFile(file: RuntimeContext["files"][number], allowed
   }
   // With an allow-list boundary, always read the canonical file. A caller
   // supplied content field may have been prepared through a symlink path and
-  // must not bypass the realpath check.
-  if (!allowedRoot && file.content !== undefined) return file.content;
+  // must not bypass the realpath check. (R1 审计#12：此处原有一段不可达的
+  // `!allowedRoot && content!==undefined` 分支，制造了有保护的假象——已在
+  // 251 行覆盖全部无边界路径并返回。)
   try {
     return await readFile(canonicalTarget, "utf8");
   } catch {
