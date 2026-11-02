@@ -543,6 +543,12 @@ async function main(): Promise<void> {
       }
       // 先占用启动锁，再进行解析、匹配和检索，避免两个 WS 消息在首个 await 前同时通过检查。
       launchBusy = true;
+      // R3 审计#3：锁后到 orch.run() 的 finally 接管前存在多个裸 await（invokerForProject/
+      // provider/secrets 解析/parseIntentForReuse/runtimeContext 组装的整段 IO），任一
+      // reject 都会让 launchBusy 永真 → 面板从此对一切 start-build 回"已有构建进行中"。
+      // 整体包一层兜底：异常路径清锁 + 推终端错误消息 + 返回失败（中间的正常早退
+      // 分支各自已清锁，return 不会触发 catch）。
+      try {
       controller = new RunController();
       panel.setController(controller);
       // Every terminal chat event carries the run that produced it. This
@@ -970,6 +976,17 @@ async function main(): Promise<void> {
           }
         });
       return { ok: true };
+      } catch (setupError: unknown) {
+        // activePlannerAbort/clearPlannerAbort/panelRunId 均在 try 块内声明，此处不可达；
+        // planner 残留仅为一次性对象引用，下一次 start-build 会重建全部运行状态。
+        launchBusy = false;
+        const message = setupError instanceof Error ? setupError.message : String(setupError);
+        const failedRunId = panel.currentRunId;
+        panel.pushChat(failedRunId
+          ? { role: "build-status", tone: "err", text: `构建启动失败：${message}`, runId: failedRunId, terminal: true, ts: Date.now() }
+          : { role: "build-status", tone: "err", text: `构建启动失败：${message}`, terminal: true, ts: Date.now() });
+        return { ok: false, error: message };
+      }
     },
     onTestScenario: async (scenarioId) => {
       const scenario = await library.get(scenarioId);
