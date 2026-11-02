@@ -3197,8 +3197,15 @@ export class PanelServer {
   }
 
   private async pushSnapshot(): Promise<void> {
-    const snap = await this.snapshot();
-    this.broadcast({ kind: "snapshot", snapshot: snap });
+    // R4 审计P1：snapshot() 内含十余个 await IO（runs/library/memoryTree/history/
+    // repository/settings），全仓 ~35 处 `void this.pushSnapshot()` 调用点任一 fs 抖动
+    // 都会成为 unhandledRejection 崩掉面板进程。在这里一处兜底，全部调用点同时受保护。
+    try {
+      const snap = await this.snapshot();
+      this.broadcast({ kind: "snapshot", snapshot: snap });
+    } catch (err) {
+      console.error("[panel] pushSnapshot failed:", err instanceof Error ? err.message : String(err));
+    }
   }
 
   get clientCount(): number {

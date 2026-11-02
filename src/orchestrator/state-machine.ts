@@ -330,6 +330,15 @@ export class Orchestrator {
     if (!resolve) {
       throw new ScenarioError({ code: ScenarioErrorCode.CONFLICT, message: "no gate pending", phase: "infra" });
     }
+    // R4 审计P2（与 ares/metis 同步）：决策必须针对当前 pending 的 gate。校验失败时
+    // 不清 decideResolve——真正 pending 的等待继续存活。
+    if (this.context.pendingGate !== parsed.data.gate) {
+      throw new ScenarioError({
+        code: ScenarioErrorCode.CONFLICT,
+        message: `gate ${parsed.data.gate} is not the pending gate (${this.context.pendingGate ?? "none"})`,
+        phase: "infra",
+      });
+    }
     this.decideResolve = undefined;
     resolve({ decision: parsed.data, decidedBy });
   }
@@ -482,6 +491,11 @@ export class Orchestrator {
   private async waitForDecision(): Promise<{ decision: GateDecision; decidedBy: "human" | "virtual-user" }> {
     return await new Promise<{ decision: GateDecision; decidedBy: "human" | "virtual-user" }>((resolve, reject) => {
       const onAbort = () => {
+        // R4 审计P3：abort 时必须清 decideResolve 与 pendingGate——否则迟到的 decide()
+        // 会 resolve 已被遗弃的等待（被静默吞掉而非报 CONFLICT），且持久化的上下文
+        // 带着死闸门，恢复构建时重新呈现已失败 run 的 gate。
+        this.decideResolve = undefined;
+        this.ctx.pendingGate = null;
         reject(new ScenarioError({ code: ScenarioErrorCode.CANCELLED, message: "orchestrator aborted while waiting for gate decision", phase: "infra" }));
       };
       if (this.abortController.signal.aborted) {
@@ -490,6 +504,7 @@ export class Orchestrator {
       }
       this.abortController.signal.addEventListener("abort", onAbort, { once: true });
       this.decideResolve = (d) => {
+        this.decideResolve = undefined;
         this.abortController.signal.removeEventListener("abort", onAbort);
         resolve(d);
       };

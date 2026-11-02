@@ -5,7 +5,9 @@ export interface ScheduledTaskRunResult { ok: boolean; runId?: string; error?: s
 /** 轻量本地任务调度器：重启后从持久化任务表恢复，单进程内保证同一任务不重入。 */
 export class TaskScheduler {
   private timer: NodeJS.Timeout | undefined;
-  private readonly inFlight = new Set<string>();
+  // R4 审计P2：存 operation promise（而非 task id 字符串）——R3 版 stop() 对
+  // ["t1"] 调 Promise.allSettled 立即 settle，"等待 in-flight 收尾"是空操作。
+  private readonly inFlight = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly repo: ScheduledTaskRepository,
@@ -44,12 +46,12 @@ export class TaskScheduler {
     const tasks = await this.repo.list(this.workspaceId);
     await Promise.all(tasks.map(async (task) => {
       if (!task.enabled || (task.maxRuns !== null && task.runCount >= task.maxRuns) || this.inFlight.has(task.id) || !isDue(task.schedule, task.lastRunAt, now)) return;
-      this.inFlight.add(task.id);
       // Keep the original operation promise separate from the timeout race.
       // Timing out the scheduler must not release this guard while the
       // underlying run is still mutating runs/artifacts; otherwise the next
       // tick can start the same task a second time.
       const operation = Promise.resolve().then(() => this.run(task));
+      this.inFlight.set(task.id, operation);
       let timedOut = false;
       try {
         const result = await withTimeout(operation, task.timeoutMs);

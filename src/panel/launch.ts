@@ -852,10 +852,14 @@ async function main(): Promise<void> {
       orch.on("run:done", ({ context }) => {
         if (!buildWasClarified || context.awaitingUser) return;
         buildWasClarified = false;
-        void finishBuild(context, requirement, runPlanner, buildId, runBinding).finally(() => {
-          currentDone = true;
-          launchBusy = false;
-        });
+        // R4 审计P1：finishBuild 内多个 await IO（library.save/writeFile/memories/
+        // artifacts/runs.update/refresh）任一 reject 都不得成为链尾 unhandledRejection。
+        void finishBuild(context, requirement, runPlanner, buildId, runBinding)
+          .catch((err: unknown) => { void failBuild(err, runBinding?.runId ?? null).catch(() => undefined); })
+          .finally(() => {
+            currentDone = true;
+            launchBusy = false;
+          });
       });
       // Link the durable RunProduct row to its persisted BuildContext before
       // the first state transition. Restart recovery must use this stable
@@ -1310,7 +1314,10 @@ async function main(): Promise<void> {
     restoredOrchestrator.on("run:done", ({ context }) => {
       if (!restoredWasClarified || context.awaitingUser) return;
       restoredWasClarified = false;
-      void finishBuild(context, restored.requirement, planner, restored.id, restoredBinding).finally(() => { currentDone = true; launchBusy = false; });
+      // R4 审计P1：同上方 run:done handler——finishBuild reject 不得成为 unhandledRejection。
+      void finishBuild(context, restored.requirement, planner, restored.id, restoredBinding)
+        .catch((err: unknown) => { void failBuild(err, restoredBinding.runId).catch(() => undefined); })
+        .finally(() => { currentDone = true; launchBusy = false; });
     });
     panel.resumeBuild(restoredRun?.id);
     if (restored.awaitingUser && restoredRun?.id) panel.notifyBuildAwaitingUser(restoredRun.id, restored.awaitingUser);
@@ -1364,12 +1371,15 @@ async function main(): Promise<void> {
     return { ok: false, runId, error: "任务运行未在规定时间内结束" };
   }) : undefined;
   scheduler?.start();
-  // R3 审计#8：scheduler.stop 现在等待 in-flight 任务收尾，并入 shutdown 链
+  // R3 审计#8：scheduler.stop 现在等待 in-flight 任务收尾；R4：加 10s 总超时防任一 stop 挂起阻塞退出。
   const shutdown = (): void => {
-    void Promise.all([
-      scheduler?.stop() ?? Promise.resolve(),
-      panel.stop(),
-      syncServer?.stop() ?? Promise.resolve(),
+    void Promise.race([
+      Promise.all([
+        scheduler?.stop() ?? Promise.resolve(),
+        panel.stop(),
+        syncServer?.stop() ?? Promise.resolve(),
+      ]),
+      new Promise((r) => setTimeout(r, 10_000)),
     ]).finally(() => process.exit(0));
   };
   process.once("SIGINT", shutdown);

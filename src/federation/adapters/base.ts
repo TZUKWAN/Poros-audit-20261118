@@ -42,6 +42,9 @@ export async function httpFetch(
         },
       });
       if ((resp.status === 429 || resp.status >= 500) && attempt < retries) {
+        // R4 审计P3：重试前必须消费/丢弃响应体——undici 在 body 被消费或 GC 前
+        // 一直占着 socket，8 源共享连接池，持续 5xx 会把池耗尽拖垮其它出站调用。
+        await resp.body?.cancel().catch(() => undefined);
         await sleep(baseBackoffMs * 2 ** attempt + Math.random() * 250, signal);
         continue;
       }
