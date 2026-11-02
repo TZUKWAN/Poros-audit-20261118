@@ -9,6 +9,8 @@ import { BuildAwaitingUserError } from "./state-machine.js";
 import { topoSort, parallelGroups } from "./dag.js";
 import { canonicalName } from "@/federation/types.js";
 import { routeDomain, profileOf } from "@/domains/profile.js";
+import { inferPipelineFromText } from "@/domains/ares/domain-dag.js";
+import { inferResearchParadigm } from "@/domains/metis/metis-knowledge.js";
 
 /**
  * 2.3 阶段处理器。所有外部依赖（LLM/检索器/探活器/执行/蒸馏）可注入 —— 测试用桩，
@@ -46,6 +48,7 @@ export async function handleParsing(ctx: BuildContext, deps: HandlerDeps): Promi
         ctx.intent = parsed.data;
         ctx.planner.actual = "llm";
         ctx.planner.fallbackReason = deps.llm.lastFallbackReason ?? null;
+        applySceneFlowDomain(ctx.intent);
         return;
       }
       ctx.planner.actual = "template";
@@ -57,6 +60,14 @@ export async function handleParsing(ctx: BuildContext, deps: HandlerDeps): Promi
     }
   }
   ctx.intent = templateIntent(ctx.requirement);
+  applySceneFlowDomain(ctx.intent);
+}
+
+/** SceneFlow 领域填充：意图缺领域信号时按文本落域——DAG 模板靠它选分支（ares L1-L6 / metis 范式）。 */
+function applySceneFlowDomain(intent: Intent): void {
+  const routed = routeDomain(intent.goal);
+  if (routed === "ares") intent.domain = inferPipelineFromText(intent.goal);
+  else if (routed === "metis") intent.domain = inferResearchParadigm(intent.goal);
 }
 
 const IntentSchema4 = z.object({

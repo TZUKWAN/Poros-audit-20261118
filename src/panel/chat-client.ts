@@ -1175,18 +1175,26 @@ function renderRichText(value: unknown): HTMLElement {
 }
 
 /** SceneFlow 进度卡：构建过程内联进度——步进器 + 流式叙述 + 分源微状态，全程一张卡原地更新。 */
+/** 完成摘要：DeepSeek 式一行（用时 + 步数） */
+function progressDoneSummary(card: ProgressCardMessage): string {
+  const seconds = card.finishedAt !== null ? Math.max(1, Math.round((card.finishedAt - card.startedAt) / 1000)) : 0;
+  return `已完成构建 · 用时 ${seconds} 秒 · ${card.steps.length} 步`;
+}
+
+/** SceneFlow 进度卡：DeepSeek 思考块式——进行中展开实时流出，完成后折叠为一行摘要。 */
 function renderProgressCard(card: ProgressCardMessage): HTMLElement {
+  const done = card.finishedAt !== null;
   const root = node("article", "message progress-message assistant");
-  const cardEl = node("div", `progress-card${card.finishedAt !== null ? " finished" : ""}`);
+  const cardEl = node("div", `progress-card ${done ? "finished" : "live"}`);
   cardEl.dataset.runId = card.runId;
 
   const head = node("div", "progress-card-head");
   const pulse = node("span", "progress-pulse");
   pulse.setAttribute("aria-hidden", "true");
   const phase = node("span", "progress-phase");
-  phase.textContent = card.finishedAt !== null ? "完成" : card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
+  phase.textContent = done ? "完成" : card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
   const title = node("span", "progress-title");
-  title.textContent = card.finishedAt !== null ? "构建流程已结束" : "SceneFlow 正在构建";
+  title.textContent = done ? progressDoneSummary(card) : "正在思考与执行";
   const sourceCount = node("span", "progress-source-count");
   sourceCount.textContent = card.sourcesTotal > 0 ? `${card.sources.filter((s) => s.done).length} / ${card.sourcesTotal} 源` : "";
   head.append(pulse, phase, title, sourceCount);
@@ -1207,7 +1215,7 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
 
   const details = node("details", "progress-details");
   const summary = node("summary", "progress-details-summary");
-  summary.textContent = `执行明细（${card.steps.length}）`;
+  summary.textContent = done ? progressDoneSummary(card) : `思考与执行中（${card.steps.length}）`;
   const steps = node("div", "progress-steps");
   steps.replaceChildren(...card.steps.map((step) => {
     const row = node("div", "progress-step-row");
@@ -1220,6 +1228,8 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
     return row;
   }));
   details.append(summary, steps);
+  // DeepSeek 行为：进行中默认展开（过程实时可见），完成即折叠
+  if (!done) details.setAttribute("open", "");
 
   cardEl.append(head, narration, line, chips, details);
   root.append(cardEl);
@@ -2016,7 +2026,10 @@ function connect(): void {
       hasReceivedSnapshot = true;
       currentSnapshot = nextSnapshot;
       panelMode = currentSnapshot.mode ?? panelMode; applyMode(panelMode); renderRight(currentSnapshot);
-      messages = normalizeChatMessages(Array.isArray(currentSnapshot.chat) ? currentSnapshot.chat : []); renderChat();
+      messages = normalizeChatMessages(Array.isArray(currentSnapshot.chat) ? currentSnapshot.chat : []);
+      // SceneFlow：进度卡不在服务端聊天历史里，快照重建后按 runId 挂回
+      reattachProgressCards();
+      renderChat();
       setBusy(currentSnapshot.busy);
     } else if (payload.kind === "chat") {
       const message = payload.message as Record<string, unknown>;
@@ -2086,6 +2099,26 @@ function findProgressCard(runId: string): ProgressCardMessage | undefined {
   return undefined;
 }
 
+/** 进度卡独立于聊天历史持久（服务端快照不含进度事件，重建后按 runId 重新挂回） */
+const progressCardStore = new Map<string, ProgressCardMessage>();
+
+function rememberProgressCard(card: ProgressCardMessage): void {
+  progressCardStore.delete(card.runId);
+  progressCardStore.set(card.runId, card);
+  while (progressCardStore.size > 30) {
+    const oldest = progressCardStore.keys().next().value;
+    if (oldest === undefined) break;
+    progressCardStore.delete(oldest);
+  }
+}
+
+/** 快照重建后把存储中的进度卡（按插入序）挂回消息流 */
+function reattachProgressCards(): void {
+  for (const card of progressCardStore.values()) {
+    if (!findProgressCard(card.runId)) messages.push(card as unknown as Record<string, unknown>);
+  }
+}
+
 function applyProgress(payload: Record<string, unknown>): void {
   const runId = String(payload.runId ?? "");
   if (!runId) return;
@@ -2095,6 +2128,7 @@ function applyProgress(payload: Record<string, unknown>): void {
     card = { role: "progress-card", runId, phase: null, line: line ?? "", narration: "", sources: [], sourcesTotal: 0, steps: [], startedAt: Date.now(), finishedAt: null, ts: Date.now() };
     pushMessage(card as unknown as Record<string, unknown>);
   }
+  rememberProgressCard(card);
   if (typeof payload.phase === "string") card.phase = payload.phase;
   if (line) {
     card.line = line;
@@ -2127,6 +2161,7 @@ function applyProgressDelta(payload: Record<string, unknown>): void {
     card = { role: "progress-card", runId, phase: null, line: "", narration: "", sources: [], sourcesTotal: 0, steps: [], startedAt: Date.now(), finishedAt: null, ts: Date.now() };
     pushMessage(card as unknown as Record<string, unknown>);
   }
+  rememberProgressCard(card);
   card.narration += delta;
   // 流式增量走定点 DOM 更新：不整列表重渲染，打字机手感顺滑
   updateProgressDom(card, true);
@@ -2169,7 +2204,22 @@ function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): void {
       return row;
     }));
   }
-  root.classList.toggle("finished", card.finishedAt !== null);
+  const done = card.finishedAt !== null;
+  const cardEl = root.querySelector<HTMLElement>(".progress-card");
+  if (cardEl) {
+    cardEl.classList.toggle("finished", done);
+    cardEl.classList.toggle("live", !done);
+  }
+  // DeepSeek 行为：完成即折叠 + 摘要行更新；进行中保持展开并刷步数
+  const summaryEl = root.querySelector<HTMLElement>(".progress-details-summary");
+  if (summaryEl) summaryEl.textContent = done ? progressDoneSummary(card) : `思考与执行中（${card.steps.length}）`;
+  const detailsEl = root.querySelector<HTMLDetailsElement>(".progress-details");
+  if (detailsEl) detailsEl.open = !done;
+  const phaseTextEl = root.querySelector<HTMLElement>(".progress-phase");
+  if (phaseTextEl) phaseTextEl.textContent = done ? "完成" : card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
+  const titleEl = root.querySelector<HTMLElement>(".progress-title");
+  if (titleEl) titleEl.textContent = done ? progressDoneSummary(card) : "正在思考与执行";
+  root.classList.toggle("finished", done);
 }
 
 function mount(): void {
