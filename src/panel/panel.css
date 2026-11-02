@@ -1722,3 +1722,63 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chat-title { font-size: 18px; font-weight: 700; }
 .chat-description { color: var(--subtle); font-size: 12.5px; }
 .chat-kicker { font-size: 10.5px; letter-spacing: .12em; }
+
+/* ═══ DeepSeek 输出排版（最终层）：AI 输出全部为纯文字排版，无卡无框无底色 ═══ */
+
+/* 1) status-card 全家 → 纯文本块 */
+.chat-stream .status-card,
+.chat-stream .stream-card,
+.chat-stream .event-card,
+.chat-stream .ui-command-card {
+  padding: 0 !important; border: 0 !important; border-left: 0 !important; border-radius: 0 !important;
+  background: transparent !important; box-shadow: none !important;
+  color: var(--text) !important; font-size: 14px !important; line-height: 1.75 !important;
+}
+.chat-stream .status-card.ok { color: var(--text) !important; }
+.chat-stream .status-card.err { color: var(--danger) !important; }
+.chat-stream .status-card.warning { color: var(--warning) !important; }
+
+/* 2) 执行过程（activity）→ 思考块语言：细左线 + muted 小字 */
+.chat-stream .activity-card {
+  border: 0 !important; background: transparent !important; border-left: 2px solid rgba(139, 124, 255, .28) !important;
+  border-radius: 0 !important; padding: 2px 0 2px 14px !important; box-shadow: none !important;
+}
+.chat-stream .activity-card .activity-header { color: var(--subtle); }
+.chat-stream .activity-card .activity-title { font-size: 12px; color: var(--subtle); font-weight: 500; }
+.chat-stream .activity-card .activity-count { font-size: 11px; color: var(--subtle); }
+.chat-stream .activity-card .activity-row { border: 0; }
+.chat-stream .activity-card .activity-text { color: var(--muted); font-size: 12.5px; }
+
+/* 3) run-group 容器压平：只有折叠行 */
+.chat-stream .run-group-card { border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; }
+
+/* 4) 闸门卡 → 无框分区：小标题 + 正文 + 静按钮 */
+.chat-stream .gate-card {
+  padding: 4px 0 0 0 !important; border: 0 !important; border-radius: 0 !important;
+  background: transparent !important; box-shadow: none !important;
+}
+.chat-stream .gate-card .gate-step { color: var(--subtle); font-size: 11.5px; letter-spacing: .08em; }
+.chat-stream .gate-card .gate-title { color: var(--text); font-size: 15px; font-weight: 650; }
+.chat-stream .gate-card .gate-pending { color: var(--accent-2); font-size: 11.5px; }
+.chat-stream .gate-card .gate-guidance { color: var(--muted); font-size: 13px; line-height: 1.7; margin-top: 4px; }
+.chat-stream .gate-card .gate-field { background: rgba(255, 255, 255, .04) !important; border: 1px solid var(--line) !important; border-radius: 10px !important; }
+.chat-stream .gate-card .receipt { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; color: var(--success) !important; font-size: 13px; margin-top: 8px; }
+.chat-stream .gate-approve { border-radius: 999px !important; padding: 8px 18px !important; font-size: 12.5px !important; }
+.chat-stream .gate-reject { border-radius: 999px !important; padding: 8px 18px !important; font-size: 12.5px !important; }
+
+/* 5) awaiting-user → 无框提问 + 输入 */
+.chat-stream .awaiting-user-card {
+  border: 0 !important; background: transparent !important; border-left: 2px solid rgba(243, 187, 114, .5) !important;
+  border-radius: 0 !important; padding: 2px 0 2px 14px !important; box-shadow: none !important;
+}
+.chat-stream .awaiting-user-question { color: var(--text) !important; font-size: 14px; }
+
+/* 6) thinking / tool / help / memory 提议 → 全部压平 */
+.chat-stream .thinking-block, .chat-stream .tool-activity, .chat-stream .help-card,
+.chat-stream .memory-proposal-card {
+  border: 0 !important; background: transparent !important; box-shadow: none !important; border-radius: 0 !important;
+}
+
+/* 7) 正文排版统一到 DeepSeek 字号节奏 */
+.chat-stream .message-content { font-size: 14px !important; line-height: 1.75 !important; }
+.chat-stream .rich-content { font-size: 14px; line-height: 1.75; }
