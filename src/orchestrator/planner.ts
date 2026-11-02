@@ -1,7 +1,10 @@
 import type { Intent, RuntimeContext } from "./context.js";
 import type { HandlerDeps } from "./handlers.js";
 
-export type ScenarioPlanner = NonNullable<HandlerDeps["llm"]>;
+export type ScenarioPlanner = NonNullable<HandlerDeps["llm"]> & {
+  /** SceneFlow 流式目标叙述（可选能力：本地规划器无模型则缺省，进度卡仅少一段叙述） */
+  narrateGoal?: (requirement: string, onDelta: (delta: string) => void, signal?: AbortSignal) => Promise<void>;
+};
 
 export interface OpenRouterConfig {
   apiKey: string;
@@ -92,6 +95,69 @@ export class OpenRouterPlanner implements ScenarioPlanner {
       "Return only valid JSON matching {nodes:{id:string,title:string,deps:string[],expectedOutput:string}[],clarification?:{question:string,inputs:{name:string,type:\"string\"|\"path\"|\"url\"|\"number\",description:string}[]}}. If a missing or ambiguous user choice prevents a safe DAG, return clarification and no guessed node; otherwise omit clarification. Build a minimal acyclic task graph.",
       formatPlannerInput(JSON.stringify(intent), context, clarificationAnswers),
     );
+  }
+
+  /**
+   * SceneFlow 真流式：构建开始时用一小段流式文本向用户复述目标与打算（非 JSON），
+   * 每个 delta 经 onDelta 直达进度卡。任何失败都静默——叙述是增强，不是依赖。
+   */
+  async narrateGoal(requirement: string, onDelta: (delta: string) => void, signal?: AbortSignal): Promise<void> {
+    const runSignal = signal ?? this.abortSignal;
+    const apiKey = this.config.apiKey;
+    if (!apiKey) return;
+    const timeout = AbortSignal.timeout(this.timeoutMs);
+    const model = this.model;
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+          accept: "text/event-stream",
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.3,
+          max_tokens: 160,
+          stream: true,
+          messages: [
+            { role: "system", content: "你是 SceneFlow 工作台的构建助手。用不超过两句话、第一人称向用户复述你理解的目标和你即将做的事。直接输出正文，不要标题、列表、引号或寒暄。" },
+            { role: "user", content: requirement.slice(0, 500) },
+          ],
+        }),
+        signal: runSignal && typeof AbortSignal.any === "function" ? AbortSignal.any([runSignal, timeout]) : timeout,
+      });
+      if (!response.ok || !response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        while (true) {
+          const next = await reader.read();
+          buffer += decoder.decode(next.value ?? new Uint8Array(), { stream: !next.done });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const data = line.slice(5).trim();
+            if (!data || data === "[DONE]") continue;
+            try {
+              const body = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
+              const chunk = body.choices?.[0]?.delta?.content ?? "";
+              if (chunk) onDelta(chunk);
+            } catch {
+              /* keepalive 片段忽略 */
+            }
+          }
+          if (next.done) break;
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+      }
+    } catch {
+      /* 叙述失败静默：进度卡没有这段文字也完全可用 */
+    }
   }
 
   private async complete(instruction: string, input: string): Promise<unknown> {

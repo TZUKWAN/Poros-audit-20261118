@@ -621,6 +621,20 @@ export class PanelServer {
   private historyPersistenceError: string | null = null;
   private static readonly MAX_PERSISTED_MESSAGES = 500;
 
+  /**
+   * SceneFlow 进度通道：构建过程叙述/分源检索/流式叙述增量都走这里——
+   * 只广播不入聊天历史，客户端按 runId 原地更新那一张进度卡。
+   * 聊天流最终形态：用户消息 → 进度卡(1) → 闸门卡片 → 终态卡。
+   */
+  pushProgress(runId: string | null, payload: Record<string, unknown>): void {
+    this.broadcast({ kind: "progress", runId: runId ?? null, ...payload, ts: Date.now() });
+  }
+
+  /** 编排器阶段迁移 → 进度卡步进器（phase key + 人话行） */
+  pushPhaseProgress(runId: string | null, phase: string): void {
+    this.pushProgress(runId, { phase, line: phaseProgressText(phase) });
+  }
+
   pushChat(message: Record<string, unknown>): void {
     // A worker can finish after the user has switched sessions (termination
     // deliberately unlocks navigation before every provider callback settles).
@@ -2149,7 +2163,8 @@ export class PanelServer {
       await this.deps.runs?.create({ id: runId, workspaceId: this.workspace?.id ?? "workspace-local", projectId: executionProjectId, sessionId: this.sessionId, mode: action.mode, scenarioId: action.scenarioId ?? null, providerId: selectedProvider?.id ?? providerSettings?.providerId ?? null, model: runModel, status: "running", requirement: action.requirement.trim(), startedAt: new Date().toISOString(), finishedAt: null, error: null, retryCount: action.retryCount ?? 0, details: { source: action.source ?? "user" } });
       if (this.workspace && this.deps.memories) {
         const enabledMemoryCount = (await this.visibleMemories()).filter((item) => item.enabled).length;
-        if (enabledMemoryCount > 0) this.pushChat({ role: "build-status", tone: "info", text: `当前上下文包含 ${enabledMemoryCount} 条启用 Memory，运行记录会保留来源。`, ts: Date.now() });
+        // SceneFlow：上下文提示进进度卡，聊天流只留 用户消息/进度卡/闸门/终态
+        if (enabledMemoryCount > 0) this.pushProgress(runId, { line: `当前上下文包含 ${enabledMemoryCount} 条启用 Memory，运行记录会保留来源。`, phase: "parsing" });
       }
       if (action.scenarioId && this.deps.library && !selectedScenario) {
         this.sessionLocked = false;
@@ -3330,11 +3345,11 @@ function tokenBudgetForModel(model: string, maxTokens: number): Record<string, n
 export function defaultPageHtml(): string {
   return `<!doctype html>
 <html lang="zh">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>场景工作台</title><link rel="stylesheet" href="/app.css?v=20261020-ux4"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SceneFlow</title><link rel="stylesheet" href="/app.css?v=20261020-ux4"></head>
 <body>
   <div class="app-shell" data-mode="work">
       <header class="topbar" role="banner">
-      <div class="brand"><div class="brand-mark">S</div><div><div class="brand-title">场景工作台</div><div class="brand-subtitle">让场景负责重复工作，让构建负责长期能力</div></div></div>
+      <div class="brand"><div class="brand-mark">S</div><div><div class="brand-title">SceneFlow</div><div class="brand-subtitle">一句话构建，处处复用</div></div></div>
        <div class="mode-switch" role="tablist" aria-label="工作模式"><button type="button" class="mode-btn active" data-mode="work" role="tab" aria-selected="true" aria-controls="chat-panel" tabindex="0">工作模式</button><button type="button" class="mode-btn" data-mode="build" role="tab" aria-selected="false" aria-controls="chat-panel" tabindex="-1">场景构建</button></div>
        <div class="topbar-spacer"></div><button id="open-rail" class="ghost-btn responsive-rail-toggle" type="button" aria-expanded="false" aria-controls="workspace-rail" aria-label="打开工作区侧栏">☰</button><button id="open-search" class="ghost-btn" type="button" onclick="document.getElementById('search-modal')?.classList.remove('hidden')">⌕ 搜索</button><button id="open-context" class="ghost-btn" type="button">⌁ 上下文</button><button id="open-shares" class="ghost-btn" type="button">⇧ 分享</button><button id="open-runs" class="ghost-btn" type="button" onclick="document.getElementById('runs-modal')?.classList.remove('hidden')">▶ 运行记录</button><button id="open-inspector" class="ghost-btn responsive-inspector-toggle" type="button" aria-expanded="false" aria-controls="workspace-inspector">▣ 任务详情</button><button id="open-tasks" class="ghost-btn" type="button" onclick="document.getElementById('tasks-modal')?.classList.remove('hidden')">◷ 任务</button><button id="open-connectors" class="ghost-btn" type="button" onclick="document.getElementById('connector-modal')?.classList.remove('hidden')">⌘ 连接器</button><button id="open-settings" class="ghost-btn" type="button" onclick="document.getElementById('settings-modal')?.classList.remove('hidden')">⚙ 设置</button><button id="toggle-theme" class="ghost-btn theme-toggle" type="button" aria-label="切换到暗色主题" title="切换主题">☾</button><button id="open-more" class="ghost-btn utility-more" type="button" aria-expanded="false">⋯ 更多</button><div class="connection"><span class="connection-dot" id="connection-dot" aria-hidden="true"></span><span id="connection-text" role="status" aria-live="polite">正在连接</span></div><div id="run-phase" class="run-phase" role="status" aria-live="polite">空闲</div>
     </header>
@@ -3403,8 +3418,8 @@ export function defaultPageHtml(): string {
   </div>
   <div id="new-session-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="new-session-title">
     <div class="settings-card session-choice-card"><div class="settings-head"><div><div id="new-session-title" class="inspector-title">新建对话</div><div class="inspector-subtitle">先选项目文件夹，再选择要使用的场景；也可以从空白对话开始。</div></div><button id="close-new-session" class="ghost-btn" type="button">关闭</button></div>
-      <label class="settings-field">项目文件夹<select id="new-session-project"><option value="">不绑定项目</option></select></label>
-      <div class="session-folder-import"><button id="choose-session-folder" class="ghost-btn" type="button">选择并绑定真实文件夹</button><div id="new-session-folder-hint" class="settings-note">选择本地文件夹后直接绑定为项目工作目录，文件不会复制到应用数据目录。</div></div>
+      <label class="settings-field work-only">项目文件夹<select id="new-session-project"><option value="">不绑定项目</option></select></label>
+      <div class="session-folder-import work-only"><button id="choose-session-folder" class="ghost-btn" type="button">选择并绑定真实文件夹</button><div id="new-session-folder-hint" class="settings-note">选择本地文件夹后直接绑定为项目工作目录，文件不会复制到应用数据目录。</div></div>
       <label class="settings-field">启动场景<select id="new-session-scenario"><option value="">空白对话（自动匹配场景）</option></select></label>
       <div id="new-session-scenario-hint" class="settings-note">选择场景后，发送需求会直接在这段对话里使用它。</div>
       <label class="scope-field"><input id="new-session-long-run" type="checkbox">将下一条需求作为长程场景运行</label>

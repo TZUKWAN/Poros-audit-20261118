@@ -271,9 +271,9 @@ async function main(): Promise<void> {
     return { tools: definitions, executor };
   };
   const { search, instance: searchInstance } = await federatedSearchFactory();
-  // R2 体验：分源完成进度直接进聊天流（检索阶段不再静默 30-60s）
-  searchInstance.onSourceSettled = (sourceId: string, ok: boolean, completed: number, total: number) => {
-    panel.pushChat({ role: "build-status", tone: "info", text: `检索进度 ${completed}/${total}：${sourceId} ${ok ? "完成" : "失败（已跳过）"}`, ts: Date.now() });
+  // SceneFlow：分源检索进度走 progress 通道（原地更新进度卡），不再逐条刷聊天
+  searchInstance.onSourceSettled = (sourceId: string, ok: boolean, _completed: number, total: number) => {
+    panel.pushProgress(panel.currentRunId, { source: { id: sourceId, ok }, sourcesTotal: total, phase: "retrieving" });
   };
   const searchForBuild = async (query: string, limit = 5): Promise<Awaited<ReturnType<typeof search>>> => {
     // 构建阶段必须有一个可验证的本地基线能力。外部联邦源主要返回
@@ -570,6 +570,8 @@ async function main(): Promise<void> {
       };
       const executionInvoker = await invokerForProject(executionProjectId);
       const pushRunChat = (message: Record<string, unknown>): void => panel.pushChat(panelRunId ? { ...message, runId: panelRunId } : message);
+      // SceneFlow 进度卡：构建叙述不再逐条刷聊天，统一原地更新
+      const pushRunProgress = (phase: string, line: string): void => panel.pushProgress(panelRunId, { phase, line });
       const runAbort = new AbortController();
       // The planner is selected after the reuse check (a project may provide
       // its own provider), so keep a small mutable binding for the terminate
@@ -588,7 +590,7 @@ async function main(): Promise<void> {
       // executions already have their own task-notification and must not
       // masquerade as a human message or rename the current conversation.
       if (source === "user") panel.pushChat({ role: "user", content: requirement, timestamp: Date.now() });
-       pushRunChat({ role: "build-status", tone: "info", text: "正在解析意图并检查可复用场景……", ts: Date.now() });
+      pushRunProgress("parsing", "正在解析意图并检查可复用场景……");
       const executeSavedDefinition = async (scenario: ScenarioRecord): Promise<{ ok: boolean; error?: string }> => {
         try {
         const runController = controller;
@@ -687,6 +689,12 @@ async function main(): Promise<void> {
         runPlanner.setAbortSignal(runAbort.signal);
       }
       const parsedIntent = await parseIntentForReuse(runPlanner, requirement);
+      // SceneFlow 真流式：目标叙述逐字上屏到进度卡（增强能力，任何失败静默）
+      if (typeof runPlanner.narrateGoal === "function") {
+        void runPlanner
+          .narrateGoal(requirement, (delta: string) => panel.pushProgress(panelRunId, { delta }), runAbort.signal)
+          .catch(() => undefined);
+      }
       try {
         runAbort.signal.throwIfAborted();
       } catch (error) {
@@ -724,9 +732,9 @@ async function main(): Promise<void> {
           clearPlannerAbort();
           return await executeSavedDefinition(match.scenario);
         }
-        pushRunChat({ role: "build-status", tone: "info", text: `发现已有场景“${match.scenario.name}”，构建模式将重新检查流程并更新定义，不在构建阶段执行外部工具。`, ts: Date.now() });
+        pushRunProgress("planning", `发现已有场景“${match.scenario.name}”，构建模式将重新检查流程并更新定义，不在构建阶段执行外部工具。`);
       } else if (match.tier === "partial" && match.scenario) {
-         pushRunChat({ role: "build-status", tone: "info", text: `发现相近场景 ${match.scenario.id}（相似度 ${(match.score * 100).toFixed(0)}%），将结合当前需求重新规划。`, ts: Date.now() });
+         pushRunProgress("planning", `发现相近场景 ${match.scenario.id}（相似度 ${(match.score * 100).toFixed(0)}%），将结合当前需求重新规划。`);
       }
       if (mode === "work") {
         // Keep the user's original requirement attached to the terminal
@@ -739,11 +747,7 @@ async function main(): Promise<void> {
         launchBusy = false;
         return { ok: false, error: "no reusable scenario" };
       }
-       pushRunChat({
-        role: "build-status", tone: "info",
-        text: "好，开始构建。我先去能力库里寻找能完成这件事的可靠工具，首次检索大约需要几十秒。",
-        ts: Date.now(),
-      });
+      pushRunProgress("retrieving", "好，开始构建。我先去能力库里寻找能完成这件事的可靠工具，首次检索大约需要几十秒。");
       // 首次检索用于展示；后续节点按各自查询检索，并在本次构建内缓存相同查询。
       const searchCache = new Map<string, Awaited<ReturnType<typeof search>>>();
       let baseResult: Awaited<ReturnType<typeof search>>;
@@ -765,7 +769,7 @@ async function main(): Promise<void> {
       const hitText = baseResult.capabilities.length
         ? `我找到了 ${baseResult.capabilities.length} 个候选能力，接下来会先说明它们分别能做什么，再请你选择。`
         : "这次没有找到现成能力，我会先用通用流程继续，并在后面告诉你哪里需要补充。";
-       pushRunChat({ role: "build-status", tone: baseResult.capabilities.length ? "ok" : "info", text: hitText, ts: Date.now() });
+      pushRunProgress("retrieving", hitText);
 
       // 构建模式只验证流程结构，不在构建阶段调用外部工具。
       // 这样“构建场景”和“运行场景”职责分离：场景可以先稳定固化，
@@ -839,6 +843,10 @@ async function main(): Promise<void> {
         store: buildStore,
       });
       panel.attachOrchestrator(orch, { interactive: false });
+      // SceneFlow：编排器阶段迁移驱动进度卡步进器（interactive=false 不刷聊天）
+      orch.on("state:enter", ({ to }: { to: string }) => {
+        if (to !== "done") panel.pushPhaseProgress(panelRunId, to);
+      });
       // 构建模式默认自动过闸，避免用户学习状态机细节；高级决策仍保留在底层协议。
       attachVirtualUser(orch, new VirtualUser({ kind: "approve-all" }));
       current = orch;
@@ -969,6 +977,7 @@ async function main(): Promise<void> {
               });
             }
           }
+          panel.pushProgress(panelRunId, { finished: true, phase: "distilling", line: shouldPin ? "场景已固化入库。" : "构建流程结束。" });
           panel.pushChat({
             role: "build-status", tone: shouldPin ? "ok" : "err", runStatus: shouldPin ? "succeeded" : "failed", error: shouldPin ? undefined : `构建结束但未固化：${final.outcome}`,
             text: shouldPin ? `构建完成 ✓ 场景已固化为「${savedScenario?.name ?? "新场景"}」（v1），会话已写入 Memory。` : `构建结束但未固化：验收或执行未全部通过（${final.outcome}）。`, terminal: true, runId: panelRunId ?? undefined,
@@ -977,6 +986,7 @@ async function main(): Promise<void> {
           await panel.refresh();
         })
         .catch(async (err: unknown) => {
+          panel.pushProgress(panelRunId, { finished: true, line: "构建流程结束。" });
           panel.pushChat({
             role: "build-status", tone: "err",
             text: `构建失败：${err instanceof Error ? err.message : String(err)}。可以直接输入新需求重试。`, terminal: true, runId: panelRunId ?? undefined,
@@ -1411,11 +1421,11 @@ async function main(): Promise<void> {
   const banner = [
     "",
     "┌──────────────────────────────────────────────┐",
-    "│  场景Agent 面板已启动                        │",
-    `│  打开  http://127.0.0.1:${port}             │`,
+    "│  SceneFlow 场景工作台已启动                  │",
+    `│  打开  http://127.0.0.1:${port}                │`,
     ...(syncPort ? [`│  同步  http://127.0.0.1:${syncPort}             │`] : []),
-    "│  输入需求 → 自动生成可复用场景              │",
-    "│  Ctrl+C 停止                                 │",
+    "│  输入需求 → 自动生成可复用场景                │",
+    "│  Ctrl+C 停止                                  │",
     "└──────────────────────────────────────────────┘",
     "",
   ].join("\n");

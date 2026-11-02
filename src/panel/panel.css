@@ -1606,3 +1606,37 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .utility-more { display: inline-flex !important; } .utility-menu.hidden { display: none !important; }
 
 .utility-menu:not(.hidden) { display: block !important; }
+
+/* ── SceneFlow 进度卡：构建过程唯一的过程性 UI，原地更新 ── */
+
+.progress-message { align-items: stretch; }
+.progress-card { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(180deg, rgba(139, 124, 255, .07), rgba(18, 27, 49, .5) 42%); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.progress-card-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.progress-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 0 0 rgba(79, 209, 197, .5); animation: sceneflow-pulse 1.6s ease-out infinite; }
+.progress-card.finished .progress-pulse { animation: none; background: var(--success); box-shadow: none; }
+@keyframes sceneflow-pulse { 0% { box-shadow: 0 0 0 0 rgba(79, 209, 197, .45); } 70% { box-shadow: 0 0 0 8px rgba(79, 209, 197, 0); } 100% { box-shadow: 0 0 0 0 rgba(79, 209, 197, 0); } }
+.progress-phase { color: var(--accent-2); font-weight: 700; letter-spacing: .04em; }
+.progress-title { color: var(--text); font-weight: 600; }
+.progress-source-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.progress-narration { font-size: 13px; line-height: 1.7; color: var(--text); white-space: pre-wrap; min-height: 0; }
+.progress-narration.empty { display: none; }
+.progress-line { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.progress-line::before { content: ""; width: 14px; height: 1px; background: var(--accent); flex: 0 0 14px; }
+.progress-source-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.progress-source-chips:empty { display: none; }
+.progress-source-chip { font-size: 10px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--subtle); }
+.progress-source-chip.ok { color: var(--accent-2); border-color: rgba(79, 209, 197, .35); }
+.progress-source-chip.err { color: var(--danger); border-color: rgba(241, 127, 155, .35); }
+.progress-details { font-size: 12px; }
+.progress-details-summary { cursor: pointer; color: var(--subtle); user-select: none; }
+.progress-details-summary:hover { color: var(--muted); }
+.progress-steps { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow: auto; }
+.progress-step-row { display: flex; gap: 8px; align-items: baseline; }
+.progress-step-time { color: var(--subtle); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.progress-step-text { color: var(--muted); }
+.progress-card.finished { border-color: rgba(101, 214, 165, .25); }
+
+/* ── SceneFlow 构建/工作分离：构建模式不显示工作空间 ── */
+
+.app-shell[data-mode="build"] .rail-workspace-section { display: none; }
+.app-shell[data-mode="build"] .work-only { display: none; }

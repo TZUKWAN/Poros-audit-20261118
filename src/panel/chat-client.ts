@@ -29,6 +29,25 @@ interface BuildStatusMessage {
   requirement?: string;
   ts?: number;
 }
+
+/** SceneFlow 进度卡：构建过程唯一的过程性消息——服务端 pushProgress 原地更新，不追加。 */
+interface ProgressCardMessage {
+  role: "progress-card";
+  runId: string;
+  phase: string | null;
+  /** 最新一行叙述（步骤文本） */
+  line: string;
+  /** LLM 流式叙述（逐字累积） */
+  narration: string;
+  /** 分源检索微状态 */
+  sources: Array<{ id: string; ok: boolean; done: boolean }>;
+  sourcesTotal: number;
+  /** 完整步骤时间线（折叠区） */
+  steps: Array<{ at: number; text: string }>;
+  startedAt: number;
+  finishedAt: number | null;
+  ts?: number;
+}
 interface ActivityGroupMessage { role: "activity-group"; items: Array<{ tone?: Tone; text?: string; ts?: number }>; ts?: number; }
 interface RunGroupMessage { role: "run-group"; user: Record<string, unknown>; items: Array<Record<string, unknown>>; expanded: boolean; groupId?: string; }
 interface AwaitingUserMessage { role: "awaiting-user"; runId: string; question: string; inputs: Array<{ name: string; description: string; type: string }>; ts?: number; }
@@ -430,7 +449,7 @@ function friendlyRunStatus(status: string): string {
 function modeText(mode: PanelMode): { kicker: string; title: string; description: string; copy: string; placeholder: string } {
   return mode === "work"
     ? { kicker: "当前项目 · 工作模式", title: "你现在想完成什么？", description: "直接描述目标。我会先判断已有场景和可用工具，需要新能力时再进入构建。", copy: "描述目标，直接开始一次工作。", placeholder: "例如：整理 /data/meeting.md 并生成行动项" }
-    : { kicker: "当前项目 · 场景构建", title: "把一次工作变成可复用场景", description: "先确认目标、步骤和工具，再决定是否保存为场景。", copy: "把重复工作整理成下次可直接使用的场景。", placeholder: "例如：每周整理销售数据并生成周报" };
+    : { kicker: "SceneFlow · 场景构建", title: "把一次工作变成可复用场景", description: "先确认目标、步骤和工具，再决定是否保存为场景。", copy: "把重复工作整理成下次可直接使用的场景。", placeholder: "例如：每周整理销售数据并生成周报" };
 }
 
 function applyMode(mode: PanelMode): void {
@@ -1155,6 +1174,58 @@ function renderRichText(value: unknown): HTMLElement {
   return root;
 }
 
+/** SceneFlow 进度卡：构建过程内联进度——步进器 + 流式叙述 + 分源微状态，全程一张卡原地更新。 */
+function renderProgressCard(card: ProgressCardMessage): HTMLElement {
+  const root = node("article", "message progress-message assistant");
+  const cardEl = node("div", `progress-card${card.finishedAt !== null ? " finished" : ""}`);
+  cardEl.dataset.runId = card.runId;
+
+  const head = node("div", "progress-card-head");
+  const pulse = node("span", "progress-pulse");
+  pulse.setAttribute("aria-hidden", "true");
+  const phase = node("span", "progress-phase");
+  phase.textContent = card.finishedAt !== null ? "完成" : card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
+  const title = node("span", "progress-title");
+  title.textContent = card.finishedAt !== null ? "构建流程已结束" : "SceneFlow 正在构建";
+  const sourceCount = node("span", "progress-source-count");
+  sourceCount.textContent = card.sourcesTotal > 0 ? `${card.sources.filter((s) => s.done).length} / ${card.sourcesTotal} 源` : "";
+  head.append(pulse, phase, title, sourceCount);
+
+  const narration = node("div", "progress-narration");
+  narration.textContent = card.narration;
+  if (!card.narration) narration.classList.add("empty");
+
+  const line = node("div", "progress-line");
+  if (card.line) line.textContent = card.line;
+
+  const chips = node("div", "progress-source-chips");
+  chips.replaceChildren(...card.sources.map((s) => {
+    const chip = node("span", `progress-source-chip ${s.ok ? "ok" : "err"}`);
+    chip.textContent = s.id;
+    return chip;
+  }));
+
+  const details = node("details", "progress-details");
+  const summary = node("summary", "progress-details-summary");
+  summary.textContent = `执行明细（${card.steps.length}）`;
+  const steps = node("div", "progress-steps");
+  steps.replaceChildren(...card.steps.map((step) => {
+    const row = node("div", "progress-step-row");
+    const time = new Date(step.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const timeEl = node("span", "progress-step-time");
+    timeEl.textContent = time;
+    const textEl = node("span", "progress-step-text");
+    textEl.textContent = step.text;
+    row.append(timeEl, textEl);
+    return row;
+  }));
+  details.append(summary, steps);
+
+  cardEl.append(head, narration, line, chips, details);
+  root.append(cardEl);
+  return root;
+}
+
 function renderActivityGroup(message: ActivityGroupMessage): HTMLElement {
   const card = node("div", "status-card activity-card");
   const items = Array.isArray(message.items) ? message.items : [];
@@ -1243,6 +1314,7 @@ function renderRunGroup(message: RunGroupMessage): HTMLElement {
 function renderMessage(message: Record<string, unknown>): HTMLElement {
   const role = String(message.role ?? "");
   if (role === "run-group") return renderRunGroup(message as unknown as RunGroupMessage);
+  if (role === "progress-card") return renderProgressCard(message as unknown as ProgressCardMessage);
   const streaming = (role === "model-stream" || role === "model-thinking") && message.streaming !== false;
   const wrapper = node("article", `message message-${role || "event"} ${role === "user" ? "user" : "assistant"}${streaming ? " message-streaming" : ""}`);
   const timestamp = Number(message.ts ?? message.timestamp ?? 0);
@@ -1261,7 +1333,7 @@ function renderMessage(message: Record<string, unknown>): HTMLElement {
   if (role === "model-stream" || role === "model-thinking") avatar.setAttribute("aria-label", "Agent");
   const body = node("div", "message-body");
   const head = node("div", "message-head");
-  const label = role === "gate-card" ? "需要你确认" : role === "awaiting-user" ? "需要补充输入" : role === "model-stream" ? (streaming ? "正在回复" : "Agent 回复") : role === "model-thinking" ? (streaming ? "正在思考" : "思考过程") : role === "tool-call" ? "工具调用" : role === "tool-result" ? "工具结果" : role === "build-status" ? "结果" : role === "activity-group" ? "执行过程" : role === "memory-proposal" ? "Memory 提议" : "场景 Agent";
+  const label = role === "gate-card" ? "需要你确认" : role === "awaiting-user" ? "需要补充输入" : role === "model-stream" ? (streaming ? "正在回复" : "Agent 回复") : role === "model-thinking" ? (streaming ? "正在思考" : "思考过程") : role === "tool-call" ? "工具调用" : role === "tool-result" ? "工具结果" : role === "build-status" ? "结果" : role === "activity-group" ? "执行过程" : role === "memory-proposal" ? "Memory 提议" : "SceneFlow";
   head.append(textBlock(label, "message-author"), textBlock(time, "message-time"));
   const meta = head;
   body.append(meta);
@@ -1663,7 +1735,7 @@ function renderChat(): void {
   if (!messages.length) {
     const empty = node("div", "chat-empty");
     const card = node("div", "empty-card");
-    const h = node("h3"); h.textContent = panelMode === "work" ? "把工作交给场景" : "从一句需求开始构建";
+    const h = node("h3"); h.textContent = panelMode === "work" ? "把重复工作交给 SceneFlow 场景" : "从一句话开始，构建可复用场景";
     const p = node("p"); p.textContent = panelMode === "work" ? "系统会优先复用已固化场景，并把运行过程显示在右侧检查台。" : "确认每一个关键阶段，把一次成功流程沉淀成下次可以直接调用的场景。";
     card.append(h, p); empty.append(card); root.append(empty); updateJumpButton(false); return;
   }
@@ -1989,7 +2061,115 @@ function connect(): void {
         }
       else if (meta?.type === "create-long-run") { pendingLongRunConfig = null; }
     } else if (payload.kind === "run-error") { setBusy(false); pushMessage({ role: "build-status", tone: "err", text: String(payload.message ?? "运行失败") }); }
+    else if (payload.kind === "progress") { applyProgress(payload); }
+    else if (payload.kind === "progress-delta") { applyProgressDelta(payload); }
   });
+}
+
+// ── SceneFlow 进度卡：服务端 pushProgress/progress-delta 原地更新那一张卡 ──
+
+const PROGRESS_PHASE_LABELS: Record<string, string> = {
+  parsing: "意图",
+  planning: "任务清单",
+  retrieving: "能力选型",
+  assembling: "装配",
+  verifying: "校验",
+  executing: "执行",
+  distilling: "固化",
+};
+
+function findProgressCard(runId: string): ProgressCardMessage | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const item = messages[i] as unknown as ProgressCardMessage;
+    if (item?.role === "progress-card" && item.runId === runId) return item;
+  }
+  return undefined;
+}
+
+function applyProgress(payload: Record<string, unknown>): void {
+  const runId = String(payload.runId ?? "");
+  if (!runId) return;
+  let card = findProgressCard(runId);
+  const line = typeof payload.line === "string" ? payload.line : undefined;
+  if (!card) {
+    card = { role: "progress-card", runId, phase: null, line: line ?? "", narration: "", sources: [], sourcesTotal: 0, steps: [], startedAt: Date.now(), finishedAt: null, ts: Date.now() };
+    pushMessage(card as unknown as Record<string, unknown>);
+  }
+  if (typeof payload.phase === "string") card.phase = payload.phase;
+  if (line) {
+    card.line = line;
+    // 时间线去重：同一行不重复记录
+    if (card.steps.length === 0 || card.steps[card.steps.length - 1]?.text !== line) {
+      card.steps.push({ at: typeof payload.ts === "number" ? payload.ts : Date.now(), text: line });
+    }
+  }
+  if (payload.source && typeof payload.source === "object") {
+    const source = payload.source as { id?: string; ok?: boolean };
+    if (source.id) {
+      const existing = card.sources.find((s) => s.id === source.id);
+      const entry = { id: source.id, ok: source.ok !== false, done: true };
+      if (existing) card.sources[card.sources.indexOf(existing)] = entry;
+      else card.sources.push(entry);
+    }
+  }
+  if (typeof payload.sourcesTotal === "number") card.sourcesTotal = payload.sourcesTotal;
+  if (payload.finished === true) card.finishedAt = typeof payload.ts === "number" ? payload.ts : Date.now();
+  updateProgressDom(card);
+  renderChat();
+}
+
+function applyProgressDelta(payload: Record<string, unknown>): void {
+  const runId = String(payload.runId ?? "");
+  const delta = typeof payload.delta === "string" ? payload.delta : "";
+  if (!runId || !delta) return;
+  let card = findProgressCard(runId);
+  if (!card) {
+    card = { role: "progress-card", runId, phase: null, line: "", narration: "", sources: [], sourcesTotal: 0, steps: [], startedAt: Date.now(), finishedAt: null, ts: Date.now() };
+    pushMessage(card as unknown as Record<string, unknown>);
+  }
+  card.narration += delta;
+  // 流式增量走定点 DOM 更新：不整列表重渲染，打字机手感顺滑
+  updateProgressDom(card, true);
+}
+
+/** 定点更新进度卡 DOM（存在则只改受影响字段；不存在则交由全量渲染） */
+function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): void {
+  const root = document.querySelector<HTMLElement>(`.progress-card[data-run-id="${CSS.escape(card.runId)}"]`);
+  if (!root) return;
+  if (deltaOnly) {
+    const narrationEl = root.querySelector<HTMLElement>(".progress-narration");
+    if (narrationEl) narrationEl.textContent = card.narration;
+    return;
+  }
+  const phaseEl = root.querySelector<HTMLElement>(".progress-phase");
+  if (phaseEl) phaseEl.textContent = card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
+  const lineEl = root.querySelector<HTMLElement>(".progress-line");
+  if (lineEl && card.line) lineEl.textContent = card.line;
+  const narrationEl = root.querySelector<HTMLElement>(".progress-narration");
+  if (narrationEl) narrationEl.textContent = card.narration;
+  const countEl = root.querySelector<HTMLElement>(".progress-source-count");
+  if (countEl) countEl.textContent = card.sourcesTotal > 0 ? `${card.sources.filter((s) => s.done).length} / ${card.sourcesTotal} 源` : "";
+  const chipsEl = root.querySelector<HTMLElement>(".progress-source-chips");
+  if (chipsEl) {
+    chipsEl.replaceChildren(...card.sources.map((s) => {
+      const chip = document.createElement("span");
+      chip.className = `progress-source-chip ${s.ok ? "ok" : "err"}`;
+      chip.textContent = s.id;
+      return chip;
+    }));
+  }
+  const stepsEl = root.querySelector<HTMLElement>(".progress-steps");
+  if (stepsEl) {
+    stepsEl.replaceChildren(...card.steps.map((step) => {
+      const row = document.createElement("div");
+      row.className = "progress-step-row";
+      const time = new Date(step.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      row.innerHTML = `<span class="progress-step-time">${time}</span><span class="progress-step-text"></span>`;
+      (row.querySelector(".progress-step-text") as HTMLElement).textContent = step.text;
+      return row;
+    }));
+  }
+  root.classList.toggle("finished", card.finishedAt !== null);
 }
 
 function mount(): void {
