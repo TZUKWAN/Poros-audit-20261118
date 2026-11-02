@@ -278,10 +278,18 @@ export class PersistentGoalLoop {
         effectiveStatus = "cancelled";
         effectiveReason = "cancelled";
         effectiveError = "长程运行已停止。";
-      } else if (this.pauseRequested || current.pauseRequested) {
-        effectiveStatus = "paused";
-        effectiveReason = null;
-        effectiveError = "已在安全轮次边界暂停，可继续恢复。";
+      } else if (
+        status === "cancelled" ||
+        (status === "failed" && reason !== "max-rounds")
+      ) {
+        // R1 审计#5：暂停只吸收「取消」与「可重试的中途失败」。已验证达成
+        // （goal-met）与「达到轮次上限」是真实终态——被并发 pause 改写为
+        // paused 后，resume 会把已达成的目标永久记为 failed(max-rounds)。
+        if (this.pauseRequested || current.pauseRequested) {
+          effectiveStatus = "paused";
+          effectiveReason = null;
+          effectiveError = "已在安全轮次边界暂停，可继续恢复。";
+        }
       }
 
       const patch: Partial<Omit<LongRun, "schemaVersion" | "id" | "createdAt" | "updatedAt" | "revision">> = {

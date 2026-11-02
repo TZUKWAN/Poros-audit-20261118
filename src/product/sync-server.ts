@@ -51,5 +51,5 @@ export class WorkspaceSyncServer {
   private authorized(req: IncomingMessage): boolean { return Boolean(this.token) && req.headers.authorization === `Bearer ${this.token}`; }
 }
 
-async function readBody(req: IncomingMessage): Promise<string> { let body = ""; for await (const chunk of req) { body += String(chunk); if (Buffer.byteLength(body, "utf8") > 5_000_000) throw new Error("request body too large"); } return body; }
+async function readBody(req: IncomingMessage): Promise<string> { const chunks: Buffer[] = []; let total = 0; for await (const chunk of req) { const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)); total += buf.length; if (total > 5_000_000) throw new Error("request body too large"); chunks.push(buf); } return Buffer.concat(chunks).toString("utf8"); }
 function sendJson(res: ServerResponse, value: unknown): void { res.setHeader("content-type", "application/json; charset=utf-8"); res.end(JSON.stringify(value)); }

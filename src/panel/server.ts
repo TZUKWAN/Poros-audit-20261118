@@ -336,6 +336,8 @@ export class PanelServer {
   private buildStatusPersistence: Promise<void> = Promise.resolve();
   private persistenceQueue: Promise<void> = Promise.resolve();
   private revision = 0;
+  /** R1 审计#2：DNS rebinding 防御——listen 后记录合法 Host 形态 */
+  private allowedHostPorts: string[] = [];
   private readonly eventLog: PanelEvent[] = [];
   /** Idempotency results are bound to the socket that first used the ID.
    * Sharing a global requestId result with another socket could leak one-shot
@@ -566,7 +568,9 @@ export class PanelServer {
       this.lastBuildContext = context;
       void this.pushSnapshot();
     });
-    orch.on("user:pending", ({ request }) => exposeBuildClarification(request));
+    // R1 审计#7：user:pending 的两张卡片去重——notifyBuildAwaitingUser 是唯一
+    // 澄清入口（run 状态 + awaiting-user 卡 + 持久化）；expose 仅处理恢复场景
+    // 的 restore（经 restoredClarification 显式调用，不重复注册 handler）。
     const restoredClarification = orch.ctx.awaitingUser;
     if (restoredClarification) exposeBuildClarification(restoredClarification);
     orch.on("state:enter", ({ to }) => {
@@ -943,7 +947,7 @@ export class PanelServer {
       audit: audit.map(({ id, actor, action, resourceType, resourceId, summary, createdAt }) => ({ id, actor, action, resourceType, resourceId, summary, createdAt })),
       contexts: contexts.map((context) => ({ id: context.id, kind: context.kind, origin: context.origin, label: context.label, enabled: context.enabled, projectId: context.projectId, updatedAt: context.updatedAt })),
       policy: policy ? { read: policy.read, write: policy.write, install: policy.install, network: policy.network, send: policy.send, approvalMode: policy.approvalMode } : null,
-      shares: shares.map(({ id, resourceType, resourceId, role, token, expiresAt, createdAt }) => ({ id, resourceType, resourceId, role, tokenMasked: `${token.slice(0, 4)}…${token.slice(-4)}`, expiresAt, createdAt })),
+      shares: shares.map(({ id, resourceType, resourceId, role, tokenHash, expiresAt, createdAt }) => ({ id, resourceType, resourceId, role, tokenMasked: `${tokenHash.slice(0, 4)}…${tokenHash.slice(-4)}`, expiresAt, createdAt })),
       comments: comments.map(({ id, resourceType, resourceId, author, body, resolved, createdAt, updatedAt }) => ({ id, resourceType, resourceId, author, body, resolved, createdAt, updatedAt })),
       identities,
       revision: this.revision,
@@ -1610,11 +1614,16 @@ export class PanelServer {
           }
         }
       }).catch(async (error: unknown) => {
-        const current = await longRuns.get(run.id);
-        if (current && ["queued", "running"].includes(current.status) && !current.pauseRequested) {
-          const failed = await longRuns.update(run.id, { status: "failed", lastError: (error instanceof Error ? error.message : String(error)).slice(0, 2_000), finishedAt: new Date().toISOString() }, current.revision);
-          this.setLongRunState(failed);
-          this.pushChat({ role: "build-status", tone: "err", runStatus: "failed", text: failed.lastError ?? "长程执行器启动失败。", runId: failed.id, sessionId: failed.sessionId ?? undefined, terminal: true, ts: Date.now() });
+        try {
+          const current = await longRuns.get(run.id);
+          if (current && ["queued", "running"].includes(current.status) && !current.pauseRequested) {
+            const failed = await longRuns.update(run.id, { status: "failed", lastError: (error instanceof Error ? error.message : String(error)).slice(0, 2_000), finishedAt: new Date().toISOString() }, current.revision);
+            this.setLongRunState(failed);
+            this.pushChat({ role: "build-status", tone: "err", runStatus: "failed", text: failed.lastError ?? "长程执行器启动失败。", runId: failed.id, sessionId: failed.sessionId ?? undefined, terminal: true, ts: Date.now() });
+          }
+        } catch (secondary: unknown) {
+          // R1 审计#1：善后自身失败（磁盘满/revision 冲突）不得再抛无处理 rejection
+          this.pushChat({ role: "build-status", tone: "err", text: `长程运行善后出错：${secondary instanceof Error ? secondary.message : String(secondary)}`, terminal: true, ts: Date.now() });
         }
       });
         return { ok: true, data: { longRunId: run.id, scenarioId: scenario.id } };
@@ -1679,7 +1688,10 @@ export class PanelServer {
       }
       const folder = action.scope === "session" ? "sessions" : action.scope === "scenario" ? "scenarios" : "knowledge";
       const safeName = path.basename(action.name).replace(/[^\w.\-\u4e00-\u9fff ]/g, "_").replace(/\.md$/i, "") + ".md";
-      const target = path.join(this.deps.memoryRoot, folder, `${action.scope}-${safeName}`);
+      // R1 审计#13：同名写入会静默覆盖旧文件并留下两条指向同一路径的
+      // Memory 记录；按内容哈希短缀命名，确保唯一
+      const contentHash = createHash("sha256").update(action.content).digest("hex").slice(0, 8);
+      const target = path.join(this.deps.memoryRoot, folder, `${action.scope}-${safeName.replace(/\.md$/, `-${contentHash}.md`)}`);
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, action.content, "utf8");
       if (this.deps.memories && this.workspace) {
@@ -1798,8 +1810,9 @@ export class PanelServer {
         const artifact = await this.deps.artifacts.get(action.resourceId);
         if (!artifact || artifact.workspaceId !== this.workspace.id || artifact.status === "deleted") return { ok: false, error: "产物不存在或不属于当前工作区" };
       }
-      const share = await this.deps.shares.create({ id: `share-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, workspaceId: this.workspace.id, resourceType: action.resourceType, resourceId: action.resourceId, role: action.role, expiresAt: null });
-      await this.pushSnapshot(); return { ok: true, data: { shareId: share.id, token: share.token, role: share.role } };
+      // R1 审计#15：token 只存哈希，原值仅在创建时通过一次性 action-result 返回
+      const { token: shareToken } = await this.deps.shares.create({ id: `share-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, workspaceId: this.workspace.id, resourceType: action.resourceType, resourceId: action.resourceId, role: action.role, expiresAt: null });
+      await this.pushSnapshot(); return { ok: true, data: { token: shareToken, role: "granted" } };
     }
     if (action.type === "delete-share") {
       if (!this.deps.shares || !this.workspace) return { ok: false, error: "分享中心未接入" };
@@ -1974,7 +1987,9 @@ export class PanelServer {
            } else if (entity.type === "scenario" && this.deps.library) {
              const parsed = ScenarioRecordSchema.safeParse(entity.data);
              if (!parsed.success) return { ok: false, error: `远端场景 ${id} 数据无效` };
-             await this.deps.library.save(parsed.data);
+             // R1 审计#3：强制归属当前工作区；sync-apply 无项目导入流程，
+             // 远端 projectId 一律置 null（防越权注入任意作用域）
+             await this.deps.library.save({ ...parsed.data, workspaceId: this.workspace.id, projectId: null });
            } else if (entity.type === "memory" && action.includeMemory && this.deps.memories) {
              const parsed = MemoryItemSchema.safeParse(entity.data);
              if (!parsed.success || parsed.data.workspaceId !== this.workspace.id) return { ok: false, error: `远端 Memory ${id} 数据无效或不属于当前工作区` };
@@ -2174,6 +2189,16 @@ export class PanelServer {
           await this.deps.runs?.update(runId, { status: "failed", finishedAt: new Date().toISOString(), error: message });
           this.pushChat({ role: "build-status", tone: "err", runStatus: "failed", error: message, text: `运行失败：${message}`, terminal: true, runId, ts: Date.now() });
           await this.pushSnapshot();
+        })
+        // R1 审计#1：catch 回调自身的 await（runs.update/pushSnapshot）若抛出
+        // （磁盘满/store 冲突），会形成无处理 rejection 崩溃面板进程
+        .catch(async (secondary: unknown) => {
+          try {
+            this.pushChat({ role: "build-status", tone: "err", text: `运行失败善后出错：${secondary instanceof Error ? secondary.message : String(secondary)}`, terminal: true, runId, ts: Date.now() });
+            await this.pushSnapshot();
+          } catch {
+            /* 兜底失败只能放弃 */
+          }
         });
       return { ok: true };
     }
@@ -2458,6 +2483,16 @@ export class PanelServer {
     }
     await this.hydrateSession();
     this.server = createServer((req, res) => {
+      // R1 审计#2：DNS rebinding 防御——面板全部 API 零鉴权（设计为仅本机使用），
+      // 恶意网页可通过 rebinding 把 Host 指向本机端口从而全权操作面板
+      // （start-build/settings/secrets/host-context）。校验 Host 头必须为本机回环形态。
+      const hostHeader = (req.headers.host ?? "").toLowerCase();
+      const allowedHosts = this.allowedHostPorts;
+      if (allowedHosts.length > 0 && !allowedHosts.includes(hostHeader)) {
+        res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: "forbidden host（面板仅接受本机回环访问）" }));
+        return;
+      }
       const requestPath = (req.url ?? "").split("?", 1)[0] ?? "";
       if (req.url === "/api/sessions" && req.method === "GET") {
         void (this.deps.history ? this.deps.history.list() : Promise.resolve([])).then((items) => {
@@ -2730,7 +2765,23 @@ export class PanelServer {
           }).catch((error: unknown) => sendRouteFailure(res, error));
           return;
         }
-        void serveArtifact(artifactQuery.get("path") ?? "").catch((error: unknown) => sendRouteFailure(res, error));
+        // R1 审计#10：裸 path 变体允许读取选中项目根/artifactRoot 下任意文件
+        // （含 .env 等敏感文件），且面板零鉴权 + 本机任意进程可达。限制为必须
+        // 命中当前工作区已登记且未删除的 artifact 记录；前端仅使用带 id 形式，
+        // 裸 path 无记录命中一律 404。
+        const barePath = artifactQuery.get("path");
+        if (barePath && this.deps.artifacts && this.workspace) {
+          const resolvedBare = path.resolve(barePath);
+          void this.deps.artifacts.list(this.workspace.id)
+            .then((items) => items.find((item) => path.resolve(item.path) === resolvedBare))
+            .then(async (listed) => {
+              if (!listed) { res.writeHead(404).end(); return; }
+              await serveArtifact(listed.path);
+            })
+            .catch((error: unknown) => sendRouteFailure(res, error));
+          return;
+        }
+        res.writeHead(404).end();
         return;
       }
       if (req.url?.startsWith("/api/project-file") && req.method === "GET") {
@@ -2819,7 +2870,12 @@ export class PanelServer {
           const pending = requestId ? this.pendingRequests.get(requestId) : undefined;
           if (pending) {
             if (pending.owner !== ws) { sendIfOpen({ kind: "action-result", requestId, ok: false, error: "requestId 已被其它连接占用" }); return; }
-            void pending.promise.then((result) => sendIfOpen({ kind: "action-result", requestId, ...result }));
+            // R1 审计#1：重放分支必须双兜底——原 promise 的 rejection 经由
+            // 此派生链时无人接会形成 unhandledRejection 崩溃面板进程
+            void pending.promise.then(
+              (result) => sendIfOpen({ kind: "action-result", requestId, ...result }),
+              (err: unknown) => sendIfOpen({ kind: "action-result", requestId, ok: false, error: err instanceof Error ? err.message : String(err) }),
+            );
             return;
           }
           const actionPromise = this.handleAction(raw);
@@ -2850,7 +2906,10 @@ export class PanelServer {
       };
       const onListening = (): void => {
         const addr = this.server!.address();
-        resolve(typeof addr === "object" && addr ? addr.port : 0);
+        const boundPort = typeof addr === "object" && addr ? addr.port : 0;
+        // 只认回环 Host 形态（IPv4/IPv6/localhost），其余 Host 一律 403
+        this.allowedHostPorts = [`127.0.0.1:${boundPort}`, `localhost:${boundPort}`, `[::1]:${boundPort}`];
+        resolve(boundPort);
       };
       this.server!.once("error", rejectOnError);
       this.server!.once("listening", onListening);
@@ -3115,8 +3174,13 @@ export class PanelServer {
       terminal: raw.terminal === true || (typeof raw.message === "object" && raw.message !== null && (raw.message as { terminal?: unknown }).terminal === true),
     };
     const event = PanelEventSchema.parse({ eventId: envelope.eventId, revision: envelope.revision, sessionId: envelope.sessionId, runId: envelope.runId, requestId: typeof raw.requestId === "string" ? raw.requestId : null, terminal: envelope.terminal, kind: String(raw.kind ?? "event"), payload: raw, emittedAt: new Date().toISOString() });
-    this.eventLog.push(event);
-    if (this.eventLog.length > 500) this.eventLog.splice(0, this.eventLog.length - 500);
+    // R1 审计#6：整份快照（数百 KB × 200 条上限）入 eventLog 会把重放缓存
+    // 撑到上百 MB 且 resume 时一次性重放全部快照。快照事件只推给在线客户端，
+    // 不入 eventLog；断线客户端 resume 后直接拉 /api/snapshot 即为最新态。
+    if (raw.kind !== "snapshot") {
+      this.eventLog.push(event);
+      if (this.eventLog.length > 500) this.eventLog.splice(0, this.eventLog.length - 500);
+    }
     const data = JSON.stringify(envelope);
     for (const ws of this.clients) {
       if (ws.readyState === ws.OPEN) {
@@ -3148,12 +3212,17 @@ export class PanelServer {
 }
 
 async function readTextBody(req: IncomingMessage, maxBytes = 64_000): Promise<string> {
-  let body = "";
+  // R1 审计#4：逐 chunk String() 解码会把跨 TCP 分段的 UTF-8 多字节字符
+  // （中文/emoji）截成 U+FFFD；收集 Buffer 后整体一次性解码
+  const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    body += String(chunk);
-    if (Buffer.byteLength(body, "utf8") > maxBytes) throw new Error("request body too large");
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    total += buf.length;
+    if (total > maxBytes) throw new Error("request body too large");
+    chunks.push(buf);
   }
-  return body;
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function readJsonBody(req: IncomingMessage, maxBytes = 64_000): Promise<unknown> {

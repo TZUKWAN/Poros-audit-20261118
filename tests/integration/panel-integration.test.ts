@@ -884,7 +884,9 @@ describe("8.1 面板服务：连接/快照一致/断线重连", () => {
     await expect(server.handleAction({ type: "archive-project", projectId })).resolves.toMatchObject({ ok: true });
     await expect(server.handleAction({ type: "archive-project", projectId: other.id })).resolves.toMatchObject({ ok: true });
     const preview = await fetch(`http://127.0.0.1:${port}/api/artifact?path=${encodeURIComponent(otherPath)}`);
-    expect(preview.status).toBe(403);
+    // R1 审计#10 收紧后：裸 path 必须命中 artifact 记录，否则 404（比旧 403
+    // 更严——连"范围内/外"的区分都不再需要，未登记路径一律不可读）
+    expect(preview.status).toBe(404);
     await expect(server.handleAction({ type: "delete-file", fileId: otherFile.id, confirm: true })).resolves.toMatchObject({ ok: false, error: "文件不存在" });
     expect(await repository.getFile(otherFile.id)).toBeTruthy();
   });
@@ -909,20 +911,28 @@ describe("8.1 面板服务：连接/快照一致/断线重连", () => {
     const c = new WsClient(`ws://127.0.0.1:${port}/ws`);
     await c.open();
     await c.waitFor("snapshot");
+    // R1 审计#13 配套：project 作用域必须显式选中项目（server.projectId 初始为 null）
+    c.send({ type: "select-project", projectId });
+    expect((await c.waitFor("action-result")) as { ok: boolean }).toMatchObject({ ok: true });
     c.send({ type: "create-memory", scope: "project", name: "偏好", content: "报告默认使用中文。" });
     expect((await c.waitFor("action-result")) as { ok: boolean }).toMatchObject({ ok: true });
     const snap = (await (await fetch(`http://127.0.0.1:${port}/api/snapshot`)).json()) as PanelSnapshot;
-    expect(JSON.stringify(snap.memoryTree)).toContain("project-偏好.md");
+    // R1 审计#13：文件名带内容哈希短缀防同名覆盖
+    expect(JSON.stringify(snap.memoryTree)).toMatch(/project-偏好-[0-9a-f]{8}\.md/);
     expect(snap.memoryItems).toHaveLength(1);
     expect(snap.memoryItems[0]).toMatchObject({ scope: "project", name: "偏好", sourceType: "user" });
     c.send({ type: "toggle-memory", memoryId: snap.memoryItems[0]!.id, enabled: false });
     expect((await c.waitFor("action-result")) as { ok: boolean }).toMatchObject({ ok: true });
     expect(((await (await fetch(`http://127.0.0.1:${port}/api/snapshot`)).json()) as PanelSnapshot).memoryItems[0]!.enabled).toBe(false);
-    const filePath = path.join(dir, "knowledge", "project-偏好.md");
-    c.send({ type: "delete-memory", path: filePath, memoryId: snap.memoryItems[0]!.id, confirm: true });
-    expect((await c.waitFor("action-result")) as { ok: boolean }).toMatchObject({ ok: true });
+    // R1 审计#13：delete-memory 需用记录里的实际落盘绝对路径
+    const createdPath = snap.memoryItems[0]!.path;
+    expect(createdPath).toBeTruthy();
+    c.send({ type: "delete-memory", path: createdPath!, memoryId: snap.memoryItems[0]!.id, confirm: true });
+    const delResult = (await c.waitFor("action-result")) as { ok: boolean; error?: string };
+    if (!delResult.ok) console.warn("[diag] delete error:", delResult.error);
+    expect(delResult).toMatchObject({ ok: true });
     const after = (await (await fetch(`http://127.0.0.1:${port}/api/snapshot`)).json()) as PanelSnapshot;
-    expect(JSON.stringify(after.memoryTree)).not.toContain("project-偏好.md");
+    expect(JSON.stringify(after.memoryTree)).not.toContain("project-偏好");
     c.close();
   });
 

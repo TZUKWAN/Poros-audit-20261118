@@ -83,7 +83,18 @@ export class PanelSettingsStore {
     if (this.loaded) return { ...this.value };
     const saved = await this.store.get("settings");
     if (saved) {
-      this.value = PanelSettingsSchema.parse({ ...this.value, ...saved, apiKey: decryptSecret(saved.apiKey), syncToken: decryptSecret(saved.syncToken ?? "") });
+      // R1 审计#9：仅当落盘记录确有该字段时才覆盖 env 注入值；解密失败
+      // （返回空串）时保留 env 值并告警，防止旧数据/解密异常永久清除凭据
+      const merged: PanelSettings = { ...this.value, ...saved, apiKey: decryptSecret(saved.apiKey), syncToken: decryptSecret(saved.syncToken ?? "") };
+      if (!merged.apiKey && this.value.apiKey) {
+        merged.apiKey = this.value.apiKey;
+        console.warn("[settings] 落盘 API Key 解密为空，已回退为环境变量注入值");
+      }
+      if (!merged.syncToken && this.value.syncToken) {
+        merged.syncToken = this.value.syncToken;
+        console.warn("[settings] 落盘 Sync Token 解密为空，已回退为环境变量注入值");
+      }
+      this.value = PanelSettingsSchema.parse(merged);
       if ((saved.apiKey && !saved.apiKey.startsWith(SECRET_PREFIX)) || (saved.syncToken && !saved.syncToken.startsWith(SECRET_PREFIX))) await this.store.set("settings", { ...this.value, apiKey: encryptSecret(this.value.apiKey), syncToken: encryptSecret(this.value.syncToken) });
     }
     this.loaded = true;
