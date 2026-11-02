@@ -1640,3 +1640,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .app-shell[data-mode="build"] .rail-workspace-section { display: none; }
 .app-shell[data-mode="build"] .work-only { display: none; }
+
+/* ── SceneFlow Phase D 打磨：流式光标 / 入场动画 / 微交互 ── */
+
+/* 构建中：叙述区尾部流式光标 */
+.progress-card:not(.finished) .progress-narration:not(.empty)::after { content: "▍"; margin-left: 2px; color: var(--accent-2); animation: sceneflow-caret 1s steps(1) infinite; }
+@keyframes sceneflow-caret { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0; } }
+
+/* 消息入场：轻浮入（120ms，不喧宾） */
+@keyframes sceneflow-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.chat-stream .message { animation: sceneflow-enter 160ms ease-out both; }
+@media (prefers-reduced-motion: reduce) { .chat-stream .message, .progress-pulse { animation: none !important; } .progress-card:not(.finished) .progress-narration:not(.empty)::after { animation: none; } }
+
+/* 进度卡完成态：收束为安静的摘要 */
+.progress-card.finished { background: rgba(18, 27, 49, .5); }
+.progress-card.finished .progress-line { color: var(--subtle); }
+
+/* 闸门卡片：待决时边框呼吸，已决后安静 */
+.message-gate-card { transition: border-color .4s ease, opacity .3s ease; }
+@keyframes sceneflow-gate { 0%, 100% { border-color: rgba(139, 124, 255, .45); } 50% { border-color: rgba(139, 124, 255, .18); } }
+.message-gate-card:has(.sc-gate-actions) { animation: sceneflow-gate 2.6s ease-in-out infinite; }
+
+/* 发送按钮：悬停轻抬 */
+.send-btn { transition: transform .15s ease, box-shadow .15s ease; }
+.send-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(105, 104, 255, .25); }
+.send-btn:active { transform: translateY(0); }
