@@ -2840,7 +2840,10 @@ export class PanelServer {
           // action promise from becoming an unhandled rejection.
         }
       };
-      void this.snapshot().then((snap) => sendIfOpen({ kind: "snapshot", snapshot: snap }));
+      // R3 审计#5：初始快照 reject 不得成为 unhandledRejection（Node 15+ 直接崩进程）
+      void this.snapshot()
+        .then((snap) => sendIfOpen({ kind: "snapshot", snapshot: snap }))
+        .catch((err: unknown) => console.error("[panel] initial snapshot failed:", err instanceof Error ? err.message : String(err)));
       ws.on("message", (data) => {
         try {
           const serialized = String(data);
