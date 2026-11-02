@@ -1,4 +1,5 @@
 import { httpFetch, makeStatus, buildCapability, type CapabilityAdapter, type CapabilityQuery } from "./adapter-utils.js";
+import { readBodyCapped } from "./base.js";
 import { ScenarioError, ScenarioErrorCode } from "@/core/errors.js";
 import type { AdapterResult, Source } from "../types.js";
 
@@ -106,5 +107,5 @@ async function fetchAwesomeReadme(signal?: AbortSignal): Promise<string> {
       phase: "retrieving",
     });
   }
-  return await resp.text();
+  return await readBodyCapped(resp); // R5+ 收尾：5MB 预算
 }

@@ -1,4 +1,5 @@
 import { fetchJson, httpFetch, makeStatus, buildCapability, type CapabilityAdapter, type CapabilityQuery } from "./adapter-utils.js";
+import { readBodyCapped } from "./base.js";
 import { ScenarioError, ScenarioErrorCode } from "@/core/errors.js";
 import type { AdapterResult, Source } from "../types.js";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -144,7 +145,7 @@ export async function downloadSkillMd(
       try {
         const resp = await httpFetch(url, { signal, headers: { accept: "text/plain" }, retries: 1 });
         if (!resp.ok) continue;
-        const text = await resp.text();
+        const text = await readBodyCapped(resp); // R5+ 收尾：5MB 预算
         if (!text.includes("#") || text.length < 20) continue; // 粗校验：像 markdown
         const dir = path.join(targetDir, path.posix.dirname(c) === "." ? "" : path.posix.dirname(c));
         await mkdir(dir, { recursive: true });

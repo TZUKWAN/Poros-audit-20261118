@@ -104,7 +104,7 @@ export function mcpSoAdapter(http = { fetch: fetchMcpSoHtml }): CapabilityAdapte
 }
 
 async function fetchMcpSoHtml(url: string, signal?: AbortSignal): Promise<string> {
-  const { httpFetch } = await import("./base.js");
+  const { httpFetch, readBodyCapped } = await import("./base.js");
   const resp = await httpFetch(url, { signal, headers: { accept: "text/html" } });
   if (resp.status === 404) {
     throw new ScenarioError({ code: ScenarioErrorCode.NOT_FOUND, message: `no mcp.so page: ${url}`, phase: "retrieving" });
@@ -117,5 +117,5 @@ async function fetchMcpSoHtml(url: string, signal?: AbortSignal): Promise<string
       context: { url, status: resp.status },
     });
   }
-  return await resp.text();
+  return await readBodyCapped(resp); // R5+ 收尾：5MB 预算
 }

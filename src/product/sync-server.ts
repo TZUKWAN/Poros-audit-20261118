@@ -7,7 +7,13 @@ export class WorkspaceSyncServer {
   constructor(private readonly store: Store<RemoteSyncEnvelope>, private readonly token: string) {}
 
   async start(port = 0): Promise<number> {
-    this.server = createServer((req, res) => { void this.handle(req, res); });
+    this.server = createServer((req, res) => {
+      // R5+ 收尾：handle 的 GET 分支/sendJson 在内层 try 之外，socket 中断或 store
+      // 异常会变成 unhandledRejection + 悬挂 socket——在外层统一兜底。
+      void this.handle(req, res).catch(() => {
+        try { res.writeHead(500).end(); } catch { /* socket 已断 */ }
+      });
+    });
     return await new Promise<number>((resolve, reject) => {
       const onError = (error: Error): void => { this.server?.off("listening", onListening); reject(error); };
       const onListening = (): void => { const address = this.server!.address(); resolve(typeof address === "object" && address ? address.port : 0); };

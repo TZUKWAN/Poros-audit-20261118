@@ -2,7 +2,7 @@ import { HostExecutionSpecSchema } from "../types.js";
 import type { Capability, HostExecutionSpecInput } from "../types.js";
 import { computeTrust } from "../trust.js";
 import { canonicalName, repoIdentity } from "../types.js";
-import { fetchJson, httpFetch, makeStatus } from "./base.js";
+import { fetchJson, httpFetch, makeStatus, readBodyCapped } from "./base.js";
 import type { AdapterResult, CapabilityAdapter, CapabilityQuery } from "../types.js";
 
 export { canonicalName, repoIdentity, fetchJson, httpFetch, makeStatus };
@@ -14,7 +14,7 @@ export async function fetchRawGithub(repo: string, path: string, branch = "main"
   for (const b of branches) {
     const url = `https://raw.githubusercontent.com/${repo}/${b}/${path}`;
     const resp = await httpFetch(url, { signal: AbortSignal.timeout(timeoutMs), retries: 1, headers: { accept: "text/plain" } });
-    if (resp.ok) return await resp.text();
+    if (resp.ok) return await readBodyCapped(resp); // R5+ 收尾：5MB 预算
   }
   return undefined;
 }

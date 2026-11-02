@@ -15,9 +15,29 @@ export interface BuildStore {
 
 export function fileBuildStore(root = path.join(scenarioDataRoot(), "builds")): BuildStore {
   const store = jsonStore<BuildContext>({ filePath: path.join(root, "builds.json"), schema: BuildContextSchema as ZodType<unknown> });
+  // R5+ 收尾：builds.json 每次持久化整体重写，长跑面板下每个闸门迁移都 O(全部构建)。
+  // 定期修剪：只保留最近 100 个，且只淘汰终态（outcome 非 running）上下文——
+  // running 的可恢复构建永不驱逐。
+  let saveCount = 0;
+  const prune = async (): Promise<void> => {
+    try {
+      const entries = await store.entries();
+      if (entries.length <= 100) return;
+      const sorted = entries
+        .map(([id, ctx]) => ({ id, startedAt: String((ctx as { startedAt?: string }).startedAt ?? ""), outcome: (ctx as { outcome?: string }).outcome ?? "running" }))
+        .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
+      for (const item of sorted.slice(100)) {
+        if (item.outcome !== "running") await store.delete(item.id);
+      }
+    } catch {
+      /* 修剪失败不影响主流程 */
+    }
+  };
   return {
     async save(ctx) {
       await store.set(ctx.id, ctx);
+      saveCount += 1;
+      if (saveCount % 25 === 0) void prune();
     },
     async load(id) {
       return await store.get(id);

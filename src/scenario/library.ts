@@ -103,6 +103,10 @@ export interface ScenarioStoreDeps {
 
 export class ScenarioLibrary {
   private matchThresholds: { hit: number; partial: number };
+  // R5+ 收尾：save 是读-改-写（previous → versionHistory → set），store 只串行化
+  // 单次写不串行化这对操作——并发同 id save（如定时任务 bump stats 与 checkDrift
+  // bump version 相撞）会互相覆盖。按 id 串行排队消除竞态。
+  private readonly saveQueues = new Map<string, Promise<void>>();
 
   /**
    * 阈值标定（6.2.2.b）：默认按 bag-of-words 嵌入器标定（hit 0.7 / partial 0.3）；
@@ -116,6 +120,17 @@ export class ScenarioLibrary {
   }
 
   async save(record: ScenarioRecord): Promise<void> {
+    const previous = this.saveQueues.get(record.id) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(() => this.saveInner(record));
+    this.saveQueues.set(record.id, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.saveQueues.get(record.id) === operation) this.saveQueues.delete(record.id);
+    }
+  }
+
+  private async saveInner(record: ScenarioRecord): Promise<void> {
     const parsed = ScenarioRecordSchema.safeParse(record);
     if (!parsed.success) {
       throw new ScenarioError({
@@ -128,7 +143,7 @@ export class ScenarioLibrary {
     const previous = await this.deps.store.get(record.id);
     const next = parsed.data;
     if (previous && next.pinnedVersion > previous.pinnedVersion) {
-      next.versionHistory = [...previous.versionHistory, { version: previous.pinnedVersion, capabilityIds: previous.capabilityIds, createdAt: previous.createdAt, reason: "superseded" }];
+      next.versionHistory = [...previous.versionHistory, { version: previous.pinnedVersion, capabilityIds: previous.capabilityIds, createdAt: previous.createdAt, reason: "superseded" }].slice(-20); // R5+ 收尾：封顶防无限增长
     }
     await this.deps.store.set(record.id, next);
   }

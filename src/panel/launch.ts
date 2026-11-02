@@ -548,6 +548,9 @@ async function main(): Promise<void> {
       // reject 都会让 launchBusy 永真 → 面板从此对一切 start-build 回"已有构建进行中"。
       // 整体包一层兜底：异常路径清锁 + 推终端错误消息 + 返回失败（中间的正常早退
       // 分支各自已清锁，return 不会触发 catch）。
+      // R5+ 收尾：orchestrator 是否已启动必须在 catch 可见的 outer 作用域声明
+      //（try 块内声明的 const 对 catch 不可达）。
+      let orchestratorStarted = false;
       try {
       controller = new RunController();
       panel.setController(controller);
@@ -885,6 +888,9 @@ async function main(): Promise<void> {
         return { projectId, projectInstructions: project?.instructions ?? "", files: fileRefs, memories: memoryRefs, connectors: connectorRefs, desktopContexts, provider: { id: selected?.id ?? project?.providerId ?? providerSettings.providerId ?? null, baseUrl: selected?.baseUrl ?? providerSettings.baseUrl, model: selected?.model ?? providerSettings.plannerModel ?? providerSettings.model, timeoutMs: selected?.timeoutMs ?? providerSettings.timeoutMs } };
       })();
       orch.start(requirement, buildId, runtimeContext, "construction");
+      // R5+ 收尾：start 之后的异常不得再报"构建启动失败"——orchestrator 已在跑、
+      // 自带 .catch 会如实报告结局，假失败消息 + 真实成功终态自相矛盾。
+      orchestratorStarted = true;
       void orch
         .run()
         .then(async (final) => {
@@ -985,6 +991,12 @@ async function main(): Promise<void> {
         // planner 残留仅为一次性对象引用，下一次 start-build 会重建全部运行状态。
         launchBusy = false;
         const message = setupError instanceof Error ? setupError.message : String(setupError);
+        if (orchestratorStarted) {
+          // orchestrator 已启动：run() 链自带 .catch 会如实报告真实结局，这里只记日志
+          // 不发假失败消息。
+          console.error("[launch] post-start setup error (run continues):", message);
+          return { ok: true };
+        }
         const failedRunId = panel.currentRunId;
         panel.pushChat(failedRunId
           ? { role: "build-status", tone: "err", text: `构建启动失败：${message}`, runId: failedRunId, terminal: true, ts: Date.now() }
@@ -1134,12 +1146,18 @@ async function main(): Promise<void> {
       .catch(async (error: unknown) => {
         // Resume replaces the aborted worker with a fresh instance. A late
         // rejection from the old worker must not mark that replacement failed.
-        if (longRunWorkers.get(run.id) !== worker) return;
-        const current = await longRuns.get(run.id);
-        if (current && ["queued", "running"].includes(current.status) && !current.pauseRequested) {
-          const failed = await longRuns.update(run.id, { status: "failed", lastError: (error instanceof Error ? error.message : String(error)).slice(0, 2_000), finishedAt: new Date().toISOString() }, current.revision);
-          panel.setLongRunState(failed);
-          panel.pushChat({ role: "build-status", tone: "err", runStatus: "failed", text: failed.lastError ?? "长程场景执行器异常退出。", runId: failed.id, sessionId: failed.sessionId ?? undefined, terminal: true, ts: Date.now() });
+        // R5+ 收尾：catch 回调自身的 await（longRuns.get/update）失败不得成为
+        // 第二个 unhandledRejection——降级为日志。
+        try {
+          if (longRunWorkers.get(run.id) !== worker) return;
+          const current = await longRuns.get(run.id);
+          if (current && ["queued", "running"].includes(current.status) && !current.pauseRequested) {
+            const failed = await longRuns.update(run.id, { status: "failed", lastError: (error instanceof Error ? error.message : String(error)).slice(0, 2_000), finishedAt: new Date().toISOString() }, current.revision);
+            panel.setLongRunState(failed);
+            panel.pushChat({ role: "build-status", tone: "err", runStatus: "failed", text: failed.lastError ?? "长程场景执行器异常退出。", runId: failed.id, sessionId: failed.sessionId ?? undefined, terminal: true, ts: Date.now() });
+          }
+        } catch (nested) {
+          console.error("[long-run] failure handler errored:", nested instanceof Error ? nested.message : String(nested));
         }
       })
       .finally(() => {

@@ -89,6 +89,25 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 }
 
 /** 安全 JSON 读取：非 2xx 抛 ScenarioError（带状态码） */
+/** R5+ 收尾：流式读取响应体并施加字节预算（默认 5MB）——超限抛错，防失控端点撑爆面板内存。 */
+export async function readBodyCapped(resp: Response, maxBytes = 5 * 1024 * 1024): Promise<string> {
+  if (!resp.body) return "";
+  const reader = resp.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`response body exceeded ${maxBytes} byte cap`);
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 export async function fetchJson<T>(url: string, init: RequestInit & { timeoutMs?: number; retries?: number } = {}): Promise<T> {
   const resp = await httpFetch(url, init);
   if (!resp.ok) {
@@ -100,7 +119,7 @@ export async function fetchJson<T>(url: string, init: RequestInit & { timeoutMs?
     });
   }
   try {
-    return (await resp.json()) as T;
+    return JSON.parse(await readBodyCapped(resp)) as T;
   } catch (err) {
     throw new ScenarioError({
       code: ScenarioErrorCode.SOURCE_PARSE,
