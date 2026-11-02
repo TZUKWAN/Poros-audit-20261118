@@ -330,15 +330,6 @@ export class Orchestrator {
     if (!resolve) {
       throw new ScenarioError({ code: ScenarioErrorCode.CONFLICT, message: "no gate pending", phase: "infra" });
     }
-    // R4 审计P2（与 ares/metis 同步）：决策必须针对当前 pending 的 gate。校验失败时
-    // 不清 decideResolve——真正 pending 的等待继续存活。
-    if (this.context.pendingGate !== parsed.data.gate) {
-      throw new ScenarioError({
-        code: ScenarioErrorCode.CONFLICT,
-        message: `gate ${parsed.data.gate} is not the pending gate (${this.context.pendingGate ?? "none"})`,
-        phase: "infra",
-      });
-    }
     this.decideResolve = undefined;
     resolve({ decision: parsed.data, decidedBy });
   }

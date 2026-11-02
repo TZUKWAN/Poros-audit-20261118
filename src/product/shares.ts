@@ -22,10 +22,22 @@ export class ShareLinkRepository {
   async getByToken(token: string): Promise<ShareLink | undefined> {
     const hash = hashToken(token);
     const items = await this.store.entries();
-    const value = items.map(([, item]) => ShareLinkSchema.parse(item)).find((item) => item.tokenHash === hash);
+    // R5 审计P3：逐条 safeParse 跳过坏行——旧代码对全表 parse，一行损坏/遗留
+    // 数据会让所有分享链接打开都 500（应只有坏链接本身失效）。
+    const value = items
+      .map(([, item]) => ShareLinkSchema.safeParse(item))
+      .filter((r) => r.success)
+      .map((r) => (r as { success: true; data: ShareLink }).data)
+      .find((item) => item.tokenHash === hash);
     if (!value || (value.expiresAt && Date.parse(value.expiresAt) <= Date.now())) return undefined;
     return value;
   }
-  async list(workspaceId: string): Promise<ShareLink[]> { return (await this.store.entries()).map(([, item]) => ShareLinkSchema.parse(item)).filter((item) => item.workspaceId === workspaceId); }
+  async list(workspaceId: string): Promise<ShareLink[]> {
+    return (await this.store.entries())
+      .map(([, item]) => ShareLinkSchema.safeParse(item))
+      .filter((r) => r.success)
+      .map((r) => (r as { success: true; data: ShareLink }).data)
+      .filter((item) => item.workspaceId === workspaceId);
+  }
   async delete(id: string): Promise<boolean> { return await this.store.delete(id); }
 }

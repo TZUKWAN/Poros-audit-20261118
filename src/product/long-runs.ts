@@ -74,6 +74,11 @@ export class LongRunRepository {
           if (!last || last.status !== "running") done = true; // 已被并发路径处理或终态
         }
       }
+      // R5 审计P3：3 次尝试仍失败（如记录本身过不了 LongRunSchema.parse）时不得静默——
+      // 该 run 会永远卡 status:"running"，每次面板启动都重试一遍。至少留痕。
+      if (!done) {
+        console.error(`[long-runs] recoverAfterRestart: 无法暂停 ${run.id}（3 次尝试均失败），该运行仍标记为 running`);
+      }
     }
     return recovered;
   }
