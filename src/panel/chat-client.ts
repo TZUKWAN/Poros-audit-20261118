@@ -2391,7 +2391,13 @@ function connect(): void {
         if (meta?.type === "choose-project-folder") { const hint = $("new-session-folder-hint"); if (hint) hint.textContent = String(payload.error ?? "未绑定文件夹，当前项目没有变化。"); }
         setBusy(false); pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "操作失败") });
       }
-      else if (meta?.type === "test-settings") { const result = $("settings-result"); if (result) result.textContent = "模型连接验证成功。"; }
+      else if (meta?.type === "test-settings") {
+        const result = $("settings-result");
+        if (result) {
+          const data = payload.data as { model?: string } | undefined;
+          result.textContent = data?.model ? `模型连接验证成功（${data.model}）。` : "模型连接验证成功。";
+        }
+      }
       else if (meta?.type === "choose-project-folder") { const data = payload.data as { rootPath?: string; fileCount?: number } | undefined; const hint = $("new-session-folder-hint"); if (hint) hint.textContent = `已绑定真实文件夹${data?.rootPath ? `：${data.rootPath}` : ""}，扫描 ${data?.fileCount ?? 0} 个文件。`; if (currentSnapshot) renderNewSessionDialog(currentSnapshot); }
       else if (meta?.type === "update-settings") { const result = $("settings-result"); if (result) result.textContent = "设置已保存，后续新运行会使用新配置。"; }
       else if (meta?.type === "create-share") { const token = (payload.data as { token?: string } | undefined)?.token; if (token) { void copyText(token); pushMessage({ role: "build-status", tone: "ok", text: `分享令牌已创建并复制：${token}` }); } }
