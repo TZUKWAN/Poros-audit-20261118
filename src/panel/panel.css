@@ -2598,3 +2598,7 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 #req-go:hover { background: var(--claude-accent-strong) !important; }
 #req-go:active { transform: scale(.94) !important; }
 #req-go:disabled { opacity: .4 !important; }
+
+/* 打磨 H — 帮助卡命令名不折行，参数词组紧凑 */
+.help-command { white-space: nowrap !important; overflow-wrap: normal !important; flex: none !important; }
+.help-description { text-align: right !important; min-width: 0 !important; }
