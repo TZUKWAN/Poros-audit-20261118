@@ -2589,3 +2589,12 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .gate-reject { color: var(--claude-ink) !important; background: transparent !important; border: 1px solid var(--claude-line) !important; }
 .gate-reject:hover { background: var(--claude-hover) !important; }
 .awaiting-user-fields .gate-approve { color: #fff !important; background: var(--claude-accent) !important; }
+
+/* 打磨 G — 指令条聚焦态与发送按钮 */
+.composer { transition: border-color .18s ease, box-shadow .18s ease !important; }
+.composer:focus-within { border-color: color-mix(in srgb, var(--claude-accent) 45%, var(--claude-line)) !important; box-shadow: 0 8px 26px rgba(45, 43, 38, .08), 0 0 0 3px color-mix(in srgb, var(--claude-accent) 11%, transparent) !important; }
+.composer textarea { caret-color: var(--claude-accent) !important; }
+#req-go { transition: background .15s ease, transform .15s ease !important; }
+#req-go:hover { background: var(--claude-accent-strong) !important; }
+#req-go:active { transform: scale(.94) !important; }
+#req-go:disabled { opacity: .4 !important; }
