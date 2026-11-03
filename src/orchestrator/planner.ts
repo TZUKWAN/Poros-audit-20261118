@@ -211,7 +211,17 @@ export class OpenRouterPlanner implements ScenarioPlanner {
       if (timeout.aborted) throw timeoutMessage();
       throw error;
     });
-    if (!response.ok) throw new Error(`OpenRouter HTTP ${response.status}`);
+    if (!response.ok) {
+      // 带可操作指引：401/403 指向 Key，404 指向地址/模型名，429 指向限流
+      const hint = response.status === 401 || response.status === 403
+        ? "（API Key 缺失或无效——请在设置里填写该端点的 Key）"
+        : response.status === 404
+          ? "（接口路径或模型名可能不对——请检查设置里的 API 地址与模型）"
+          : response.status === 429
+            ? "（端点限流——稍后重试或更换模型）"
+            : "";
+      throw new Error(`模型端点 HTTP ${response.status}${hint}`);
+    }
     if (response.headers.get("content-type")?.includes("text/event-stream")) {
       let content = "";
       const consumeLine = (line: string): void => {
