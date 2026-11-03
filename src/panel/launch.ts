@@ -1243,7 +1243,7 @@ async function main(): Promise<void> {
     const goalMet = result.status === "succeeded" && Object.values(result.outputs).some((output) => /GOAL_MET\s*:\s*true/i.test(output));
     return {
       round,
-      summary: result.status === "succeeded" ? `本轮执行完成，成功 ${successSteps} 个步骤。已生成产物。` : result.status === "untested" ? `本轮生成了说明，但没有形成可验证结果：${result.error ?? "缺少真实执行证据"}` : `本轮执行失败：${result.error ?? "步骤未通过"}`,
+      summary: result.status === "succeeded" ? `本轮执行完成，成功 ${successSteps} 个步骤。已生成产物。` : result.status === "untested" ? `本轮生成了说明，但没有形成可验证结果：${(result.error ?? "缺少真实执行证据").replace(/。+$/, "")}。` : `本轮执行失败：${(result.error ?? "步骤未通过").replace(/。+$/, "")}。`,
       goalMet,
       metrics: { steps: result.trace.length, successSteps, totalTokens: result.totalTokens ?? 0 },
     };
