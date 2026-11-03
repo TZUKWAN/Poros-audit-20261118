@@ -2675,3 +2675,13 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .inspector .section-label { color: var(--claude-muted) !important; }
 .inspector .inspector-subtitle { font-size: 11.5px !important; }
 .inspector .acceptance-row, .inspector .file-row, .inspector .selection-row, .inspector .dag-node { font-size: 12.5px !important; }
+
+/* ============================================================
+   打磨 Q — 场景库卡片操作层级（8px 按钮不可读）
+   ============================================================ */
+.scenario-card { padding: 11px 12px !important; border-radius: 10px !important; transition: border-color .15s ease !important; }
+.scenario-card:hover { border-color: color-mix(in srgb, var(--claude-accent) 34%, var(--claude-line)) !important; }
+.scenario-card .scenario-actions .session-action { font-size: 11px !important; padding: 4px 9px !important; border-radius: 6px !important; color: var(--claude-muted) !important; border-color: var(--claude-line) !important; transition: color .14s ease, border-color .14s ease, background .14s ease !important; }
+.scenario-card .scenario-actions .session-action:hover { color: var(--claude-ink) !important; border-color: var(--claude-accent) !important; background: color-mix(in srgb, var(--claude-accent) 8%, transparent) !important; }
+.scenario-card .scenario-actions .session-action:first-child { font-size: 12px !important; font-weight: 650 !important; color: var(--claude-accent-strong) !important; border-color: color-mix(in srgb, var(--claude-accent) 42%, var(--claude-line)) !important; }
+.scenario-card .scenario-actions .session-action:first-child:hover { background: color-mix(in srgb, var(--claude-accent) 12%, transparent) !important; }
