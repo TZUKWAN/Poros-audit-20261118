@@ -1912,7 +1912,9 @@ function renderMinimap(): void {
       title = userText.slice(0, 32);
       subtitle = "用户需求";
     } else if (isProgress) {
-      title = "构建与思考流程";
+      // 预览卡标题跟随当前阶段（head 虽隐藏，phase 文本仍可读取）
+      const phaseText = el.querySelector(".progress-phase")?.textContent?.trim();
+      title = phaseText && phaseText !== "准备中" ? (phaseText === "完成" ? "任务画布" : phaseText) : "构建与思考流程";
       const summaryText = el.querySelector(".progress-details-summary")?.textContent ?? "";
       subtitle = summaryText || "进行中";
       const stepTexts = el.querySelectorAll(".progress-step-text");
