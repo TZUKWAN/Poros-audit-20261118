@@ -1053,6 +1053,7 @@ function renderProviders(snap: PanelSnapshot): void {
 
 function renderTasks(snap: PanelSnapshot): void {
   const box = $("task-list"); if (!box) return;
+  (window as unknown as { __rtLog?: string[] }).__rtLog = [...((window as unknown as { __rtLog?: string[] }).__rtLog ?? []), `tasks=${snap.tasks.length} rows=${snap.tasks.map((t) => t.requirement.slice(0, 6)).join(",")}`];
   box.replaceChildren();
   if (!snap.tasks.length) { box.append(textBlock("还没有后台任务", "inspector-subtitle")); return; }
   for (const task of snap.tasks) {
