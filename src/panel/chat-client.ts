@@ -2423,6 +2423,24 @@ function connect(): void {
         if (meta?.type === "choose-project-folder") { const hint = $("new-session-folder-hint"); if (hint) hint.textContent = String(payload.error ?? "未绑定文件夹，当前项目没有变化。"); }
         setBusy(false); pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "操作失败") });
       }
+      else if (meta?.type === "version-artifact") {
+        if (ok) pushMessage({ role: "build-status", tone: "ok", text: "产物新版本已创建。", ts: Date.now() });
+        else pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "产物新版本创建失败。"), ts: Date.now() });
+      }
+      else if (meta?.type === "test-scenario") {
+        if (ok) pushMessage({ role: "build-status", tone: "ok", text: "泛化测试已启动，结果会出现在对话流中。", ts: Date.now() });
+        else pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "泛化测试启动失败。"), ts: Date.now() });
+      }
+      else if (meta?.type === "archive-scenario" || meta?.type === "restore-scenario" || meta?.type === "delete-scenario") {
+        const labels: Record<string, string> = { "archive-scenario": "场景已归档。", "restore-scenario": "场景已恢复。", "delete-scenario": "场景已删除。" };
+        if (ok) pushMessage({ role: "build-status", tone: "ok", text: labels[meta.type] ?? "操作完成。", ts: Date.now() });
+        else pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "操作失败。"), ts: Date.now() });
+      }
+      else if (meta?.type === "pin-project" || meta?.type === "archive-project" || meta?.type === "restore-project") {
+        const labels: Record<string, string> = { "pin-project": "项目置顶状态已更新。", "archive-project": "项目已归档。", "restore-project": "项目已恢复。" };
+        if (ok) pushMessage({ role: "build-status", tone: "ok", text: labels[meta.type] ?? "操作完成。", ts: Date.now() });
+        else pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "操作失败。"), ts: Date.now() });
+      }
       else if (meta?.type === "search") {
         const box = $("search-result");
         if (box) {
