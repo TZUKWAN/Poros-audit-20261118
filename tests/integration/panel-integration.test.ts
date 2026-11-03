@@ -653,6 +653,32 @@ describe("8.1 面板服务：连接/快照一致/断线重连", () => {
     await expect(server.handleAction({ type: "branch-run", runId: "active-run" })).resolves.toMatchObject({ ok: false, error: "该运行尚未结束，不能创建分支" });
   });
 
+  it("步骤级操作支持编辑、仅重做当前步、级联重做后续依赖", async () => {
+    let capturedAction: unknown;
+    const depsRef = (server as unknown as {
+      deps: {
+        onStepAction?: (payload: { runId: string; stepId: string; action: "edit" | "redo-single" | "redo-cascade"; updatedTitle?: string }) => Promise<{ ok: boolean; error?: string }>;
+      };
+    }).deps;
+    depsRef.onStepAction = async (payload) => {
+      capturedAction = payload;
+      return { ok: true };
+    };
+
+    const res = await server.handleAction({
+      type: "step-action",
+      runId: "run-test-step",
+      stepId: "n1",
+      action: "redo-single",
+    });
+    expect(res).toEqual({ ok: true });
+    expect(capturedAction).toMatchObject({
+      runId: "run-test-step",
+      stepId: "n1",
+      action: "redo-single",
+    });
+  });
+
   it("运行期间拒绝切换项目，避免异步终态污染新项目", async () => {
     const depsRef = (server as unknown as {
       deps: {
