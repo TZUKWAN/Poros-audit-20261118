@@ -1727,3 +1727,35 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* 11) kicker 用 ID 级选择器压制主题橙 */
 #chat-kicker.chat-kicker { color: var(--claude-faint) !important; }
 .chat-kicker { color: var(--claude-faint) !important; }
+
+/* ═══ SceneFlow Phase D-6 细节打磨 ═══ */
+
+/* 执行过程折叠行：紧凑单行（去三列 grid 拉伸），小三角引导 */
+.chat-stream .run-timeline-summary { display: flex !important; grid-template-columns: none; gap: 0 !important; align-items: center; padding: 3px 0 !important; font-size: 12px !important; }
+.chat-stream .run-timeline-summary::before { content: "▸"; display: inline-block; margin-right: 7px; color: var(--claude-faint); transition: transform .15s ease; }
+.chat-stream .run-timeline[open] > .run-timeline-summary::before { transform: rotate(90deg); }
+.chat-stream .run-timeline-summary .run-timeline-label { font-size: 12px; }
+.chat-stream .run-timeline-summary .run-timeline-result { display: none; }
+.chat-stream .run-timeline-summary .run-timeline-count { margin-left: 8px; font-size: 11px; }
+.chat-stream .run-timeline { margin-left: 0 !important; }
+
+/* 验收"已定义"态：橙字太亮 → muted（浅色不刺眼，暗色不抢） */
+.chat-stream .acceptance-row.defined { color: var(--claude-faint) !important; }
+#acc-view .acceptance-row.defined { color: var(--claude-faint) !important; }
+
+/* 用户气泡：浅色下稍加深对比 */
+:root:not([data-theme="dark"]) { --sf-user-bubble: #e3e1db; }
+
+/* composer 聚焦统一为 claude 主题反馈（覆盖历史蓝/紫聚焦态） */
+.composer:focus-within { border-color: var(--claude-accent) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--claude-accent) 12%, transparent) !important; }
+
+/* 会话列表项：更安静的层次（悬停浮起当前态） */
+.rail .session-item:hover { background: var(--claude-hover); }
+.rail .session-item.active { background: var(--claude-hover); box-shadow: inset 2px 0 0 var(--claude-accent); }
+
+/* 顶栏模式切换：当前 tab 用主题强调（浅色系更稳） */
+.mode-btn.active { background: var(--claude-hover) !important; color: var(--claude-ink) !important; box-shadow: inset 0 0 0 1px var(--claude-line) !important; }
+
+/* "查看最新消息"浮钮贴主题 */
+.jump-latest { background: var(--claude-surface) !important; border: 1px solid var(--claude-line) !important; color: var(--claude-muted) !important; box-shadow: var(--claude-shadow) !important; }
+.jump-latest:hover { color: var(--claude-ink) !important; }
