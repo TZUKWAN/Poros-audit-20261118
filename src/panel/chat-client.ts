@@ -1174,8 +1174,14 @@ function renderRichText(value: unknown): HTMLElement {
       continue;
     }
     if (code) { code.append(document.createTextNode(`${line}\n`)); continue; }
-    const heading = line.match(/^#{1,3}\s+(.+)$/);
-    if (heading) { flushParagraph(); closeList(); const h = node(heading[0].startsWith("###") ? "h4" : heading[0].startsWith("##") ? "h3" : "h2", "rich-heading"); h.append(inline(heading[1]!)); root.append(h); continue; }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      flushParagraph(); closeList();
+      // 模型常输出 #### 四级标题：1-3 级映射 h2-h4，更深的统一 h5，避免原始 # 泄漏
+      const depth = heading[1]!.length;
+      const h = node(depth === 1 ? "h2" : depth === 2 ? "h3" : depth === 3 ? "h4" : "h5", "rich-heading");
+      h.append(inline(heading[2]!)); root.append(h); continue;
+    }
     const bullet = line.match(/^\s*[-*•]\s+(.+)$/);
     const numbered = line.match(/^\s*\d+[.)]\s+(.+)$/);
     if (bullet || numbered) {
