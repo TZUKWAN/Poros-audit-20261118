@@ -1372,7 +1372,7 @@ function renderThinkingMessage(message: ThinkingMessage): HTMLElement {
   // of internal-looking text.
   details.open = streaming || thinkingExpanded.get(key) === true;
   const summary = node("summary", "thinking-summary");
-  summary.append(textBlock(streaming ? "正在思考" : "思考过程", "thinking-title"), textBlock(streaming ? "实时" : "已完成", "thinking-state"));
+  summary.append(textBlock(streaming ? "正在思考…" : "已深度思考", "thinking-title"), textBlock(streaming ? "实时" : "已完成", "thinking-state"));
   details.append(summary, renderRichText(content));
   details.dataset.thinkingKey = key;
   details.addEventListener("toggle", () => { if (!streaming) thinkingExpanded.set(key, details.open); });
