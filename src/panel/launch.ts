@@ -622,10 +622,10 @@ async function main(): Promise<void> {
             tools: connectorTools.tools,
             toolExecutor: connectorTools.executor,
             onEvent: (event: WorkExecutionEvent) => {
-              if (event.type === "step-start") pushRunChat({ role: "build-status", tone: "info", text: `开始步骤：${event.title}`, ts: Date.now() });
+              // 任务画布：节点事件进进度卡（不重复入聊天流），由客户端按 nodeId 原地合并
+              if (event.type === "step-start") panel.pushProgress(runId, { node: { nodeId: event.nodeId, title: event.title, status: "running" } });
               if (event.type === "step-finish") {
-                const seconds = Math.max(0, Math.round(event.durationMs / 1000));
-                pushRunChat({ role: "build-status", tone: event.status === "success" ? "info" : "err", text: `${event.status === "success" ? "完成步骤" : event.status === "skipped" ? "跳过步骤" : "步骤失败"}：${event.title}（用时 ${seconds} 秒）`, ts: Date.now() });
+                panel.pushProgress(runId, { node: { nodeId: event.nodeId, title: event.title, status: event.status === "success" || event.status === "skipped" ? "ok" : "err", seconds: Math.max(0, Math.round(event.durationMs / 1000)) } });
               }
               if (event.type === "chunk") pushRunChat({ role: "model-stream", nodeId: event.nodeId, content: event.chunk, ts: Date.now() });
               if (event.type === "thinking") pushRunChat({ role: "model-thinking", nodeId: event.nodeId, content: event.chunk, ts: Date.now() });
@@ -639,6 +639,8 @@ async function main(): Promise<void> {
           providedSlots = { ...providedSlots, ...answer };
         }
         const workspaceId = runBinding.workspaceId ?? (await repository.getDefaultWorkspace()).id;
+        // 任务画布收口：工作模式运行结束 → 进度卡折叠为一行摘要
+        panel.pushProgress(runId, { finished: true, line: result.status === "succeeded" ? "执行完成，产物已生成。" : result.status === "untested" ? "已生成说明，但缺少真实执行证据。" : "执行失败。" });
         await artifacts.create({ id: `artifact-${runId}-result`, workspaceId, projectId: runBinding.projectId, sessionId: runBinding.sessionId, runId, name: `${scenario.name} 工作结果.md`, mediaType: "text/markdown", path: result.artifactPath, version: 1, checksum: artifactChecksum(result.artifactContent), status: result.status === "succeeded" ? "ready" : result.status === "untested" ? "draft" : "failed" });
         const finishedAt = new Date().toISOString();
         const storedRun = await runs.get(runId);
@@ -1208,8 +1210,11 @@ async function main(): Promise<void> {
         tools: connectorTools.tools,
         toolExecutor: connectorTools.executor,
         onEvent: (event: WorkExecutionEvent) => {
-          if (event.type === "step-start") panel.pushChat({ role: "build-status", tone: "info", text: `第 ${round} 轮开始步骤：${event.title}`, runId: run.id, ts: Date.now() });
-          if (event.type === "step-finish") panel.pushChat({ role: "build-status", tone: event.status === "success" ? "info" : "err", text: `第 ${round} 轮${event.status === "success" ? "完成" : event.status === "skipped" ? "跳过" : "失败"}步骤：${event.title}`, runId: run.id, ts: Date.now() });
+          // 任务画布：长程轮次同样走节点级进度卡事件
+          if (event.type === "step-start") panel.pushProgress(run.id, { node: { nodeId: event.nodeId, title: event.title, status: "running" } });
+          if (event.type === "step-finish") {
+            panel.pushProgress(run.id, { node: { nodeId: event.nodeId, title: event.title, status: event.status === "success" || event.status === "skipped" ? "ok" : "err", seconds: Math.max(0, Math.round(event.durationMs / 1000)) } });
+          }
           if (event.type === "chunk") panel.pushChat({ role: "model-stream", nodeId: event.nodeId, content: event.chunk, runId: run.id, ts: Date.now() });
           if (event.type === "thinking") panel.pushChat({ role: "model-thinking", nodeId: event.nodeId, content: event.chunk, runId: run.id, ts: Date.now() });
           if (event.type === "tool-call") panel.pushChat({ role: "tool-call", nodeId: event.nodeId, toolCallId: event.call.id, toolName: event.call.name, arguments: event.call.arguments, runId: run.id, ts: Date.now() });

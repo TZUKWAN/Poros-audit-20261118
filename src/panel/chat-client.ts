@@ -42,8 +42,8 @@ interface ProgressCardMessage {
   /** 分源检索微状态 */
   sources: Array<{ id: string; ok: boolean; done: boolean }>;
   sourcesTotal: number;
-  /** 完整步骤时间线（折叠区） */
-  steps: Array<{ at: number; text: string }>;
+  /** 完整步骤时间线（折叠区）；nodeId/status 来自工作模式节点级事件 */
+  steps: Array<{ at: number; text: string; nodeId?: string; status?: "running" | "ok" | "err" }>;
   startedAt: number;
   finishedAt: number | null;
   ts?: number;
@@ -1192,8 +1192,23 @@ function renderRichText(value: unknown): HTMLElement {
 
 /** SceneFlow 进度卡：构建过程内联进度——步进器 + 流式叙述 + 分源微状态，全程一张卡原地更新。 */
 /** 完成摘要：DeepSeek 式一行（用时 + 步数，无明细时省略步数） */
-function progressDoneSummary(card: ProgressCardMessage): string {
-  const seconds = card.finishedAt !== null ? Math.max(1, Math.round((card.finishedAt - card.startedAt) / 1000)) : 0;
+function progressLiveSummary(card: ProgressCardMessage): string {
+  const nodeSteps = card.steps.filter((s) => s.nodeId);
+  if (nodeSteps.length > 0) {
+    const ok = nodeSteps.filter((s) => s.status === "ok").length;
+    const running = nodeSteps.some((s) => s.status === "running");
+    return running ? `执行中 · 已完成 ${ok}/${nodeSteps.length} 步` : `执行中（${nodeSteps.length} 步）`;
+  }
+  return `思考与执行中（${card.steps.length}）`;
+}
+
+function progressDoneSummary(card: ProgressCardMessage): string {  const seconds = card.finishedAt !== null ? Math.max(1, Math.round((card.finishedAt - card.startedAt) / 1000)) : 0;
+  const nodeSteps = card.steps.filter((s) => s.nodeId);
+  if (nodeSteps.length > 0) {
+    const ok = nodeSteps.filter((s) => s.status === "ok").length;
+    const err = nodeSteps.filter((s) => s.status === "err").length;
+    return err > 0 ? `执行结束 · ${ok} 步成功 · ${err} 步失败` : `执行完成 · ${ok} 步全部成功 · 用时 ${seconds} 秒`;
+  }
   return card.steps.length > 0 ? `已完成构建 · 用时 ${seconds} 秒 · ${card.steps.length} 步` : `已完成构建 · 用时 ${seconds} 秒`;
 }
 
@@ -1236,86 +1251,10 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
 
   const details = node("details", "progress-details");
   const summary = node("summary", "progress-details-summary");
-  summary.textContent = done ? progressDoneSummary(card) : `思考与执行中（${card.steps.length}）`;
+  summary.textContent = done ? progressDoneSummary(card) : progressLiveSummary(card);
   const steps = node("div", "progress-steps");
-  steps.replaceChildren(...card.steps.map((step, index) => {
-    const row = node("div", "progress-step-row");
-    const time = new Date(step.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    const timeEl = node("span", "progress-step-time");
-    timeEl.textContent = time;
-    const textEl = node("span", "progress-step-text");
-    textEl.textContent = step.text;
-    row.append(timeEl, textEl);
-
-    // SceneFlow 核心机制：步骤级操作（编辑、独立重做当前步、级联重做后续依赖）
-    const stepId = `n${index + 1}`;
-    const actions = node("div", "step-actions");
-    const editBtn = node("button", "step-btn");
-    editBtn.type = "button";
-    editBtn.textContent = "编辑";
-    editBtn.title = "修改该步骤内容与预期产出";
-    editBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const updated = window.prompt("编辑该步骤内容：", step.text);
-      if (updated && updated.trim() && updated.trim() !== step.text) {
-        sendPayload({
-          type: "step-action",
-          runId: card.runId,
-          stepId,
-          action: "edit",
-          updatedTitle: updated.trim(),
-        });
-      }
-    });
-
-    const redoBtn = node("button", "step-btn step-redo-btn");
-    redoBtn.type = "button";
-    redoBtn.textContent = "重做 ▾";
-    redoBtn.title = "重新执行该步骤";
-    const redoMenu = node("div", "step-redo-menu");
-
-    const redoSingle = node("button", "step-redo-item");
-    redoSingle.type = "button";
-    redoSingle.innerHTML = `<span>仅重做当前步</span><span class="step-redo-hint">保持其他步骤产出不变</span>`;
-    redoSingle.addEventListener("click", (e) => {
-      e.stopPropagation();
-      redoMenu.classList.remove("open");
-      sendPayload({
-        type: "step-action",
-        runId: card.runId,
-        stepId,
-        action: "redo-single",
-      });
-    });
-
-    const redoCascade = node("button", "step-redo-item");
-    redoCascade.type = "button";
-    redoCascade.innerHTML = `<span>重做此步及后续步骤</span><span class="step-redo-hint">按依赖链级联更新后续产出</span>`;
-    redoCascade.addEventListener("click", (e) => {
-      e.stopPropagation();
-      redoMenu.classList.remove("open");
-      sendPayload({
-        type: "step-action",
-        runId: card.runId,
-        stepId,
-        action: "redo-cascade",
-      });
-    });
-
-    redoMenu.append(redoSingle, redoCascade);
-    redoBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      document.querySelectorAll(".step-redo-menu.open").forEach((m) => {
-        if (m !== redoMenu) m.classList.remove("open");
-      });
-      redoMenu.classList.toggle("open");
-    });
-
-    actions.append(editBtn, redoBtn, redoMenu);
-    row.append(actions);
-    return row;
-  }));
-  if (done && card.line) {
+  steps.replaceChildren(...card.steps.map((step, index) => buildStepRow(card, step, index)));
+  if (done && card.line && !card.steps.some((s) => s.text === card.line)) {
     const row = node("div", "progress-step-row");
     const timeEl = node("span", "progress-step-time");
     timeEl.textContent = new Date(card.finishedAt ?? card.ts ?? Date.now()).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -1331,6 +1270,70 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
   cardEl.append(head, narration, line, chips, details);
   root.append(cardEl);
   return root;
+}
+
+/** 任务画布步骤卡：状态点 + 时间 + 内容 + 悬停操作（编辑 / 重做单步 / 级联重做）。 */
+function buildStepRow(card: ProgressCardMessage, step: ProgressCardMessage["steps"][number], index: number): HTMLElement {
+  const row = node("div", `progress-step-row${step.status ? ` step-${step.status}` : ""}`);
+  const dot = node("span", `progress-step-dot ${step.status ?? ""}`);
+  dot.setAttribute("aria-hidden", "true");
+  const timeEl = node("span", "progress-step-time");
+  timeEl.textContent = new Date(step.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const textEl = node("span", "progress-step-text");
+  textEl.textContent = step.text;
+  row.append(dot, timeEl, textEl);
+
+  // SceneFlow 核心机制：步骤级操作（编辑、独立重做当前步、级联重做后续依赖）
+  const stepId = step.nodeId ?? `n${index + 1}`;
+  const actions = node("div", "step-actions");
+  const editBtn = node("button", "step-btn");
+  editBtn.type = "button";
+  editBtn.textContent = "编辑";
+  editBtn.title = "修改该步骤内容与预期产出";
+  editBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const updated = window.prompt("编辑该步骤内容：", step.text);
+    if (updated && updated.trim() && updated.trim() !== step.text) {
+      sendPayload({ type: "step-action", runId: card.runId, stepId, action: "edit", updatedTitle: updated.trim() });
+    }
+  });
+
+  const redoBtn = node("button", "step-btn step-redo-btn");
+  redoBtn.type = "button";
+  redoBtn.textContent = "重做 ▾";
+  redoBtn.title = "重新执行该步骤";
+  const redoMenu = node("div", "step-redo-menu");
+
+  const redoSingle = node("button", "step-redo-item");
+  redoSingle.type = "button";
+  redoSingle.innerHTML = `<span>仅重做当前步</span><span class="step-redo-hint">保持其他步骤产出不变</span>`;
+  redoSingle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    redoMenu.classList.remove("open");
+    sendPayload({ type: "step-action", runId: card.runId, stepId, action: "redo-single" });
+  });
+
+  const redoCascade = node("button", "step-redo-item");
+  redoCascade.type = "button";
+  redoCascade.innerHTML = `<span>重做此步及后续步骤</span><span class="step-redo-hint">按依赖链级联更新后续产出</span>`;
+  redoCascade.addEventListener("click", (e) => {
+    e.stopPropagation();
+    redoMenu.classList.remove("open");
+    sendPayload({ type: "step-action", runId: card.runId, stepId, action: "redo-cascade" });
+  });
+
+  redoMenu.append(redoSingle, redoCascade);
+  redoBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    document.querySelectorAll(".step-redo-menu.open").forEach((m) => {
+      if (m !== redoMenu) m.classList.remove("open");
+    });
+    redoMenu.classList.toggle("open");
+  });
+
+  actions.append(editBtn, redoBtn, redoMenu);
+  row.append(actions);
+  return row;
 }
 
 function renderActivityGroup(message: ActivityGroupMessage): HTMLElement {
@@ -2404,6 +2407,24 @@ function applyProgress(payload: Record<string, unknown>): void {
   }
   rememberProgressCard(card);
   if (typeof payload.phase === "string") card.phase = payload.phase;
+  // 工作模式节点级事件：按 nodeId 原地合并（同一节点状态变化不新增行）
+  if (payload.node && typeof payload.node === "object") {
+    const nd = payload.node as { nodeId?: string; title?: string; status?: string; seconds?: number };
+    if (nd.nodeId) {
+      const at = typeof payload.ts === "number" ? payload.ts : Date.now();
+      const status = nd.status === "running" || nd.status === "ok" || nd.status === "err" ? nd.status : "ok";
+      const title = nd.title ?? nd.nodeId;
+      const text = status === "running"
+        ? `执行中 · ${title}`
+        : status === "err"
+          ? `失败 · ${title}${nd.seconds ? `（用时 ${nd.seconds} 秒）` : ""}`
+          : `${title}${nd.seconds ? ` · 用时 ${nd.seconds} 秒` : ""}`;
+      const existing = card.steps.find((s) => s.nodeId === nd.nodeId);
+      if (existing) { existing.status = status; existing.text = text; existing.at = at; }
+      else card.steps.push({ at, text, nodeId: nd.nodeId, status });
+      card.line = text;
+    }
+  }
   if (line) {
     card.line = line;
     // 时间线去重：同一行不重复记录
@@ -2469,14 +2490,7 @@ function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): void {
   }
   const stepsEl = root.querySelector<HTMLElement>(".progress-steps");
   if (stepsEl) {
-    stepsEl.replaceChildren(...card.steps.map((step) => {
-      const row = document.createElement("div");
-      row.className = "progress-step-row";
-      const time = new Date(step.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      row.innerHTML = `<span class="progress-step-time">${time}</span><span class="progress-step-text"></span>`;
-      (row.querySelector(".progress-step-text") as HTMLElement).textContent = step.text;
-      return row;
-    }));
+    stepsEl.replaceChildren(...card.steps.map((step, index) => buildStepRow(card, step, index)));
   }
   const done = card.finishedAt !== null;
   const cardEl = root.querySelector<HTMLElement>(".progress-card");
@@ -2486,7 +2500,7 @@ function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): void {
   }
   // DeepSeek 行为：完成即折叠 + 摘要行更新；进行中保持展开并刷步数
   const summaryEl = root.querySelector<HTMLElement>(".progress-details-summary");
-  if (summaryEl) summaryEl.textContent = done ? progressDoneSummary(card) : `思考与执行中（${card.steps.length}）`;
+  if (summaryEl) summaryEl.textContent = done ? progressDoneSummary(card) : progressLiveSummary(card);
   const detailsEl = root.querySelector<HTMLDetailsElement>(".progress-details");
   if (detailsEl) detailsEl.open = !done;
   const phaseTextEl = root.querySelector<HTMLElement>(".progress-phase");

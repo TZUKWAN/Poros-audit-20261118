@@ -2538,3 +2538,25 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .message { position: relative !important; }
 .message .message-actions { position: absolute !important; top: 100% !important; left: 0 !important; right: auto !important; margin-top: 2px !important; z-index: 5 !important; }
 .message.user .message-actions { left: auto !important; right: 0 !important; }
+
+/* ============================================================
+   Phase F — 任务画布：步骤卡片状态点 + 时间线
+   ============================================================ */
+.progress-step-row { grid-template-columns: auto auto minmax(0, 1fr) auto !important; gap: 9px !important; }
+.progress-step-dot { position: relative; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--claude-faint); flex: none; z-index: 1; }
+.progress-step-dot.ok { background: #3d9a50; box-shadow: 0 0 0 3px color-mix(in srgb, #3d9a50 16%, transparent); }
+.progress-step-dot.err { background: #c04a3a; box-shadow: 0 0 0 3px color-mix(in srgb, #c04a3a 16%, transparent); }
+.progress-step-dot.running { background: var(--claude-accent); animation: step-pulse 1.2s ease-in-out infinite; }
+@keyframes step-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--claude-accent) 42%, transparent); } 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--claude-accent) 0%, transparent); } }
+/* 时间线：相邻步骤点之间连线 */
+.progress-steps { position: relative; }
+.progress-steps::before { content: ""; position: absolute; left: 4px; top: 16px; bottom: 16px; width: 1px; background: var(--claude-line); }
+.progress-step-row.step-running { border-color: color-mix(in srgb, var(--claude-accent) 46%, var(--claude-line)) !important; background: color-mix(in srgb, var(--claude-accent) 4%, var(--claude-raised)) !important; }
+.progress-step-row.step-err { border-color: color-mix(in srgb, #c04a3a 42%, var(--claude-line)) !important; }
+.progress-step-row.step-err .progress-step-text { color: color-mix(in srgb, #c04a3a 78%, var(--claude-ink)) !important; }
+
+/* F-2 能力源 chips：药丸化，不再是一坨长文字 */
+.progress-source-chips { display: flex !important; flex-wrap: wrap !important; gap: 5px !important; margin-top: 8px !important; }
+.progress-source-chip { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 9px !important; border-radius: 99px !important; font-size: 10.5px !important; line-height: 1.5 !important; border: 1px solid var(--claude-line) !important; background: var(--claude-raised) !important; color: var(--claude-muted) !important; }
+.progress-source-chip.ok { border-color: color-mix(in srgb, #3d9a50 32%, var(--claude-line)) !important; color: color-mix(in srgb, #3d9a50 74%, var(--claude-ink)) !important; }
+.progress-source-chip.err { border-color: color-mix(in srgb, #c04a3a 32%, var(--claude-line)) !important; color: color-mix(in srgb, #c04a3a 74%, var(--claude-ink)) !important; }
