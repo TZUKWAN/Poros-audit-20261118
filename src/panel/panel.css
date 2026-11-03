@@ -1793,3 +1793,6 @@ label.scope-field input[type="checkbox"] { width: 15px; height: 15px; accent-col
 
 /* composer 聚焦环柔化（红边过重 → 主题色淡环） */
 .composer:focus-within { border-color: color-mix(in srgb, var(--claude-accent) 55%, var(--claude-line)) !important; box-shadow: 0 0 0 2px color-mix(in srgb, var(--claude-accent) 8%, transparent) !important; }
+
+/* 搜索空结果：不渲染黑条 */
+.search-results:empty, .search-result-list:empty, #search-result:empty { display: none !important; }
