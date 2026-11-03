@@ -2602,3 +2602,10 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 /* 打磨 H — 帮助卡命令名不折行，参数词组紧凑 */
 .help-command { white-space: nowrap !important; overflow-wrap: normal !important; flex: none !important; }
 .help-description { text-align: right !important; min-width: 0 !important; }
+
+/* 打磨 I — 工具调用/返回一行紧凑折叠 */
+.chat-stream .tool-activity { margin: 3px 0 !important; }
+.chat-stream .tool-activity summary { padding: 4px 8px !important; font-size: 11.5px !important; border-radius: 7px !important; transition: background .14s ease !important; }
+.chat-stream .tool-activity summary:hover { background: var(--claude-hover) !important; }
+.chat-stream .tool-activity .tool-name { color: var(--claude-ink) !important; font-weight: 600 !important; }
+.chat-stream .tool-activity .tool-payload { margin: 2px 0 8px !important; padding: 8px 10px !important; border-radius: 8px !important; background: var(--claude-raised) !important; font-size: 11px !important; max-height: 200px !important; overflow: auto !important; }

@@ -1384,7 +1384,8 @@ function renderToolActivity(message: ToolActivityMessage): HTMLElement {
   const toolName = String(message.toolName ?? "未命名工具");
   const card = node("details", `tool-activity tool-${role === "tool-call" ? "call" : "result"}`);
   const key = `${role}-${message.toolCallId ?? message.nodeId ?? toolName}`;
-  card.open = toolExpanded.get(key) ?? role === "tool-call";
+  // DeepSeek 式紧凑：工具调用/返回默认折叠为一行，用户点击才展开载荷
+  card.open = toolExpanded.get(key) ?? false;
   const summary = node("summary", "tool-summary");
   summary.append(textBlock(role === "tool-call" ? "调用工具" : "工具返回", "tool-kind"), textBlock(toolName, "tool-name"));
   card.append(summary);
