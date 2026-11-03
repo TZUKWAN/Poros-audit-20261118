@@ -2391,6 +2391,15 @@ function connect(): void {
         if (meta?.type === "choose-project-folder") { const hint = $("new-session-folder-hint"); if (hint) hint.textContent = String(payload.error ?? "未绑定文件夹，当前项目没有变化。"); }
         setBusy(false); pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "操作失败") });
       }
+      else if (meta?.type === "search") {
+        const box = $("search-result");
+        if (box) {
+          const data = payload.data as { results?: string[]; query?: string } | undefined;
+          const results = Array.isArray(data?.results) ? data!.results : [];
+          if (!results.length) { box.textContent = `没有找到与「${data?.query ?? ""}」相关的内容，试试更短的关键词。`; return; }
+          box.replaceChildren(...results.map((item) => { const row = node("div", "search-result"); row.textContent = item; return row; }));
+        }
+      }
       else if (meta?.type === "test-settings") {
         const result = $("settings-result");
         if (result) {

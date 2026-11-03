@@ -2658,3 +2658,8 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .run-row-button { transition: border-color .15s ease, background .15s ease, transform .12s ease !important; }
 .run-row-button:hover { border-color: color-mix(in srgb, var(--claude-accent) 40%, var(--claude-line)) !important; background: var(--claude-hover) !important; }
 .run-row-button:active { transform: scale(.995); }
+
+/* 搜索弹窗结果列表排版 */
+#search-result { display: grid !important; gap: 4px !important; margin-top: 8px !important; }
+#search-result .search-result { padding: 6px 9px !important; border-radius: 7px !important; background: var(--claude-raised) !important; border: 1px solid var(--claude-line-soft) !important; }
+#search-result:empty { margin-top: 0 !important; }

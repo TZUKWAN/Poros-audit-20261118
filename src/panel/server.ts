@@ -2056,7 +2056,8 @@ export class PanelServer {
       for (const item of (this.workspace && this.deps.runs ? await this.deps.runs.listForWorkspace(this.workspace.id, 100) : [])) if (item.requirement.toLowerCase().includes(query)) results.push(`运行 · ${item.requirement} · ${item.status}`);
       for (const item of (this.workspace && this.deps.artifacts ? await this.deps.artifacts.list(this.workspace.id, this.projectId) : [])) if (item.name.toLowerCase().includes(query)) results.push(`产物 · ${item.name} · ${item.status}`);
       this.pushChat({ role: "search-result", query: action.query, text: results.length ? `搜索“${action.query}”命中：\n${results.slice(0, 40).join("\n")}` : `搜索“${action.query}”没有命中。`, ts: Date.now() });
-      return { ok: true };
+      // 弹窗内联结果：命中 0 条时给可行动的空态提示，而不是让用户自己去对话流里找
+      return { ok: true, data: { query: action.query, results: results.slice(0, 40) } };
     }
     if (action.type === "set-mode") {
       if (this.sessionLocked) return { ok: false, error: "当前运行中不能切换模式" };
@@ -3363,7 +3364,7 @@ function tokenBudgetForModel(model: string, maxTokens: number): Record<string, n
 export function defaultPageHtml(): string {
   return `<!doctype html>
 <html lang="zh">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SceneFlow</title><link rel="stylesheet" href="/app.css?v=sceneflow-d40"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SceneFlow</title><link rel="stylesheet" href="/app.css?v=sceneflow-d42"></head>
 <body>
   <div class="app-shell" data-mode="work">
       <header class="topbar" role="banner">
@@ -3479,7 +3480,7 @@ export function defaultPageHtml(): string {
   <div id="tasks-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="tasks-title">
     <div class="settings-card"><div class="settings-head"><div><div id="tasks-title" class="inspector-title">后台任务</div><div class="inspector-subtitle">管理一次性、周期和事件触发的任务</div></div><button id="close-tasks" class="ghost-btn" type="button">关闭</button></div><div id="task-list" class="run-list"></div><details class="gate-advanced" open><summary>添加任务</summary><label class="settings-field">任务内容<input id="task-requirement" type="text" placeholder="例如：每天整理项目资料并生成摘要"></label><label class="settings-field">触发计划<input id="task-schedule" type="text" placeholder="once / every 1h / 09:00"></label><div class="settings-actions"><button id="save-task" class="primary-btn" type="button">添加任务</button></div><div id="task-result" class="settings-result"></div></details></div>
   </div>
-  <script type="module" src="/panel.js?v=sceneflow-d40"></script>
+  <script type="module" src="/panel.js?v=sceneflow-d42"></script>
 </body>
 </html>`;
 }
