@@ -2347,15 +2347,11 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
   transition: opacity .15s ease, transform .15s ease, visibility .15s ease;
   text-align: left;
 }
-.minimap-tick:hover .minimap-popover,
-.chat-minimap:not(:hover) .minimap-tick.active .minimap-popover {
-  opacity: 1 !important;
-  visibility: visible !important;
-  transform: translateY(-50%) translateX(0) !important;
-}
-.chat-minimap:hover .minimap-tick.active:not(:hover) .minimap-popover {
-  opacity: 0 !important;
-  visibility: hidden !important;
+/* 仅悬停该刻度时才浮出预览卡，平时一律隐藏 */
+.minimap-tick:hover .minimap-popover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(0);
 }
 .minimap-popover-title {
   font-size: 13px;
