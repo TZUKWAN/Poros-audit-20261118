@@ -235,6 +235,14 @@ export const PanelActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("trigger-event"), name: z.string().min(1).max(120) }),
   z.object({ type: z.literal("retry-run"), runId: z.string().min(1) }),
   z.object({ type: z.literal("branch-run"), runId: z.string().min(1) }),
+  z.object({
+    type: z.literal("step-action"),
+    runId: z.string().min(1),
+    stepId: z.string().min(1),
+    action: z.enum(["edit", "redo-single", "redo-cascade"]),
+    updatedTitle: z.string().max(200).optional(),
+    updatedInstruction: z.string().max(5000).optional(),
+  }),
   z.object({ type: z.literal("create-memory"), scope: z.enum(["global", "project", "session", "scenario"]), name: z.string().min(1).max(120), content: z.string().min(1).max(100_000) }),
   z.object({ type: z.literal("update-memory"), path: z.string().min(1), content: z.string().min(1).max(100_000), memoryId: z.string().optional() }),
   z.object({ type: z.literal("delete-memory"), path: z.string().min(1), confirm: z.literal(true), memoryId: z.string().optional() }),
@@ -309,6 +317,8 @@ export interface PanelDeps {
   onControlLongRun?: (run: LongRun, action: "pause" | "resume" | "stop") => Promise<{ ok: boolean; error?: string }>;
   hostExecution?: HostExecutionStatus;
   onTestScenario?: (scenarioId: string) => Promise<{ passed: boolean; skipped?: boolean; reason?: string; attempts: Array<{ inputs: Record<string, string>; passed: boolean; error?: string }> }>;
+  /** SceneFlow 步骤级操作：单步编辑、独立重做当前步、级联重做后续依赖步骤 */
+  onStepAction?: (payload: { runId: string; stepId: string; action: "edit" | "redo-single" | "redo-cascade"; updatedTitle?: string; updatedInstruction?: string }) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export class PanelServer {
@@ -1687,6 +1697,10 @@ export class PanelServer {
       if (["queued", "running", "waiting-approval", "paused"].includes(previous.status)) return { ok: false, error: "该运行尚未结束，不能创建分支" };
       if (previous.sessionId !== this.sessionId) return { ok: false, error: "运行不属于当前对话，不能创建分支" };
       return await this.handleAction({ type: "start-build", requirement: previous.requirement, mode: previous.mode, scenarioId: previous.scenarioId ?? undefined, projectId: previous.projectId ?? undefined, retryCount: 0 });
+    }
+    if (action.type === "step-action") {
+      if (!this.deps.onStepAction) return { ok: false, error: "步骤操作未接入" };
+      return await this.deps.onStepAction(action);
     }
     if (action.type === "create-memory") {
       if (!this.deps.memoryRoot) return { ok: false, error: "Memory 未接入" };
@@ -3367,10 +3381,12 @@ export function defaultPageHtml(): string {
          </section>
       </aside>
          <section id="chat-panel" class="chat-panel" data-pane="chat" aria-label="对话区">
+         <div id="chat-left-progress" class="chat-left-progress" aria-label="阶段进度"></div>
          <div class="chat-head"><div id="chat-kicker" class="chat-kicker">WORKSPACE / WORK</div><div id="chat-title" class="chat-title">今天要完成什么？</div><div id="chat-description" class="chat-description">我会先判断是否有现成场景可用，需要新能力时再带你进入构建流程。</div><div id="chat-context-strip" class="chat-context-strip" aria-label="当前运行上下文"></div></div>
-         <div id="chat-root" class="chat-stream" role="log" aria-live="polite" aria-atomic="false" aria-relevant="additions text"></div><button id="jump-latest" class="jump-latest hidden" type="button" aria-hidden="true">↓ 查看最新消息</button>
+         <div id="chat-root" class="chat-stream" role="log" aria-live="polite" aria-atomic="false" aria-relevant="additions text"></div><nav id="chat-minimap" class="chat-minimap" aria-label="信息快速跳转"></nav><button id="jump-latest" class="jump-latest hidden" type="button" aria-hidden="true">↓ 查看最新消息</button>
          <div class="composer-wrap"><div id="command-menu" class="command-menu hidden" role="listbox" aria-label="斜杠命令建议"></div><div class="composer"><textarea id="req-input" rows="2" aria-label="需求输入" aria-controls="command-menu" aria-expanded="false" autocomplete="off" placeholder="描述一个要完成的工作，例如：整理 /data/meeting.md 并生成行动项"></textarea><button id="req-go" class="send-btn" type="button" aria-label="发送">↑</button></div><div id="composer-hint" class="composer-hint">回车发送 · 输入 / 查看命令 · Shift + 回车换行</div></div>
       </section>
+      <div id="inspector-backdrop" class="inspector-backdrop hidden" aria-hidden="true"></div>
       <aside id="workspace-inspector" class="inspector" data-pane="preview" aria-label="任务详情">
         <div class="inspector-head"><div><div class="inspector-title">任务详情</div><div id="inspector-subtitle" class="inspector-subtitle">等待一个工作需求</div></div><div class="run-controls"><button id="run-pause" class="ghost-btn hidden" type="button">暂停</button><button id="run-resume" class="ghost-btn hidden" type="button">继续</button><button id="run-stop" class="danger-btn hidden" type="button">停止</button></div></div><div id="run-alert" class="run-alert hidden" role="status" aria-live="polite"></div><div id="long-run-summary" class="run-meta hidden" role="status" aria-live="polite"></div>
         <section class="inspector-section"><div class="section-label">本次目标</div><div id="preview-goal" class="goal-card">还没有开始运行</div><div class="progress-track"><span class="progress-step"></span><span class="progress-step"></span><span class="progress-step"></span><span class="progress-step"></span><span class="progress-step"></span></div><div class="progress-caption"><span id="progress-label">等待输入</span><span id="progress-count">0 / 5</span></div></section>

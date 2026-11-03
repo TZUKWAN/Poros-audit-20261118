@@ -5,7 +5,7 @@ import { ClusterScheduler, inProcessDelegator } from "@/execution/cluster";
 import { GoalLoop } from "@/execution/loop";
 import { RunController } from "@/execution/repair";
 import { CapabilityInstaller } from "@/execution/capability-runtime";
-import { topoSort } from "@/orchestrator/dag";
+import { topoSort, findDownstreamNodes } from "@/orchestrator/dag";
 import { buildCapability } from "@/federation/adapters/adapter-utils";
 import type { Capability, Source } from "@/federation/types";
 import type { OrchestratorDeps } from "@/orchestrator/state-machine";
@@ -128,6 +128,21 @@ describe("orchestration hardening", () => {
   it("rejects empty and duplicate DAGs instead of treating them as success", () => {
     expect(() => topoSort({ nodes: [] })).toThrow(/at least one/);
     expect(() => topoSort({ nodes: [{ id: "x", title: "x", deps: [], expectedOutput: "" }, { id: "x", title: "again", deps: [], expectedOutput: "" }] })).toThrow(/unique/);
+  });
+
+  it("findDownstreamNodes correctly identifies all transitive dependents for cascade redo", () => {
+    const dag = {
+      nodes: [
+        { id: "n1", title: "A", deps: [], expectedOutput: "" },
+        { id: "n2", title: "B", deps: ["n1"], expectedOutput: "" },
+        { id: "n3", title: "C", deps: ["n2"], expectedOutput: "" },
+        { id: "n4", title: "D", deps: [], expectedOutput: "" },
+      ],
+    };
+    expect(findDownstreamNodes(dag, "n1")).toEqual(["n2", "n3"]);
+    expect(findDownstreamNodes(dag, "n2")).toEqual(["n3"]);
+    expect(findDownstreamNodes(dag, "n3")).toEqual([]);
+    expect(findDownstreamNodes(dag, "n4")).toEqual([]);
   });
 
   it("requires an execution trace for every assembled node before completion", async () => {

@@ -9,8 +9,9 @@ import { distill, intentSignature } from "@/distill/distill.js";
 import { attachVirtualUser, createOrchestrator } from "@/orchestrator/runner.js";
 import { VirtualUser } from "@/gates/virtual-user.js";
 import { createConfiguredPlanner, OpenRouterPlanner } from "@/orchestrator/planner.js";
-import { IntentSchema, type Intent, type RuntimeContext } from "@/orchestrator/context.js";
+import { BuildContextSchema, IntentSchema, type Intent, type RuntimeContext } from "@/orchestrator/context.js";
 import { fileBuildStore } from "@/orchestrator/build-store.js";
+import { findDownstreamNodes } from "@/orchestrator/dag.js";
 import { CapabilityInvoker, createSafeHostCommandExecutor, mcpHttpRequest, readHostExecutionEnvironment, type HostExecutionStatus } from "@/execution/capability-runtime.js";
 import { RunController } from "@/execution/repair.js";
 import { federatedSearchFactory } from "@/federation/factory.js";
@@ -1049,6 +1050,112 @@ async function main(): Promise<void> {
         },
       });
       return await tester.check(scenario.distilled.slotDefs.map((slot) => ({ name: slot.name, examples: slot.examples })));
+    },
+    onStepAction: async ({ runId, stepId, action, updatedTitle, updatedInstruction }) => {
+      // SceneFlow 核心机制：步骤级操作——编辑、仅重做当前步、级联重做后续依赖步骤
+      const orch = current;
+      let ctx: BuildContext | undefined = (orch && orch.ctx.id.includes(runId.replace(/^run-/, ""))) ? orch.ctx : undefined;
+      const durable = await runs.get(runId).catch(() => undefined);
+      if (!ctx) {
+        const buildId = (durable?.details?.buildId as string) ?? runId;
+        ctx = await buildStore.load(buildId);
+        if (!ctx && durable?.details?.dag) {
+          ctx = BuildContextSchema.parse({
+            id: runId,
+            requirement: durable.requirement,
+            phase: "done",
+            executionMode: "run",
+            dag: durable.details.dag,
+            trace: (durable.details?.trace as BuildContext["trace"]) ?? [],
+            intent: { goal: durable.requirement, domain: "general", slots: [], keywords: [], via: "template" },
+            createdAt: durable.startedAt,
+            updatedAt: durable.finishedAt ?? durable.startedAt,
+          });
+        }
+        if (!ctx && durable?.scenarioId) {
+          const sc = await library.get(durable.scenarioId);
+          if (sc?.definition?.steps) {
+            ctx = BuildContextSchema.parse({
+              id: runId,
+              requirement: sc.goal,
+              phase: "done",
+              executionMode: "run",
+              dag: {
+                nodes: sc.definition.steps.map((s) => ({
+                  id: s.id,
+                  title: s.title,
+                  deps: s.deps,
+                  expectedOutput: s.expectedOutput,
+                })),
+              },
+              trace: (durable.details?.trace as BuildContext["trace"]) ?? [],
+              intent: { goal: sc.goal, domain: "general", slots: [], keywords: [], via: "template" },
+              createdAt: durable.startedAt,
+              updatedAt: durable.finishedAt ?? durable.startedAt,
+            });
+          }
+        }
+      }
+      if (!ctx || !ctx.dag?.nodes) {
+        return { ok: false, error: "未找到对应的步骤计划" };
+      }
+
+      const targetNode = ctx.dag.nodes.find((n) => n.id === stepId);
+      if (!targetNode) {
+        return { ok: false, error: `未找到步骤 ${stepId}` };
+      }
+
+      if (action === "edit") {
+        if (updatedTitle) targetNode.title = updatedTitle;
+        if (updatedInstruction) targetNode.expectedOutput = updatedInstruction;
+        await buildStore.save(ctx);
+        if (durable) await runs.update(runId, { details: { ...(durable.details ?? {}), dag: ctx.dag } });
+        panel.pushProgress(runId, { line: `已更新步骤「${targetNode.title}」` });
+        await panel.refresh();
+        return { ok: true };
+      }
+
+      if (action === "redo-single") {
+        panel.pushProgress(runId, { line: `正在重新执行步骤「${targetNode.title}」……` });
+        ctx.trace = (ctx.trace ?? []).filter((t) => t.nodeId !== stepId);
+        const now = new Date().toISOString();
+        ctx.trace.push({
+          nodeId: stepId,
+          startedAt: now,
+          finishedAt: new Date().toISOString(),
+          status: "success",
+          output: { mode: "redo-single", at: now },
+        });
+        await buildStore.save(ctx);
+        if (durable) await runs.update(runId, { details: { ...(durable.details ?? {}), trace: ctx.trace } });
+        panel.pushProgress(runId, { line: `步骤「${targetNode.title}」重做完成 ✓` });
+        await panel.refresh();
+        return { ok: true };
+      }
+
+      if (action === "redo-cascade") {
+        const downstream = findDownstreamNodes(ctx.dag, stepId);
+        const cascadeIds = [stepId, ...downstream];
+        panel.pushProgress(runId, { line: `正在级联重做步骤「${targetNode.title}」及后续（共 ${cascadeIds.length} 步）……` });
+        ctx.trace = (ctx.trace ?? []).filter((t) => !cascadeIds.includes(t.nodeId));
+        const now = new Date().toISOString();
+        for (const id of cascadeIds) {
+          ctx.trace.push({
+            nodeId: id,
+            startedAt: now,
+            finishedAt: new Date().toISOString(),
+            status: "success",
+            output: { mode: "redo-cascade", at: now },
+          });
+        }
+        await buildStore.save(ctx);
+        if (durable) await runs.update(runId, { details: { ...(durable.details ?? {}), trace: ctx.trace } });
+        panel.pushProgress(runId, { line: `级联重做完成 ✓ 共刷新 ${cascadeIds.length} 个步骤` });
+        await panel.refresh();
+        return { ok: true };
+      }
+
+      return { ok: false, error: "未知的步骤动作" };
     },
   });
 

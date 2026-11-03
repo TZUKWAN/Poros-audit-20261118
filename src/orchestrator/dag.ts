@@ -67,3 +67,21 @@ export function parallelGroups(dag: Dag): string[][] {
   }
   return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([, ids]) => ids);
 }
+
+/**
+ * 级联重做依赖计算：找出所有直接或间接依赖 targetNodeId 的下游节点 id 列表（按拓扑顺序排列）。
+ * 用于支持"重做此步及后续所有步骤"的核心机制。
+ */
+export function findDownstreamNodes(dag: Dag, targetNodeId: string): string[] {
+  const sorted = topoSort(dag);
+  const downstream = new Set<string>();
+  downstream.add(targetNodeId);
+  for (const node of sorted) {
+    if (node.deps.some((dep) => downstream.has(dep))) {
+      downstream.add(node.id);
+    }
+  }
+  downstream.delete(targetNodeId);
+  return sorted.filter((node) => downstream.has(node.id)).map((node) => node.id);
+}
+

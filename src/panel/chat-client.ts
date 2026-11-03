@@ -401,8 +401,14 @@ function setInspectorOpen(open: boolean): void {
     inspectorPreviousFocus = isVisibleElement(active) ? active : $("open-more") ?? button;
   }
   inspector.classList.toggle("responsive-open", open);
+  inspector.classList.toggle("open", open);
   inspector.setAttribute("aria-hidden", String(!open));
   button.setAttribute("aria-expanded", String(open));
+  const insBackdrop = $("inspector-backdrop");
+  if (insBackdrop) {
+    insBackdrop.classList.toggle("hidden", !open);
+    insBackdrop.setAttribute("aria-hidden", String(!open));
+  }
   if (open) {
     window.setTimeout(() => {
       if (!inspector.classList.contains("responsive-open")) return;
@@ -1232,7 +1238,7 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
   const summary = node("summary", "progress-details-summary");
   summary.textContent = done ? progressDoneSummary(card) : `思考与执行中（${card.steps.length}）`;
   const steps = node("div", "progress-steps");
-  steps.replaceChildren(...card.steps.map((step) => {
+  steps.replaceChildren(...card.steps.map((step, index) => {
     const row = node("div", "progress-step-row");
     const time = new Date(step.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const timeEl = node("span", "progress-step-time");
@@ -1240,6 +1246,73 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
     const textEl = node("span", "progress-step-text");
     textEl.textContent = step.text;
     row.append(timeEl, textEl);
+
+    // SceneFlow 核心机制：步骤级操作（编辑、独立重做当前步、级联重做后续依赖）
+    const stepId = `n${index + 1}`;
+    const actions = node("div", "step-actions");
+    const editBtn = node("button", "step-btn");
+    editBtn.type = "button";
+    editBtn.textContent = "编辑";
+    editBtn.title = "修改该步骤内容与预期产出";
+    editBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const updated = window.prompt("编辑该步骤内容：", step.text);
+      if (updated && updated.trim() && updated.trim() !== step.text) {
+        sendPayload({
+          type: "step-action",
+          runId: card.runId,
+          stepId,
+          action: "edit",
+          updatedTitle: updated.trim(),
+        });
+      }
+    });
+
+    const redoBtn = node("button", "step-btn step-redo-btn");
+    redoBtn.type = "button";
+    redoBtn.textContent = "重做 ▾";
+    redoBtn.title = "重新执行该步骤";
+    const redoMenu = node("div", "step-redo-menu");
+
+    const redoSingle = node("button", "step-redo-item");
+    redoSingle.type = "button";
+    redoSingle.innerHTML = `<span>仅重做当前步</span><span class="step-redo-hint">保持其他步骤产出不变</span>`;
+    redoSingle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      redoMenu.classList.remove("open");
+      sendPayload({
+        type: "step-action",
+        runId: card.runId,
+        stepId,
+        action: "redo-single",
+      });
+    });
+
+    const redoCascade = node("button", "step-redo-item");
+    redoCascade.type = "button";
+    redoCascade.innerHTML = `<span>重做此步及后续步骤</span><span class="step-redo-hint">按依赖链级联更新后续产出</span>`;
+    redoCascade.addEventListener("click", (e) => {
+      e.stopPropagation();
+      redoMenu.classList.remove("open");
+      sendPayload({
+        type: "step-action",
+        runId: card.runId,
+        stepId,
+        action: "redo-cascade",
+      });
+    });
+
+    redoMenu.append(redoSingle, redoCascade);
+    redoBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      document.querySelectorAll(".step-redo-menu.open").forEach((m) => {
+        if (m !== redoMenu) m.classList.remove("open");
+      });
+      redoMenu.classList.toggle("open");
+    });
+
+    actions.append(editBtn, redoBtn, redoMenu);
+    row.append(actions);
     return row;
   }));
   if (done && card.line) {
@@ -1759,6 +1832,161 @@ function humanizeGateLines(gate: number, source: string[]): string[] {
   return result;
 }
 
+// ── 聊天栏左侧微型进度导轨与右侧短横微地图（复刻用户截图） ──
+
+let activeMinimapIndex = 0;
+
+function renderLeftProgress(snap: PanelSnapshot): void {
+  const container = $("chat-left-progress");
+  if (!container) return;
+  container.replaceChildren();
+
+  const phases = [
+    { key: "parsing", label: "意图解析" },
+    { key: "planning", label: "任务清单" },
+    { key: "retrieving", label: "能力选型" },
+    { key: "assembling", label: "流程装配" },
+    { key: "distilling", label: "固化场景" },
+  ];
+
+  const currentPhaseIndex = phases.findIndex((p) => p.key === (snap.phase ?? ""));
+  const rail = node("div", "left-progress-rail");
+  const fill = node("div", "left-progress-fill");
+  const percent = snap.run.status === "succeeded" ? 100 : currentPhaseIndex >= 0 ? ((currentPhaseIndex + 0.5) / phases.length) * 100 : 0;
+  fill.style.height = `${percent}%`;
+  container.append(rail, fill);
+
+  phases.forEach((p, index) => {
+    const isDone = snap.run.status === "succeeded" || (currentPhaseIndex >= 0 && index < currentPhaseIndex);
+    const isActive = snap.run.status === "running" && index === currentPhaseIndex;
+    const dot = node("div", `left-progress-dot${isDone ? " done" : ""}${isActive ? " active" : ""}`);
+    dot.dataset.phase = p.key;
+    const tooltip = textBlock(`${index + 1}. ${p.label}`, "progress-tooltip");
+    dot.append(tooltip);
+    container.append(dot);
+  });
+}
+
+function renderMinimap(): void {
+  const container = $("chat-minimap");
+  if (!container) return;
+  container.replaceChildren();
+
+  const items = document.querySelectorAll<HTMLElement>(".chat-stream .run-group-card, .chat-stream > .message");
+  if (items.length <= 1) {
+    container.style.display = "none";
+    return;
+  }
+  container.style.display = "flex";
+
+  items.forEach((el, index) => {
+    const isUser = el.classList.contains("message-user") || el.querySelector(".message-user");
+    const isProgress = el.classList.contains("progress-message") || el.querySelector(".progress-card");
+    const isGate = el.classList.contains("message-gate-card") || el.querySelector(".gate-card");
+
+    let title = "消息";
+    let subtitle = "";
+    const bullets: string[] = [];
+
+    if (isUser) {
+      const contentEl = el.querySelector(".message-content");
+      const userText = (contentEl ? contentEl.textContent : el.textContent)?.trim().replace(/\s+/g, " ") ?? "";
+      title = userText.slice(0, 32);
+      subtitle = "用户需求";
+    } else if (isProgress) {
+      title = "构建与思考流程";
+      const summaryText = el.querySelector(".progress-details-summary")?.textContent ?? "";
+      subtitle = summaryText || "进行中";
+      const stepTexts = el.querySelectorAll(".progress-step-text");
+      stepTexts.forEach((st, i) => {
+        if (i < 3) bullets.push(st.textContent?.slice(0, 24) ?? "");
+      });
+    } else if (isGate) {
+      title = el.querySelector(".gate-title")?.textContent ?? "闸门确认";
+      subtitle = el.querySelector(".gate-step")?.textContent ?? "阶段等待确认";
+      const lines = el.querySelectorAll(".sc-gate-line, .gate-plan-title");
+      lines.forEach((l, i) => {
+        if (i < 3) bullets.push(l.textContent?.slice(0, 24) ?? "");
+      });
+    } else {
+      const content = el.querySelector(".message-content")?.textContent?.trim().replace(/\s+/g, " ") ?? "";
+      title = content.slice(0, 30) || "AI 产出与答复";
+      subtitle = "执行产物";
+      const listItems = el.querySelectorAll("li");
+      listItems.forEach((li, i) => {
+        if (i < 3) bullets.push(li.textContent?.slice(0, 24) ?? "");
+      });
+    }
+
+    const tick = node("button", `minimap-tick${index === activeMinimapIndex ? " active" : ""}`);
+    tick.type = "button";
+    tick.dataset.index = String(index);
+    tick.setAttribute("aria-label", title);
+
+    const dash = node("span", "minimap-tick-dash");
+
+    // 悬浮预览卡片（严格复刻用户截图格式）
+    const popover = node("div", "minimap-popover");
+    const popTitle = textBlock(title, "minimap-popover-title");
+    popover.append(popTitle);
+    if (subtitle) {
+      const popSub = textBlock(subtitle, "minimap-popover-subtitle");
+      popover.append(popSub);
+    }
+    if (bullets.length) {
+      const ul = node("ul", "minimap-popover-bullets");
+      for (const b of bullets) {
+        const li = node("li");
+        li.textContent = `• ${b}`;
+        ul.append(li);
+      }
+      popover.append(ul);
+    }
+
+    tick.append(dash, popover);
+    tick.addEventListener("click", () => {
+      activeMinimapIndex = index;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      updateMinimapTicks();
+    });
+    container.append(tick);
+  });
+}
+
+function updateMinimapTicks(): void {
+  const ticks = document.querySelectorAll(".minimap-tick");
+  ticks.forEach((tick, i) => {
+    tick.classList.toggle("active", i === activeMinimapIndex);
+  });
+}
+
+function updateMinimapActive(): void {
+  const root = $("chat-root");
+  if (!root) return;
+  const items = document.querySelectorAll<HTMLElement>(".chat-stream .run-group-card, .chat-stream > .message");
+  if (!items.length) return;
+  const rootRect = root.getBoundingClientRect();
+  const centerY = rootRect.top + rootRect.height / 2;
+
+  let closestIndex = 0;
+  let minDistance = Infinity;
+
+  items.forEach((el, index) => {
+    const rect = el.getBoundingClientRect();
+    const itemCenter = rect.top + rect.height / 2;
+    const distance = Math.abs(itemCenter - centerY);
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestIndex = index;
+    }
+  });
+
+  if (activeMinimapIndex !== closestIndex) {
+    activeMinimapIndex = closestIndex;
+    updateMinimapTicks();
+  }
+}
+
 function renderChat(): void {
   const root = $("chat-root"); if (!root) return;
   const resetPosition = chatNeedsInitialScroll;
@@ -1773,12 +2001,17 @@ function renderChat(): void {
     const card = node("div", "empty-card");
     const h = node("h3"); h.textContent = panelMode === "work" ? "把重复工作交给 SceneFlow 场景" : "从一句话开始，构建可复用场景";
     const p = node("p"); p.textContent = panelMode === "work" ? "系统会优先复用已固化场景，并把运行过程显示在右侧检查台。" : "确认每一个关键阶段，把一次成功流程沉淀成下次可以直接调用的场景。";
-    card.append(h, p); empty.append(card); root.append(empty); updateJumpButton(false); return;
+    card.append(h, p); empty.append(card); root.append(empty); updateJumpButton(false);
+    $("chat-minimap")?.replaceChildren();
+    $("chat-left-progress")?.replaceChildren();
+    return;
   }
   for (const message of condensedMessages(messages)) root.append(renderMessage(message));
   if (resetPosition || wasAtBottom) root.scrollTop = root.scrollHeight;
   else root.scrollTop = previousTop;
   updateJumpButton(!wasAtBottom && root.scrollHeight > root.clientHeight && root.scrollTop < root.scrollHeight - root.clientHeight - 48);
+  renderMinimap();
+  if (currentSnapshot) renderLeftProgress(currentSnapshot);
 }
 
 function condensedMessages(source: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
@@ -2284,11 +2517,12 @@ function mount(): void {
   $("chat-root")?.addEventListener("scroll", () => {
     const root = $("chat-root"); if (!root) return;
     updateJumpButton(root.scrollHeight - root.scrollTop - root.clientHeight > 48);
+    updateMinimapActive();
   }, { passive: true });
   $("open-inspector")?.addEventListener("click", (event) => {
     event.stopPropagation();
     const inspector = document.querySelector<HTMLElement>(".inspector"); if (!inspector) return;
-    setInspectorOpen(!inspector.classList.contains("responsive-open"));
+    setInspectorOpen(!inspector.classList.contains("open"));
   });
   $("open-rail")?.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -2296,6 +2530,13 @@ function mount(): void {
     setRailOpen(!rail?.classList.contains("responsive-open"));
   });
   $("rail-backdrop")?.addEventListener("click", () => setRailOpen(false));
+  $("inspector-backdrop")?.addEventListener("click", () => setInspectorOpen(false));
+  document.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (!target.closest(".step-actions")) {
+      document.querySelectorAll(".step-redo-menu.open").forEach((m) => m.classList.remove("open"));
+    }
+  });
   $("open-more")?.addEventListener("click", (event) => {
     event.stopPropagation();
     const menu = $("utility-menu"); if (!menu) return;
