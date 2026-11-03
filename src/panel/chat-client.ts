@@ -2456,8 +2456,8 @@ function applyProgress(payload: Record<string, unknown>): void {
   }
   if (typeof payload.sourcesTotal === "number") card.sourcesTotal = payload.sourcesTotal;
   if (payload.finished === true) card.finishedAt = typeof payload.ts === "number" ? payload.ts : Date.now();
-  updateProgressDom(card);
-  renderChat();
+  // 已存在的卡走定点 DOM 更新：避免整流重渲染（滚动跳动 + 动画重播）
+  if (!updateProgressDom(card)) renderChat();
 }
 
 function applyProgressDelta(payload: Record<string, unknown>): void {
@@ -2475,14 +2475,14 @@ function applyProgressDelta(payload: Record<string, unknown>): void {
   updateProgressDom(card, true);
 }
 
-/** 定点更新进度卡 DOM（存在则只改受影响字段；不存在则交由全量渲染） */
-function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): void {
+/** 定点更新进度卡 DOM。返回 false 表示 DOM 中无此卡，需要全量渲染。 */
+function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): boolean {
   const root = document.querySelector<HTMLElement>(`.progress-card[data-run-id="${CSS.escape(card.runId)}"]`);
-  if (!root) return;
+  if (!root) return false;
   if (deltaOnly) {
     const narrationEl = root.querySelector<HTMLElement>(".progress-narration");
     if (narrationEl) narrationEl.textContent = card.narration;
-    return;
+    return true;
   }
   const done = card.finishedAt !== null;
   const phaseEl = root.querySelector<HTMLElement>(".progress-phase");
@@ -2523,17 +2523,15 @@ function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): void {
   if (detailsEl) detailsEl.open = !done;
   const phaseTextEl = root.querySelector<HTMLElement>(".progress-phase");
   if (phaseTextEl) phaseTextEl.textContent = done ? "完成" : card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
+  // DeepSeek 式减层保持一致：title/source-count/head 由 renderProgressCard 常驻隐藏
   const titleEl = root.querySelector<HTMLElement>(".progress-title");
-  if (titleEl) {
-    titleEl.textContent = done ? "" : "正在思考与执行";
-    titleEl.style.display = done || !titleEl.textContent ? "none" : "";
-  }
+  if (titleEl) { titleEl.textContent = ""; titleEl.style.display = "none"; }
+  const headEl2 = root.querySelector<HTMLElement>(".progress-card-head");
+  if (headEl2) headEl2.style.display = done ? "" : "none";
   const countEl2 = root.querySelector<HTMLElement>(".progress-source-count");
-  if (countEl2) {
-    countEl2.textContent = done ? "" : card.sourcesTotal > 0 ? `${card.sources.filter((s) => s.done).length} / ${card.sourcesTotal} 源` : "";
-    countEl2.style.display = countEl2.textContent ? "" : "none";
-  }
+  if (countEl2) { countEl2.textContent = ""; countEl2.style.display = "none"; }
   root.classList.toggle("finished", done);
+  return true;
 }
 
 function mount(): void {
