@@ -1799,3 +1799,19 @@ label.scope-field input[type="checkbox"] { width: 15px; height: 15px; accent-col
 
 /* 完成态 phase 标签用 success 色（非橙红），摘要行即全部 */
 .progress-card.finished .progress-phase { color: var(--claude-success) !important; }
+
+/* ═══ SceneFlow Phase D-13 右栏检查台压平：无框分区 + 分隔线 ═══ */
+
+#workspace-inspector .inspector-section {
+  border: 0 !important; background: transparent !important; box-shadow: none !important;
+  border-bottom: 1px solid var(--claude-line-soft) !important; border-radius: 0 !important;
+  padding: 12px 2px !important; margin-bottom: 0 !important;
+}
+#workspace-inspector .inspector-section:last-of-type { border-bottom: 0; }
+#workspace-inspector .goal-card { padding: 0 !important; background: transparent !important; border: 0 !important; color: var(--claude-ink) !important; font-size: 13.5px !important; }
+#workspace-inspector .dag-node { border: 0 !important; background: transparent !important; padding: 5px 0 !important; }
+#workspace-inspector .selection-row, #workspace-inspector .acceptance-row { border: 0 !important; background: transparent !important; padding: 4px 0 !important; font-size: 12px !important; }
+#workspace-inspector .section-label { color: var(--claude-faint) !important; font-size: 11px !important; letter-spacing: .06em; }
+#workspace-inspector .inspector-subtitle { color: var(--claude-faint) !important; }
+#workspace-inspector .context-meta { color: var(--claude-muted) !important; font-size: 12px !important; }
+#workspace-inspector .context-instructions { color: var(--claude-faint) !important; }
