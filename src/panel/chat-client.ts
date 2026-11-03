@@ -502,7 +502,7 @@ function renderHeaderContext(snap: PanelSnapshot): void {
     project ? `项目 · ${project.name}` : "未选择项目",
     snap.preview.context.providerModel ? `模型 · ${snap.preview.context.providerModel}` : configuredModel ? `模型 · ${configuredModel}` : "模型 · 默认",
     `状态 · ${runState}`,
-    `记忆 · ${snap.preview.context.memoryCount}`,
+    `注入记忆 · ${snap.preview.context.memoryCount}`,
   ];
   for (const value of chips) strip.append(textBlock(value, "context-chip"));
 }
