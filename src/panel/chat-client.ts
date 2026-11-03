@@ -2377,9 +2377,14 @@ function connect(): void {
        if (message.role === "ui-command" && message.command === "export-session") {
          const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), sessionId: currentSnapshot?.sessionId, messages }, null, 2)], { type: "application/json" });
          const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `scenario-session-${currentSnapshot?.sessionId ?? "export"}.json`; anchor.click(); URL.revokeObjectURL(url);
+         pushMessage({ role: "build-status", tone: "ok", text: `对话已导出（${messages.length} 条消息），下载已开始。`, ts: Date.now() });
        }
        if (message.role === "ui-command" && message.command === "export-workspace") {
-         fetch("/api/workspace/export").then(async (response) => { if (!response.ok) throw new Error("export failed"); const blob = new Blob([await response.text()], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `scenario-workspace-${currentSnapshot?.workspace?.id ?? "export"}.json`; anchor.click(); URL.revokeObjectURL(url); }).catch(() => pushMessage({ role: "build-status", tone: "err", text: "工作区导出失败。" }));
+         fetch("/api/workspace/export").then(async (response) => {
+           if (!response.ok) throw new Error("export failed");
+           const blob = new Blob([await response.text()], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `scenario-workspace-${currentSnapshot?.workspace?.id ?? "export"}.json`; anchor.click(); URL.revokeObjectURL(url);
+           pushMessage({ role: "build-status", tone: "ok", text: "工作区已导出，下载已开始。", ts: Date.now() });
+         }).catch(() => pushMessage({ role: "build-status", tone: "err", text: "工作区导出失败。", ts: Date.now() }));
        }
       if ((message as unknown as BuildStatusMessage).terminal) setBusy(false);
     } else if (payload.kind === "action-result") {

@@ -2663,3 +2663,15 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 #search-result { display: grid !important; gap: 4px !important; margin-top: 8px !important; }
 #search-result .search-result { padding: 6px 9px !important; border-radius: 7px !important; background: var(--claude-raised) !important; border: 1px solid var(--claude-line-soft) !important; }
 #search-result:empty { margin-top: 0 !important; }
+
+/* ============================================================
+   打磨 O — Host Bridge 面板 + Inspector 排版一致性
+   ============================================================ */
+.context-bridge { border-color: var(--claude-line) !important; background: var(--claude-raised) !important; color: var(--claude-muted) !important; border-radius: 10px !important; }
+.context-bridge strong { color: var(--claude-ink) !important; font-size: 12px !important; }
+.context-bridge #host-bridge-info { color: var(--claude-muted) !important; font-size: 11.5px !important; overflow-wrap: anywhere; }
+#copy-host-bridge { font-size: 12px !important; padding: 5px 12px !important; border-color: var(--claude-line) !important; color: var(--claude-accent-strong) !important; border-radius: 7px !important; transition: border-color .15s ease, background .15s ease !important; }
+#copy-host-bridge:hover { border-color: var(--claude-accent) !important; background: color-mix(in srgb, var(--claude-accent) 9%, transparent) !important; }
+.inspector .section-label { color: var(--claude-muted) !important; }
+.inspector .inspector-subtitle { font-size: 11.5px !important; }
+.inspector .acceptance-row, .inspector .file-row, .inspector .selection-row, .inspector .dag-node { font-size: 12.5px !important; }
