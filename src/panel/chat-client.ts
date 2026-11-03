@@ -2069,6 +2069,8 @@ function renderChat(): void {
   else root.scrollTop = previousTop;
   updateJumpButton(!wasAtBottom && root.scrollHeight > root.clientHeight && root.scrollTop < root.scrollHeight - root.clientHeight - 48);
   renderMinimap();
+  // 快照恢复/切会话后立即校准滚动高亮，避免 active 停在上一次点击的刻度
+  updateMinimapActive();
   if (currentSnapshot) renderLeftProgress(currentSnapshot);
 }
 
