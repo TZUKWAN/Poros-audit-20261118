@@ -1759,3 +1759,37 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* "查看最新消息"浮钮贴主题 */
 .jump-latest { background: var(--claude-surface) !important; border: 1px solid var(--claude-line) !important; color: var(--claude-muted) !important; box-shadow: var(--claude-shadow) !important; }
 .jump-latest:hover { color: var(--claude-ink) !important; }
+
+/* ═══ SceneFlow Phase D-7 弹窗打磨 ═══ */
+
+/* 遮罩：轻暗化、去重模糊（DeepSeek 式轻遮罩） */
+.settings-modal { background: color-mix(in srgb, var(--claude-ink) 22%, transparent) !important; backdrop-filter: blur(2px) !important; }
+
+/* 弹窗卡片：更大圆角 + 主题阴影 */
+.settings-card { border-radius: 18px !important; box-shadow: 0 24px 60px rgba(45, 43, 38, .18) !important; border-color: var(--claude-line-soft) !important; }
+:root[data-theme="dark"] .settings-card { box-shadow: 0 24px 60px rgba(0, 0, 0, .4) !important; }
+
+/* 场景库搜索框：跟随主题（修浅色下黑底） */
+#scenario-filter, .scenario-toolbar input[type="search"] {
+  background: var(--claude-surface) !important; color: var(--claude-ink) !important;
+  border: 1px solid var(--claude-line) !important; border-radius: 12px !important;
+}
+.scenario-search::placeholder { color: var(--claude-faint); }
+
+/* 长程运行 checkbox：去框拉伸，安静一行 */
+label.scope-field { border: 0 !important; padding: 0 !important; margin: 14px 0 4px !important; color: var(--claude-muted) !important; font-size: 12.5px !important; gap: 8px !important; }
+label.scope-field input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--claude-accent); }
+
+/* 弹窗输入/select 统一主题化（含下拉箭头区域） */
+.settings-field select, .settings-field input { border-radius: 12px !important; }
+.settings-card .primary-btn { border-radius: 999px !important; padding: 9px 22px !important; }
+
+/* ═══ SceneFlow Phase D-8 空态与聚焦 ═══ */
+
+/* 空态：无框大字（DeepSeek 空态语言） */
+.chat-stream .empty-card { border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; }
+.chat-stream .empty-card h3 { color: var(--claude-muted) !important; font-size: 19px !important; font-weight: 650 !important; letter-spacing: -.01em; }
+.chat-stream .empty-card p { color: var(--claude-faint) !important; font-size: 13px !important; margin-top: 8px !important; }
+
+/* composer 聚焦环柔化（红边过重 → 主题色淡环） */
+.composer:focus-within { border-color: color-mix(in srgb, var(--claude-accent) 55%, var(--claude-line)) !important; box-shadow: 0 0 0 2px color-mix(in srgb, var(--claude-accent) 8%, transparent) !important; }
