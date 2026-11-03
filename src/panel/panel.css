@@ -2560,3 +2560,8 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .progress-source-chip { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 9px !important; border-radius: 99px !important; font-size: 10.5px !important; line-height: 1.5 !important; border: 1px solid var(--claude-line) !important; background: var(--claude-raised) !important; color: var(--claude-muted) !important; }
 .progress-source-chip.ok { border-color: color-mix(in srgb, #3d9a50 32%, var(--claude-line)) !important; color: color-mix(in srgb, #3d9a50 74%, var(--claude-ink)) !important; }
 .progress-source-chip.err { border-color: color-mix(in srgb, #c04a3a 32%, var(--claude-line)) !important; color: color-mix(in srgb, #c04a3a 74%, var(--claude-ink)) !important; }
+
+/* F-3 plain 叙述行弱化：无边框融入时间线，与 DAG 节点卡区分 */
+.progress-step-row:not(.step-ok):not(.step-err):not(.step-running) { border: 0 !important; background: transparent !important; padding: 5px 13px !important; }
+.progress-step-row:not(.step-ok):not(.step-err):not(.step-running) .progress-step-text { color: var(--claude-muted) !important; font-size: 12.5px !important; }
+.progress-step-row:not(.step-ok):not(.step-err):not(.step-running):hover { border: 0 !important; background: transparent !important; }

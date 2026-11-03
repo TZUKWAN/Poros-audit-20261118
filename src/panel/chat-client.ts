@@ -1193,13 +1193,17 @@ function renderRichText(value: unknown): HTMLElement {
 /** SceneFlow 进度卡：构建过程内联进度——步进器 + 流式叙述 + 分源微状态，全程一张卡原地更新。 */
 /** 完成摘要：DeepSeek 式一行（用时 + 步数，无明细时省略步数） */
 function progressLiveSummary(card: ProgressCardMessage): string {
+  const phaseLabel = card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "";
   const nodeSteps = card.steps.filter((s) => s.nodeId);
+  const sources = card.sourcesTotal > 0 ? ` · ${card.sources.filter((s) => s.done).length}/${card.sourcesTotal} 源` : "";
   if (nodeSteps.length > 0) {
     const ok = nodeSteps.filter((s) => s.status === "ok").length;
     const running = nodeSteps.some((s) => s.status === "running");
-    return running ? `执行中 · 已完成 ${ok}/${nodeSteps.length} 步` : `执行中（${nodeSteps.length} 步）`;
+    return running
+      ? `${phaseLabel ? `${phaseLabel} · ` : ""}执行中 · 已完成 ${ok}/${nodeSteps.length} 步${sources}`
+      : `${phaseLabel ? `${phaseLabel} · ` : ""}执行中（${nodeSteps.length} 步）${sources}`;
   }
-  return `思考与执行中（${card.steps.length}）`;
+  return `${phaseLabel ? `${phaseLabel} · ` : ""}思考与执行中（${card.steps.length}）${sources}`;
 }
 
 function progressDoneSummary(card: ProgressCardMessage): string {  const seconds = card.finishedAt !== null ? Math.max(1, Math.round((card.finishedAt - card.startedAt) / 1000)) : 0;
@@ -1225,12 +1229,13 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
   const phase = node("span", "progress-phase");
   phase.textContent = done ? "完成" : card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
   const title = node("span", "progress-title");
-  // finished 卡：一行摘要即全部；title 只在 live 态显示
-  title.textContent = done ? "" : "正在思考与执行";
-  if (!title.textContent) title.style.display = "none";
+  // DeepSeek 式减层：live 态信息全部收进折叠条一行（summary），head 仅 finished 显示
+  title.textContent = "";
+  title.style.display = "none";
   const sourceCount = node("span", "progress-source-count");
-  sourceCount.textContent = done ? "" : card.sourcesTotal > 0 ? `${card.sources.filter((s) => s.done).length} / ${card.sourcesTotal} 源` : "";
-  if (!sourceCount.textContent) sourceCount.style.display = "none";
+  sourceCount.textContent = "";
+  sourceCount.style.display = "none";
+  if (!done) head.style.display = "none";
   head.append(pulse, phase, title, sourceCount);
 
   const narration = node("div", "progress-narration");
@@ -1238,8 +1243,9 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
   if (!narration.textContent) narration.classList.add("empty");
 
   const line = node("div", "progress-line");
-  if (card.line && !done) line.textContent = card.line;
-  else if (done) line.style.display = "none";
+  // line 与 steps 首条重复，仅在没有任何步骤记录时兜底显示
+  if (card.line && !done && card.steps.length === 0) line.textContent = card.line;
+  else line.style.display = "none";
 
   const chips = node("div", "progress-source-chips");
   if (done) chips.style.display = "none";
@@ -1253,7 +1259,7 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
   const summary = node("summary", "progress-details-summary");
   summary.textContent = done ? progressDoneSummary(card) : progressLiveSummary(card);
   const steps = node("div", "progress-steps");
-  steps.replaceChildren(...card.steps.map((step, index) => buildStepRow(card, step, index)));
+  steps.replaceChildren(...card.steps.map((step, index) => buildStepRow(card, step)));
   if (done && card.line && !card.steps.some((s) => s.text === card.line)) {
     const row = node("div", "progress-step-row");
     const timeEl = node("span", "progress-step-time");
@@ -1273,7 +1279,7 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
 }
 
 /** 任务画布步骤卡：状态点 + 时间 + 内容 + 悬停操作（编辑 / 重做单步 / 级联重做）。 */
-function buildStepRow(card: ProgressCardMessage, step: ProgressCardMessage["steps"][number], index: number): HTMLElement {
+function buildStepRow(card: ProgressCardMessage, step: ProgressCardMessage["steps"][number]): HTMLElement {
   const row = node("div", `progress-step-row${step.status ? ` step-${step.status}` : ""}`);
   const dot = node("span", `progress-step-dot ${step.status ?? ""}`);
   dot.setAttribute("aria-hidden", "true");
@@ -1282,9 +1288,11 @@ function buildStepRow(card: ProgressCardMessage, step: ProgressCardMessage["step
   const textEl = node("span", "progress-step-text");
   textEl.textContent = step.text;
   row.append(dot, timeEl, textEl);
+  // plain 叙述行（无 nodeId）不是 DAG 节点：不提供编辑/重做操作
+  if (!step.nodeId) return row;
 
   // SceneFlow 核心机制：步骤级操作（编辑、独立重做当前步、级联重做后续依赖）
-  const stepId = step.nodeId ?? `n${index + 1}`;
+  const stepId = step.nodeId;
   const actions = node("div", "step-actions");
   const editBtn = node("button", "step-btn");
   editBtn.type = "button";
@@ -2471,10 +2479,16 @@ function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): void {
     if (narrationEl) narrationEl.textContent = card.narration;
     return;
   }
+  const done = card.finishedAt !== null;
   const phaseEl = root.querySelector<HTMLElement>(".progress-phase");
-  if (phaseEl) phaseEl.textContent = card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
+  if (phaseEl) phaseEl.textContent = done ? "完成" : card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
+  const headEl = root.querySelector<HTMLElement>(".progress-card-head");
+  if (headEl) headEl.style.display = done ? "" : "none";
   const lineEl = root.querySelector<HTMLElement>(".progress-line");
-  if (lineEl && card.line) lineEl.textContent = card.line;
+  if (lineEl) {
+    if (card.line && !done && card.steps.length === 0) { lineEl.textContent = card.line; lineEl.style.display = ""; }
+    else lineEl.style.display = "none";
+  }
   const narrationEl = root.querySelector<HTMLElement>(".progress-narration");
   if (narrationEl) narrationEl.textContent = card.narration;
   const countEl = root.querySelector<HTMLElement>(".progress-source-count");
@@ -2490,9 +2504,8 @@ function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): void {
   }
   const stepsEl = root.querySelector<HTMLElement>(".progress-steps");
   if (stepsEl) {
-    stepsEl.replaceChildren(...card.steps.map((step, index) => buildStepRow(card, step, index)));
+    stepsEl.replaceChildren(...card.steps.map((step, index) => buildStepRow(card, step)));
   }
-  const done = card.finishedAt !== null;
   const cardEl = root.querySelector<HTMLElement>(".progress-card");
   if (cardEl) {
     cardEl.classList.toggle("finished", done);
