@@ -183,15 +183,25 @@ export class ScenarioLibrary {
   /** 6.2.2 命中三档：当前默认词袋签名阈值为 hit=0.7 / partial=0.3。 */
   async match(signature: IntentSignature, scope?: ScenarioScope): Promise<{ tier: "hit" | "partial" | "miss"; scenario?: ScenarioRecord; score: number }> {
     let best: { scenario: ScenarioRecord; score: number } | undefined;
+    // 治理死锁防护：degraded 场景不参与自动命中，但保留为 partial 候选——
+    // 否则降级场景永远无法被再次执行，成功率永远无法回升，降级即永久封禁。
+    let degradedBest: { scenario: ScenarioRecord; score: number } | undefined;
     for (const scenario of await this.list()) {
       if (scope && !scenarioMatchesScope(scenario, scope)) continue;
-      if (scenario.degraded || scenario.status !== "active") continue;
+      if (scenario.status !== "active") continue;
       const score = this.scoreMatch(signature, scenario.distilled.signature as unknown as IntentSignature);
       const rank = scope?.projectId && scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && scenario.workspaceId === scope.workspaceId ? 1 : 0;
+      if (scenario.degraded) {
+        if (!degradedBest || score > degradedBest.score) degradedBest = { scenario, score };
+        continue;
+      }
       const bestRank = best ? (scope?.projectId && best.scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && best.scenario.workspaceId === scope.workspaceId ? 1 : 0) : -1;
       if (!best || rank > bestRank || (rank === bestRank && score > best.score)) best = { scenario, score };
     }
-    if (!best) return { tier: "miss", score: 0 };
+    if (!best) {
+      if (degradedBest && degradedBest.score >= this.matchThresholds.partial) return { tier: "partial", scenario: degradedBest.scenario, score: degradedBest.score };
+      return { tier: "miss", score: 0 };
+    }
     if (best.score >= this.matchThresholds.hit) return { tier: "hit", scenario: best.scenario, score: best.score };
     if (best.score >= this.matchThresholds.partial) return { tier: "partial", scenario: best.scenario, score: best.score };
     return { tier: "miss", score: best.score };

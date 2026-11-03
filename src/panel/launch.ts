@@ -744,8 +744,11 @@ async function main(): Promise<void> {
         // Keep the user's original requirement attached to the terminal
         // outcome so the UI can offer a one-click, lossless hand-off into
         // construction. Requiring the user to retype a long request here is
-        // both error-prone and unlike a normal assistant interaction.
-         pushRunChat({ role: "build-status", tone: "info", text: "工作模式没有找到可直接使用的场景。切换到场景构建后，可以把这次需求固化成新场景。", action: "switch-to-build", requirement, terminal: true, ts: Date.now() });
+        // both error-prone and unlike a normal assistant interaction. A
+        // partial match is not a miss: tell the user a near scenario exists
+        // and its similarity, so the suggestion reads as honest triage.
+        const partialNote = match.tier === "partial" && match.scenario ? `找到相近场景（相似度 ${(match.score * 100).toFixed(0)}%），还不足以直接执行。` : "";
+         pushRunChat({ role: "build-status", tone: "info", text: `工作模式没有找到可直接使用的场景。${partialNote}切换到场景构建后，可以把这次需求固化成新场景。`, action: "switch-to-build", requirement, terminal: true, ts: Date.now() });
         await panel.refresh();
         clearPlannerAbort();
         launchBusy = false;
