@@ -1185,10 +1185,10 @@ function renderRichText(value: unknown): HTMLElement {
 }
 
 /** SceneFlow 进度卡：构建过程内联进度——步进器 + 流式叙述 + 分源微状态，全程一张卡原地更新。 */
-/** 完成摘要：DeepSeek 式一行（用时 + 步数） */
+/** 完成摘要：DeepSeek 式一行（用时 + 步数，无明细时省略步数） */
 function progressDoneSummary(card: ProgressCardMessage): string {
   const seconds = card.finishedAt !== null ? Math.max(1, Math.round((card.finishedAt - card.startedAt) / 1000)) : 0;
-  return `已完成构建 · 用时 ${seconds} 秒 · ${card.steps.length} 步`;
+  return card.steps.length > 0 ? `已完成构建 · 用时 ${seconds} 秒 · ${card.steps.length} 步` : `已完成构建 · 用时 ${seconds} 秒`;
 }
 
 /** SceneFlow 进度卡：DeepSeek 思考块式——进行中展开实时流出，完成后折叠为一行摘要。 */
@@ -1305,7 +1305,7 @@ function renderRunGroup(message: RunGroupMessage): HTMLElement {
   section.append(renderMessage(message.user));
   const items = Array.isArray(message.items) ? message.items : [];
   const terminal = [...items].reverse().find((item) => item.role === "build-status" && item.terminal === true);
-  const primaryRoles = new Set(["model-stream", "model-thinking", "awaiting-user", "gate-card", "memory-proposal"]);
+  const primaryRoles = new Set(["model-stream", "model-thinking", "awaiting-user", "gate-card", "memory-proposal", "progress-card"]);
   const primary: Array<Record<string, unknown>> = [];
   const processItems: Array<Record<string, unknown>> = [];
   for (const item of items) {
@@ -1809,6 +1809,21 @@ function condensedMessages(source: Array<Record<string, unknown>>): Array<Record
 }
 
 function pushMessage(message: Record<string, unknown>): void {
+  // SceneFlow：持久化终态进度卡与 live 卡按 runId 合并——保留 live 卡的过程明细
+  //（narration/steps/sources），用持久卡补 finishedAt，避免出现两张同 run 卡。
+  if ((message as { role?: string }).role === "progress-card") {
+    const card = message as unknown as ProgressCardMessage;
+    const existing = findProgressCard(card.runId);
+    if (existing) {
+      existing.finishedAt = card.finishedAt ?? existing.finishedAt;
+      if (card.line && !existing.line) existing.line = card.line;
+      if (card.startedAt) existing.startedAt = existing.startedAt || card.startedAt;
+      rememberProgressCard(existing);
+      updateProgressDom(existing);
+      renderChat();
+      return;
+    }
+  }
   if (message.role !== "model-stream" && message.role !== "model-thinking") {
     // A non-stream event is the protocol boundary for the previous model
     // response. Persisting this bit locally keeps the caret from blinking on

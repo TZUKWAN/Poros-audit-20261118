@@ -556,6 +556,7 @@ async function main(): Promise<void> {
       // R5+ 收尾：orchestrator 是否已启动必须在 catch 可见的 outer 作用域声明
       //（try 块内声明的 const 对 catch 不可达）。
       let orchestratorStarted = false;
+      const buildStartedAt = Date.now();
       try {
       controller = new RunController();
       panel.setController(controller);
@@ -978,6 +979,17 @@ async function main(): Promise<void> {
             }
           }
           panel.pushProgress(panelRunId, { finished: true, phase: "distilling", line: shouldPin ? "场景已固化入库。" : "构建流程结束。" });
+          // SceneFlow：终态进度卡持久化入聊天历史——刷新/重连后思考块仍在（折叠一行摘要）。
+          // 客户端按 runId 与 live 卡合并，不会出现两张。
+          if (panelRunId) {
+            panel.pushChat({
+              role: "progress-card", runId: panelRunId, phase: "distilling",
+              line: shouldPin ? "场景已固化入库。" : "构建流程结束。",
+              startedAt: buildStartedAt, finishedAt: Date.now(),
+              narration: "", sources: [], sourcesTotal: 0, steps: [],
+              ts: Date.now(),
+            });
+          }
           panel.pushChat({
             role: "build-status", tone: shouldPin ? "ok" : "err", runStatus: shouldPin ? "succeeded" : "failed", error: shouldPin ? undefined : `构建结束但未固化：${final.outcome}`,
             text: shouldPin ? `构建完成 ✓ 场景已固化为「${savedScenario?.name ?? "新场景"}」（v1），会话已写入 Memory。` : `构建结束但未固化：验收或执行未全部通过（${final.outcome}）。`, terminal: true, runId: panelRunId ?? undefined,
