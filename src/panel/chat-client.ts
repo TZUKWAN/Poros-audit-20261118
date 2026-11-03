@@ -1516,8 +1516,10 @@ function renderMessage(message: Record<string, unknown>): HTMLElement {
       body.append(rich);
     } else body.append(textBlock(content, "status-card event-card"));
   } else if (role === "memory-proposal") {
-    body.append(textBlock(message.text ?? "", "status-card"));
-    const actions = node("div", "gate-actions"); const save = node("button", "gate-approve"); save.type = "button"; save.dataset.memoryProposal = "save"; save.dataset.memoryName = String(message.proposalName ?? "运行记录"); save.dataset.memoryContent = String(message.content ?? ""); save.textContent = "保存 Memory"; const discard = node("button", "gate-reject"); discard.type = "button"; discard.dataset.memoryProposal = "discard"; discard.textContent = "忽略"; actions.append(save, discard); body.append(actions);
+    const proposalCard = node("div", "memory-proposal-card");
+    proposalCard.append(textBlock(message.text ?? "", "memory-proposal-text"));
+    const actions = node("div", "gate-actions"); const save = node("button", "gate-approve"); save.type = "button"; save.dataset.memoryProposal = "save"; save.dataset.memoryName = String(message.proposalName ?? "运行记录"); save.dataset.memoryContent = String(message.content ?? ""); save.textContent = "保存 Memory"; const discard = node("button", "gate-reject"); discard.type = "button"; discard.dataset.memoryProposal = "discard"; discard.textContent = "忽略"; actions.append(save, discard); proposalCard.append(actions);
+    body.append(proposalCard);
   } else if (role === "gate-card") {
     body.append(renderGateCard(message as unknown as GateCardMessage));
   } else if (role === "ui-command") {

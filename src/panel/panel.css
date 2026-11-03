@@ -2631,3 +2631,7 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .chat-stream .awaiting-user-field input { background: var(--claude-raised) !important; color: var(--claude-ink) !important; border-color: var(--claude-line) !important; font-size: 13px !important; padding: 9px 11px !important; }
 .chat-stream .awaiting-user-field input:focus { border-color: var(--claude-accent) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--claude-accent) 12%, transparent) !important; outline: 0 !important; }
 .chat-stream .awaiting-user-field input::placeholder { color: var(--claude-faint) !important; }
+
+/* Memory 提议卡：专有排版（此前 CSS 指向未使用的类名） */
+.chat-stream .memory-proposal-card { border-left: 2px solid var(--claude-line) !important; padding: 2px 0 2px 14px !important; }
+.chat-stream .memory-proposal-text { color: var(--claude-muted) !important; font-size: 13px !important; line-height: 1.7 !important; padding: 0 !important; border: 0 !important; background: transparent !important; white-space: pre-wrap !important; }
