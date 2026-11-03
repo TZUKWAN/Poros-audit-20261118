@@ -1910,7 +1910,14 @@ function renderMinimap(): void {
       const contentEl = el.querySelector(".message-content");
       const userText = (contentEl ? contentEl.textContent : el.textContent)?.trim().replace(/\s+/g, " ") ?? "";
       title = userText.slice(0, 32);
-      subtitle = "用户需求";
+      const groupCard = el.querySelector(".progress-card");
+      subtitle = groupCard ? "用户需求 · 执行明细" : "用户需求";
+      // 同组带进度卡时，预览直接带出步骤要点（hover 即见执行了什么）
+      if (groupCard) {
+        groupCard.querySelectorAll(".progress-step-text").forEach((st, i) => {
+          if (i < 3) bullets.push(st.textContent?.slice(0, 24) ?? "");
+        });
+      }
     } else if (isProgress) {
       // 预览卡标题跟随当前阶段（head 虽隐藏，phase 文本仍可读取）
       const phaseText = el.querySelector(".progress-phase")?.textContent?.trim();
