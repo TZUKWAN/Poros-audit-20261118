@@ -1815,3 +1815,321 @@ label.scope-field input[type="checkbox"] { width: 15px; height: 15px; accent-col
 #workspace-inspector .inspector-subtitle { color: var(--claude-faint) !important; }
 #workspace-inspector .context-meta { color: var(--claude-muted) !important; font-size: 12px !important; }
 #workspace-inspector .context-instructions { color: var(--claude-faint) !important; }
+
+/* ═══ SceneFlow Phase D-15 弹窗内部组件深度打磨：科技简约质感 ═══ */
+
+/* Host Bridge 卡片：从死黑框转为优雅的技术参数卡 */
+.context-bridge {
+  display: flex !important; align-items: center !important; justify-content: space-between !important;
+  gap: 12px !important; margin-bottom: 14px !important; padding: 10px 14px !important;
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 12px !important;
+  color: var(--claude-muted) !important; background: var(--claude-raised) !important; font-size: 11.5px !important;
+}
+.context-bridge strong { color: var(--claude-ink) !important; font-weight: 600 !important; }
+.context-bridge #host-bridge-info { flex: 1 !important; color: var(--claude-faint) !important; font-family: ui-monospace, SFMono-Regular, monospace !important; font-size: 11px !important; }
+
+/* 弹窗行组件（连接器/运行/任务/分享/上下文行）统一质感 */
+.connector-row, .run-row {
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 12px !important;
+  background: var(--claude-surface) !important; padding: 10px 14px !important; margin-bottom: 7px !important;
+  transition: border-color .15s ease, background .15s ease !important;
+}
+:root[data-theme="dark"] .connector-row, :root[data-theme="dark"] .run-row {
+  background: var(--claude-raised) !important;
+}
+.connector-row:hover, .run-row:hover {
+  border-color: var(--claude-line) !important;
+}
+.connector-name, .run-title {
+  color: var(--claude-ink) !important; font-size: 13.5px !important; font-weight: 600 !important; line-height: 1.4 !important;
+}
+.connector-meta, .run-meta {
+  color: var(--claude-faint) !important; font-size: 11.5px !important; margin-top: 2px !important;
+}
+
+/* 按钮微交互：操作按钮统一药丸胶囊风格 */
+.connector-row .session-action, .connector-actions .session-action, .run-row .session-action {
+  padding: 4px 11px !important; border-radius: 999px !important; border: 1px solid var(--claude-line) !important;
+  color: var(--claude-muted) !important; background: transparent !important; font-size: 11px !important;
+  font-weight: 500 !important; cursor: pointer !important; transition: all .15s ease !important;
+}
+.connector-row .session-action:hover, .connector-actions .session-action:hover, .run-row .session-action:hover {
+  border-color: var(--claude-muted) !important; color: var(--claude-ink) !important; background: var(--claude-hover) !important;
+}
+.connector-row .session-action.session-delete:hover, .connector-actions .session-action.session-delete:hover, .run-row .session-action.session-delete:hover {
+  border-color: var(--claude-danger) !important; color: var(--claude-danger) !important; background: transparent !important;
+}
+
+/* 状态 Badge 统一：放弃刺眼浅色，绑定主题语义色彩 */
+.connector-status, .run-status {
+  padding: 2px 8px !important; border-radius: 999px !important; font-size: 11px !important; font-weight: 600 !important;
+}
+.connector-enabled, .run-status.succeeded {
+  color: var(--claude-success) !important; background: color-mix(in srgb, var(--claude-success) 12%, transparent) !important;
+}
+.connector-disabled, .run-status.cancelled {
+  color: var(--claude-faint) !important; background: var(--claude-hover) !important;
+}
+.connector-error, .run-status.failed {
+  color: var(--claude-danger) !important; background: color-mix(in srgb, var(--claude-danger) 12%, transparent) !important;
+}
+
+/* 折叠区块 Accordion 极简科技感（添加任务/添加连接器/工作区权限） */
+.gate-advanced {
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 12px !important;
+  padding: 10px 14px !important; margin-top: 14px !important; background: var(--claude-raised) !important;
+}
+.gate-advanced summary {
+  color: var(--claude-muted) !important; font-size: 12.5px !important; font-weight: 600 !important;
+  cursor: pointer !important; user-select: none !important; transition: color .15s ease;
+}
+.gate-advanced summary:hover { color: var(--claude-ink) !important; }
+.gate-advanced[open] { padding-bottom: 16px !important; }
+.gate-advanced[open] summary {
+  margin-bottom: 12px !important; border-bottom: 1px solid var(--claude-line-soft) !important; padding-bottom: 8px !important;
+}
+
+/* 权限复选框组美化 */
+fieldset.scope-field {
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 12px !important;
+  padding: 10px 14px !important; margin: 12px 0 !important; background: var(--claude-surface) !important;
+  display: flex !important; flex-wrap: wrap !important; gap: 12px !important;
+}
+:root[data-theme="dark"] fieldset.scope-field { background: var(--claude-raised) !important; }
+fieldset.scope-field legend { padding: 0 6px !important; color: var(--claude-muted) !important; font-size: 11px !important; font-weight: 600 !important; }
+fieldset.scope-field label { display: inline-flex !important; gap: 6px !important; align-items: center !important; color: var(--claude-ink) !important; font-size: 12px !important; cursor: pointer !important; }
+fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14px !important; accent-color: var(--claude-accent) !important; cursor: pointer !important; }
+
+/* 弹窗空态文字沉着内敛 */
+.connector-list:empty::before, .run-list:empty::before,
+.connector-list > .inspector-subtitle, .run-list > .inspector-subtitle {
+  display: block !important; padding: 18px 0 !important; color: var(--claude-faint) !important;
+  font-size: 13px !important; text-align: center !important;
+}
+
+/* 运行详情/代码预览块现代极客质感 */
+.file-preview-content {
+  border-radius: 12px !important; border: 1px solid var(--claude-line-soft) !important;
+  background: var(--claude-code) !important; color: var(--claude-ink) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 12px !important; line-height: 1.65 !important;
+}
+
+/* ═══ SceneFlow Phase D-16 闸门内容区全量纯净重构 ═══ */
+
+/* 闸门整体概览网格 */
+.gate-overview {
+  display: grid !important; gap: 6px !important; margin: 10px 0 14px !important;
+}
+.gate-overview-row {
+  display: grid !important; grid-template-columns: minmax(80px, .22fr) minmax(0, 1fr) !important;
+  gap: 12px !important; align-items: baseline !important; padding: 8px 12px !important;
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 10px !important;
+  background: var(--claude-surface) !important; transition: border-color .15s ease;
+}
+:root[data-theme="dark"] .gate-overview-row {
+  background: var(--claude-raised) !important;
+}
+.gate-overview-focus {
+  border-color: color-mix(in srgb, var(--claude-accent) 35%, var(--claude-line-soft)) !important;
+  background: color-mix(in srgb, var(--claude-accent) 5%, var(--claude-surface)) !important;
+}
+:root[data-theme="dark"] .gate-overview-focus {
+  background: color-mix(in srgb, var(--claude-accent) 7%, var(--claude-raised)) !important;
+}
+.gate-overview-label {
+  color: var(--claude-faint) !important; font-size: 11.5px !important; font-weight: 600 !important;
+  letter-spacing: .02em !important;
+}
+.gate-overview-value {
+  color: var(--claude-ink) !important; font-size: 13px !important; line-height: 1.55 !important;
+}
+.gate-overview-pass .gate-overview-value { color: var(--claude-success) !important; }
+.gate-overview-pending .gate-overview-value { color: var(--claude-accent-strong) !important; }
+.gate-overview-fail .gate-overview-value { color: var(--claude-danger) !important; }
+.gate-overview-empty .gate-overview-value { color: var(--claude-faint) !important; }
+
+/* 闸门规划步骤行（如阶段2 DAG 步骤卡） */
+.gate-plan-row {
+  display: flex !important; align-items: baseline !important; gap: 10px !important; padding: 8px 12px !important;
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 10px !important;
+  background: var(--claude-surface) !important; margin-bottom: 5px !important;
+}
+:root[data-theme="dark"] .gate-plan-row {
+  background: var(--claude-raised) !important;
+}
+.gate-plan-index {
+  display: inline-grid !important; place-items: center !important; width: 22px !important; height: 22px !important;
+  border-radius: 6px !important; background: var(--claude-hover) !important; color: var(--claude-faint) !important;
+  font-family: ui-monospace, SFMono-Regular, monospace !important; font-size: 11px !important; font-weight: 600 !important;
+  flex: 0 0 22px !important;
+}
+.gate-plan-main { flex: 1 !important; min-width: 0 !important; }
+.gate-plan-title { color: var(--claude-ink) !important; font-size: 13px !important; font-weight: 500 !important; line-height: 1.45 !important; }
+.gate-plan-output { color: var(--claude-faint) !important; font-size: 11.5px !important; margin-top: 3px !important; }
+
+/* 表单结构体（调整步骤/目标槽位输入） */
+.gate-structured-form, .gate-structured-list {
+  display: grid !important; gap: 8px !important; margin: 10px 0 !important; padding: 12px !important;
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 12px !important;
+  background: var(--claude-surface) !important;
+}
+:root[data-theme="dark"] .gate-structured-form, :root[data-theme="dark"] .gate-structured-list {
+  background: var(--claude-raised) !important;
+}
+.gate-structured-row {
+  display: grid !important; grid-template-columns: minmax(64px, .2fr) 1fr 1fr !important;
+  gap: 8px !important; align-items: center !important; padding: 6px 10px !important;
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 8px !important;
+  background: transparent !important;
+}
+.gate-field-label { color: var(--claude-faint) !important; font-size: 11px !important; font-weight: 500 !important; }
+.gate-field {
+  padding: 6px 10px !important; border: 1px solid var(--claude-line) !important; border-radius: 8px !important;
+  background: var(--claude-surface) !important; color: var(--claude-ink) !important; font-size: 12px !important;
+  outline: none !important;
+}
+:root[data-theme="dark"] .gate-field { background: var(--claude-raised) !important; }
+.gate-field:focus { border-color: var(--claude-accent) !important; }
+
+/* 调整步骤折叠栏 */
+.gate-editor { margin-top: 10px !important; }
+.gate-editor summary {
+  display: inline-flex !important; padding: 5px 12px !important; border-radius: 999px !important;
+  border: 1px solid var(--claude-line) !important; background: transparent !important;
+  color: var(--claude-muted) !important; font-size: 11.5px !important; font-weight: 500 !important;
+  cursor: pointer !important; user-select: none !important; transition: all .15s ease !important;
+}
+.gate-editor summary:hover { border-color: var(--claude-muted) !important; color: var(--claude-ink) !important; }
+.gate-editor[open] summary { border-color: var(--claude-accent) !important; color: var(--claude-ink) !important; }
+
+/* 决策动作栏与驳回注释框 */
+.gate-actions { display: flex !important; align-items: center !important; gap: 10px !important; flex-wrap: wrap !important; margin-top: 14px !important; }
+.gate-comment {
+  flex: 1 1 200px !important; padding: 7px 14px !important; border: 1px solid var(--claude-line) !important;
+  border-radius: 999px !important; background: var(--claude-surface) !important; color: var(--claude-ink) !important;
+  font-size: 12px !important; outline: none !important; transition: border-color .15s ease !important;
+}
+:root[data-theme="dark"] .gate-comment { background: var(--claude-raised) !important; }
+.gate-comment:focus { border-color: var(--claude-accent) !important; }
+
+/* ═══ SceneFlow Phase D-17 帮助命令面板现代化排版 ═══ */
+.help-card {
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 14px !important;
+  background: var(--claude-surface) !important; padding: 14px 16px !important; margin: 8px 0 !important;
+}
+:root[data-theme="dark"] .help-card { background: var(--claude-raised) !important; }
+.help-title {
+  display: flex !important; align-items: baseline !important; justify-content: space-between !important;
+  margin-bottom: 12px !important; border-bottom: 1px solid var(--claude-line-soft) !important; padding-bottom: 8px !important;
+}
+.help-heading { color: var(--claude-ink) !important; font-size: 13.5px !important; font-weight: 600 !important; }
+.help-hint { color: var(--claude-faint) !important; font-size: 11px !important; }
+.help-grid { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 4px 12px !important; }
+@media (max-width: 680px) { .help-grid { grid-template-columns: 1fr !important; } }
+.help-row {
+  display: flex !important; align-items: baseline !important; justify-content: space-between !important;
+  gap: 8px !important; padding: 5px 8px !important; border-radius: 6px !important;
+  background: transparent !important; transition: background .15s ease !important;
+}
+.help-row:hover { background: var(--claude-hover) !important; }
+.help-command {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  color: var(--claude-accent) !important; font-size: 11.5px !important; font-weight: 600 !important;
+}
+.help-description { color: var(--claude-muted) !important; font-size: 11.5px !important; }
+.help-more { margin-top: 10px !important; }
+.help-more summary { color: var(--claude-faint) !important; font-size: 11.5px !important; cursor: pointer !important; padding: 4px 0 !important; user-select: none !important; }
+.help-more summary:hover { color: var(--claude-muted) !important; }
+
+/* ═══ SceneFlow Phase D-18 富文本/Markdown 渲染排版打磨 ═══ */
+.rich-content {
+  color: var(--claude-ink) !important; font-size: 14px !important; line-height: 1.75 !important;
+}
+.rich-content .rich-paragraph { margin: 6px 0 !important; }
+.rich-content ul, .rich-content ol { margin: 6px 0 10px 20px !important; padding: 0 !important; }
+.rich-content li { margin-bottom: 4px !important; line-height: 1.7 !important; }
+.rich-content .inline-code {
+  padding: 2px 6px !important; border: 1px solid var(--claude-line-soft) !important;
+  border-radius: 6px !important; color: var(--claude-accent-strong) !important;
+  background: var(--claude-code) !important; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: .88em !important;
+}
+.rich-content .rich-code {
+  margin: 8px 0 12px !important; padding: 12px 14px !important; overflow: auto !important;
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 12px !important;
+  color: var(--claude-ink) !important; background: var(--claude-code) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 12px !important; line-height: 1.65 !important; white-space: pre !important;
+}
+.rich-content .rich-link {
+  color: var(--claude-accent) !important; text-decoration: underline !important;
+  text-underline-offset: 3px !important; transition: color .15s ease !important;
+}
+.rich-content .rich-link:hover { color: var(--claude-accent-strong) !important; }
+.rich-content strong { font-weight: 650 !important; color: var(--claude-ink) !important; }
+
+/* ═══ SceneFlow Phase D-19 斜杠命令菜单现代化重构（居中胶囊卡片） ═══ */
+.command-menu {
+  position: absolute !important; left: 50% !important; right: auto !important;
+  transform: translateX(-50%) !important; bottom: calc(var(--composer-height, 80px) + 12px) !important;
+  width: min(520px, 92%) !important; max-width: 520px !important; padding: 6px !important;
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 14px !important;
+  background: var(--claude-surface) !important; box-shadow: 0 16px 40px rgba(45, 43, 38, .14) !important;
+  z-index: 10 !important;
+}
+:root[data-theme="dark"] .command-menu {
+  background: var(--claude-raised) !important; box-shadow: 0 20px 48px rgba(0, 0, 0, .42) !important;
+}
+.command-item {
+  display: flex !important; align-items: center !important; gap: 14px !important; width: 100% !important;
+  padding: 8px 12px !important; border-radius: 8px !important; border: 0 !important;
+  background: transparent !important; cursor: pointer !important; text-align: left !important;
+  transition: all .15s ease !important;
+}
+.command-item:hover, .command-item.active { background: var(--claude-hover) !important; }
+.command-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  color: var(--claude-accent) !important; font-size: 12.5px !important; font-weight: 600 !important;
+  flex: 0 0 150px !important;
+}
+.command-description {
+  color: var(--claude-muted) !important; font-size: 12px !important; flex: 1 !important;
+  white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+}
+
+/* ═══ SceneFlow Phase D-20 侧栏新建按钮/工具菜单/内存操作按钮精致化 ═══ */
+.rail-icon-btn, .rail-new-btn {
+  border: 1px solid var(--claude-line) !important; border-radius: 999px !important;
+  color: var(--claude-muted) !important; background: transparent !important;
+  font-size: 11px !important; font-weight: 500 !important; padding: 3px 10px !important;
+  transition: all .15s ease !important;
+}
+.rail-icon-btn:hover, .rail-new-btn:hover {
+  border-color: var(--claude-accent) !important; color: var(--claude-accent) !important; background: var(--claude-hover) !important;
+}
+.utility-menu {
+  border: 1px solid var(--claude-line-soft) !important; border-radius: 12px !important;
+  background: var(--claude-surface) !important; box-shadow: 0 16px 36px rgba(45, 43, 38, .16) !important;
+  padding: 6px !important; z-index: 100 !important;
+}
+:root[data-theme="dark"] .utility-menu {
+  background: var(--claude-raised) !important; box-shadow: 0 20px 48px rgba(0, 0, 0, .45) !important;
+}
+.utility-menu button {
+  padding: 7px 12px !important; border-radius: 8px !important; color: var(--claude-muted) !important;
+  font-size: 12px !important; font-weight: 500 !important; transition: all .15s ease !important;
+}
+.utility-menu button:hover {
+  color: var(--claude-ink) !important; background: var(--claude-hover) !important;
+}
+.memory-actions { display: flex !important; gap: 8px !important; margin-bottom: 10px !important; }
+.memory-actions button {
+  padding: 5px 12px !important; border-radius: 999px !important; font-size: 11.5px !important; font-weight: 500 !important;
+}
+.memory-actions #delete-selected-memory {
+  border: 1px solid var(--claude-line) !important; color: var(--claude-muted) !important; background: transparent !important;
+}
+.memory-actions #delete-selected-memory:hover {
+  border-color: var(--claude-danger) !important; color: var(--claude-danger) !important;
+}

@@ -2328,7 +2328,7 @@ export class PanelServer {
     this.pushChat({ role: "user", content: input, timestamp: Date.now() });
     switch (parsed.name) {
       case "/help":
-        this.pushChat({ role: "build-status", tone: "info", text: COMMANDS.map((command) => `${command.usage} · ${command.description}`).join("\n"), ts: Date.now() });
+        this.pushChat({ role: "build-status", tone: "info", text: COMMANDS.map((command) => `${command.usage} · ${command.description}`).join("\n"), terminal: true, ts: Date.now() });
         return { ok: true };
       case "/work":
         return await this.handleAction({ type: "set-mode", mode: "work" });
@@ -2366,25 +2366,25 @@ export class PanelServer {
         this.pushChat({ role: "ui-command", command: "file-picker", ts: Date.now() });
         return { ok: true };
       case "/files list":
-        this.pushChat({ role: "build-status", tone: "info", text: this.projectId && this.deps.repository ? ((await this.deps.repository.listFiles(this.projectId)).map((file) => `${file.name} · ${file.mediaType} · ${file.size} bytes`).join("\n") || "当前项目没有文件") : "请先选择项目。", ts: Date.now() });
+        this.pushChat({ role: "build-status", tone: "info", text: this.projectId && this.deps.repository ? ((await this.deps.repository.listFiles(this.projectId)).map((file) => `${file.name} · ${file.mediaType} · ${file.size} bytes`).join("\n") || "当前项目没有文件") : "请先选择项目。", terminal: true, ts: Date.now() });
         return { ok: true };
       case "/scenario list": {
         const scenarios = this.deps.library ? (await this.deps.library.list()).filter((scenario) => this.scenarioInScope(scenario)) : [];
-        this.pushChat({ role: "build-status", tone: "info", text: scenarios.length ? scenarios.map((scenario) => `${scenario.id} · ${scenario.name} · v${scenario.pinnedVersion}`).join("\n") : "场景库为空", ts: Date.now() });
+        this.pushChat({ role: "build-status", tone: "info", text: scenarios.length ? scenarios.map((scenario) => `${scenario.id} · ${scenario.name} · v${scenario.pinnedVersion}`).join("\n") : "场景库为空", terminal: true, ts: Date.now() });
         return { ok: true };
       }
       case "/scenario inspect": {
         const id = parsed.args[0];
         const scenario = id && this.deps.library ? await this.deps.library.get(id) : undefined;
         if (!scenario || !this.scenarioInScope(scenario)) return { ok: false, error: "场景不存在，请先使用 /scenario list" };
-        this.pushChat({ role: "build-status", tone: "info", text: `${scenario.name}\n版本 v${scenario.pinnedVersion} · 使用 ${scenario.stats.uses} 次 · 成功 ${scenario.stats.successes} 次\n能力数 ${scenario.capabilityIds.length} · 槽位数 ${scenario.distilled.slotDefs.length}`, ts: Date.now() });
+        this.pushChat({ role: "build-status", tone: "info", text: `${scenario.name}\n版本 v${scenario.pinnedVersion} · 使用 ${scenario.stats.uses} 次 · 成功 ${scenario.stats.successes} 次\n能力数 ${scenario.capabilityIds.length} · 槽位数 ${scenario.distilled.slotDefs.length}`, terminal: true, ts: Date.now() });
         return { ok: true };
       }
       case "/scenario version": {
         const id = parsed.args[0];
         const scenario = id && this.deps.library ? await this.deps.library.get(id) : undefined;
         if (!scenario || !this.scenarioInScope(scenario)) return { ok: false, error: "场景不存在，请先使用 /scenario list" };
-        this.pushChat({ role: "build-status", tone: "info", text: `${scenario.name} 当前发布版本 v${scenario.pinnedVersion}，构建 ${scenario.distilled.buildId}，创建于 ${scenario.createdAt}`, ts: Date.now() });
+        this.pushChat({ role: "build-status", tone: "info", text: `${scenario.name} 当前发布版本 v${scenario.pinnedVersion}，构建 ${scenario.distilled.buildId}，创建于 ${scenario.createdAt}`, terminal: true, ts: Date.now() });
         return { ok: true };
       }
       case "/scenario test": {
@@ -2407,7 +2407,7 @@ export class PanelServer {
         this.pushChat({ role: "ui-command", command: "memory", ts: Date.now() });
         return { ok: true };
       case "/memory list":
-        this.pushChat({ role: "build-status", tone: "info", text: "Memory 已在右侧面板显示；切换到 Memory 标签可浏览会话、场景和知识文件。", ts: Date.now() });
+        this.pushChat({ role: "build-status", tone: "info", text: "Memory 已在右侧面板显示；切换到 Memory 标签可浏览会话、场景和知识文件。", terminal: true, ts: Date.now() });
         return { ok: true };
       case "/memory search": {
         const keyword = parsed.args.join(" ");
@@ -2415,7 +2415,7 @@ export class PanelServer {
         if (this.deps.memories && this.workspace) {
           const needle = keyword.trim().toLowerCase();
           const records = (await this.visibleMemories()).filter((item) => `${item.name}\n${item.content}`.toLowerCase().includes(needle));
-          this.pushChat({ role: "build-status", tone: "info", text: records.length ? `Memory 搜索“${keyword}”命中：\n${records.slice(0, 20).map((item) => `${item.name} · ${item.scope}`).join("\n")}` : `Memory 中没有找到“${keyword}”。`, ts: Date.now() });
+          this.pushChat({ role: "build-status", tone: "info", text: records.length ? `Memory 搜索“${keyword}”命中：\n${records.slice(0, 20).map((item) => `${item.name} · ${item.scope}`).join("\n")}` : `Memory 中没有找到“${keyword}”。`, terminal: true, ts: Date.now() });
           return { ok: true };
         }
         const tree = this.deps.memoryRoot ? await memoryTree({ root: this.deps.memoryRoot, sessions: "", scenarios: "", knowledge: "" }) : null;
@@ -3407,7 +3407,7 @@ export function defaultPageHtml(): string {
     <div class="settings-card"><div class="settings-head"><div><div id="context-title" class="inspector-title">桌面上下文</div><div class="inspector-subtitle">导入当前文件、剪贴板、终端或浏览器中的可控文本</div></div><button id="close-context" class="ghost-btn" type="button">关闭</button></div><div class="context-bridge"><strong>Host Bridge</strong><span id="host-bridge-info">读取接入地址…</span><button id="copy-host-bridge" class="session-action" type="button">复制接入信息</button></div><div id="context-list" class="connector-list"></div><label class="settings-field">类型<select id="context-kind"><option value="note">笔记</option><option value="local-file">本地文件</option><option value="clipboard">剪贴板</option><option value="terminal">终端输出</option><option value="browser">浏览器页面</option></select></label><label class="settings-field">来源<input id="context-origin" type="text" placeholder="文件路径、窗口标题或 URL"></label><label class="settings-field">名称<input id="context-label" type="text" placeholder="例如：当前选中的代码"></label><label class="settings-field">内容<textarea id="context-content" rows="6" placeholder="粘贴或导入需要参与本次运行的内容"></textarea></label><div class="settings-actions"><button id="paste-context" class="ghost-btn" type="button">读取剪贴板</button><button id="save-context" class="primary-btn" type="button">保存上下文</button></div><div id="context-result" class="settings-result"></div></div>
   </div>
   <div id="shares-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="shares-title">
-    <div class="settings-card"><div class="settings-head"><div><div id="shares-title" class="inspector-title">分享中心</div><div class="inspector-subtitle">管理项目、场景和产物分享令牌</div></div><button id="close-shares" class="ghost-btn" type="button">关闭</button></div><div id="shares-list" class="connector-list"></div><label class="settings-field">资源类型<select id="share-type"><option value="workspace">工作区</option><option value="project">项目</option><option value="scenario">场景</option><option value="artifact">产物</option></select></label><label class="settings-field">资源 ID<input id="share-resource" type="text" placeholder="选择资源后自动填写，或手动填写"></label><label class="settings-field">角色<select id="share-role"><option value="viewer">查看</option><option value="user">使用</option><option value="editor">编辑</option><option value="publisher">发布</option><option value="admin">管理</option></select></label><button id="create-share" class="primary-btn" type="button">创建分享令牌</button><div id="share-result" class="settings-result"></div></div>
+    <div class="settings-card"><div class="settings-head"><div><div id="shares-title" class="inspector-title">分享中心</div><div class="inspector-subtitle">管理项目、场景和产物分享令牌</div></div><button id="close-shares" class="ghost-btn" type="button">关闭</button></div><div id="shares-list" class="connector-list"></div><label class="settings-field">资源类型<select id="share-type"><option value="workspace">工作区</option><option value="project">项目</option><option value="scenario">场景</option><option value="artifact">产物</option></select></label><label class="settings-field">资源 ID<input id="share-resource" type="text" placeholder="选择资源后自动填写，或手动填写"></label><label class="settings-field">角色<select id="share-role"><option value="viewer">查看</option><option value="user">使用</option><option value="editor">编辑</option><option value="publisher">发布</option><option value="admin">管理</option></select></label><div class="settings-actions"><button id="create-share" class="primary-btn" type="button">创建分享令牌</button></div><div id="share-result" class="settings-result"></div></div>
   </div>
   <div id="project-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="project-title">
     <div class="settings-card"><div class="settings-head"><div><div id="project-title" class="inspector-title">新建项目</div><div class="inspector-subtitle">项目会成为文件、Memory、场景和运行的上下文边界</div></div><button id="close-project" class="ghost-btn" type="button">关闭</button></div>
@@ -3445,8 +3445,8 @@ export function defaultPageHtml(): string {
   </div>
   <div id="connector-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="connector-title">
     <div class="settings-card"><div class="settings-head"><div><div id="connector-title" class="inspector-title">连接器中心</div><div class="inspector-subtitle">查看已接入能力、权限范围和健康状态</div></div><button id="close-connectors" class="ghost-btn" type="button">关闭</button></div>
-      <div id="connector-list" class="connector-list"></div><details class="gate-advanced"><summary>工作区权限策略</summary><div id="policy-list" class="scope-field"></div><button id="save-policy" class="primary-btn" type="button">保存权限策略</button><div id="policy-result" class="settings-result"></div></details>
-       <details class="gate-advanced"><summary>添加连接器</summary><label class="settings-field">名称<input id="connector-name" type="text" placeholder="例如：项目 MCP"></label><label class="settings-field">类型<select id="connector-kind"><option value="mcp-remote">远程 MCP</option><option value="mcp-local">本地 MCP</option><option value="cli">CLI 命令</option><option value="http">HTTP API</option><option value="skill">Skill/Knowledge</option></select></label><label class="settings-field">地址或命令<input id="connector-endpoint" type="text" placeholder="https://example.com/mcp 或 node server.js"></label><label class="settings-field">来源<select id="connector-source"><option value="user">用户添加</option><option value="catalog">官方/目录</option><option value="imported">导入</option><option value="host">宿主</option></select></label><label class="settings-field">信任证据链接（可选）<input id="connector-evidence" type="url" placeholder="官方文档或仓库地址"></label><label class="settings-field">Secret（可选，写入加密凭据库）<input id="connector-secret" type="password" autocomplete="new-password"></label><fieldset class="scope-field"><legend>允许的权限</legend><label><input id="connector-scope-read" type="checkbox" checked>读取</label><label><input id="connector-scope-network" type="checkbox" checked>联网</label><label><input id="connector-scope-write" type="checkbox">写入</label><label><input id="connector-scope-install" type="checkbox">安装</label><label><input id="connector-scope-send" type="checkbox">外发</label></fieldset><button id="save-connector" class="primary-btn" type="button">添加连接器</button></details>
+      <div id="connector-list" class="connector-list"></div><details class="gate-advanced"><summary>工作区权限策略</summary><div id="policy-list" class="scope-field"></div><div class="settings-actions"><button id="save-policy" class="primary-btn" type="button">保存权限策略</button></div><div id="policy-result" class="settings-result"></div></details>
+       <details class="gate-advanced"><summary>添加连接器</summary><label class="settings-field">名称<input id="connector-name" type="text" placeholder="例如：项目 MCP"></label><label class="settings-field">类型<select id="connector-kind"><option value="mcp-remote">远程 MCP</option><option value="mcp-local">本地 MCP</option><option value="cli">CLI 命令</option><option value="http">HTTP API</option><option value="skill">Skill/Knowledge</option></select></label><label class="settings-field">地址或命令<input id="connector-endpoint" type="text" placeholder="https://example.com/mcp 或 node server.js"></label><label class="settings-field">来源<select id="connector-source"><option value="user">用户添加</option><option value="catalog">官方/目录</option><option value="imported">导入</option><option value="host">宿主</option></select></label><label class="settings-field">信任证据链接（可选）<input id="connector-evidence" type="url" placeholder="官方文档或仓库地址"></label><label class="settings-field">Secret（可选，写入加密凭据库）<input id="connector-secret" type="password" autocomplete="new-password"></label><fieldset class="scope-field"><legend>允许的权限</legend><label><input id="connector-scope-read" type="checkbox" checked>读取</label><label><input id="connector-scope-network" type="checkbox" checked>联网</label><label><input id="connector-scope-write" type="checkbox">写入</label><label><input id="connector-scope-install" type="checkbox">安装</label><label><input id="connector-scope-send" type="checkbox">外发</label></fieldset><div class="settings-actions"><button id="save-connector" class="primary-btn" type="button">添加连接器</button></div></details>
       <div id="connector-result" class="settings-result"></div>
     </div>
   </div>
@@ -3454,7 +3454,7 @@ export function defaultPageHtml(): string {
     <div class="settings-card"><div class="settings-head"><div><div id="runs-title" class="inspector-title">运行中心</div><div class="inspector-subtitle">查看每次工作和构建的状态、模型和结果</div></div><div class="settings-actions"><button id="compare-runs" class="ghost-btn" type="button">对比选中</button><button id="close-runs" class="ghost-btn" type="button">关闭</button></div></div><div id="run-list" class="run-list"></div><pre id="run-compare-result" class="file-preview-content hidden"></pre><details class="gate-advanced"><summary>审批与权限审计</summary><div id="audit-list" class="run-list"></div></details></div>
   </div>
   <div id="run-detail-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="run-detail-title">
-    <div class="settings-card file-preview-card"><div class="settings-head"><div><div id="run-detail-title" class="inspector-title">运行详情</div><div class="inspector-subtitle">计划、节点、验收、上下文和错误证据</div></div><div class="settings-actions"><button id="retry-run-detail" class="ghost-btn" type="button">重试</button><button id="branch-run-detail" class="ghost-btn" type="button">创建分支</button><button id="close-run-detail" class="ghost-btn" type="button">关闭</button></div></div><pre id="run-detail-content" class="file-preview-content"></pre><label class="settings-field">添加评论<textarea id="run-comment-body" rows="3" placeholder="记录决策、问题或交接说明"></textarea></label><button id="save-run-comment" class="primary-btn" type="button">保存评论</button><div id="run-comments" class="run-list"></div></div>
+    <div class="settings-card file-preview-card"><div class="settings-head"><div><div id="run-detail-title" class="inspector-title">运行详情</div><div class="inspector-subtitle">计划、节点、验收、上下文和错误证据</div></div><div class="settings-actions"><button id="retry-run-detail" class="ghost-btn" type="button">重试</button><button id="branch-run-detail" class="ghost-btn" type="button">创建分支</button><button id="close-run-detail" class="ghost-btn" type="button">关闭</button></div></div><pre id="run-detail-content" class="file-preview-content"></pre><label class="settings-field">添加评论<textarea id="run-comment-body" rows="3" placeholder="记录决策、问题或交接说明"></textarea></label><div class="settings-actions"><button id="save-run-comment" class="primary-btn" type="button">保存评论</button></div><div id="run-comments" class="run-list"></div></div>
   </div>
   <div id="tasks-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="tasks-title">
     <div class="settings-card"><div class="settings-head"><div><div id="tasks-title" class="inspector-title">后台任务</div><div class="inspector-subtitle">管理一次性、周期和事件触发的任务</div></div><button id="close-tasks" class="ghost-btn" type="button">关闭</button></div><div id="task-list" class="run-list"></div><details class="gate-advanced" open><summary>添加任务</summary><label class="settings-field">任务内容<input id="task-requirement" type="text" placeholder="例如：每天整理项目资料并生成摘要"></label><label class="settings-field">触发计划<input id="task-schedule" type="text" placeholder="once / every 1h / 09:00"></label><div class="settings-actions"><button id="save-task" class="primary-btn" type="button">添加任务</button></div><div id="task-result" class="settings-result"></div></details></div>

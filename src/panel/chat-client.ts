@@ -1322,8 +1322,10 @@ function renderRunGroup(message: RunGroupMessage): HTMLElement {
   const primaryRoles = new Set(["model-stream", "model-thinking", "awaiting-user", "gate-card", "memory-proposal", "progress-card"]);
   const primary: Array<Record<string, unknown>> = [];
   const processItems: Array<Record<string, unknown>> = [];
+  const isSlashUser = typeof message.user?.content === "string" && (message.user.content as string).trim().startsWith("/");
   for (const item of items) {
-    if (primaryRoles.has(String(item.role)) || (item.role === "build-status" && item.terminal === true)) primary.push(item);
+    const isHelp = String(item.text ?? "").startsWith("/help ·");
+    if (primaryRoles.has(String(item.role)) || (item.role === "build-status" && (item.terminal === true || isHelp || isSlashUser))) primary.push(item);
     else processItems.push(item);
   }
   for (const item of primary) section.append(renderMessage(item));
