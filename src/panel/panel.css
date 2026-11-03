@@ -2565,3 +2565,10 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .progress-step-row:not(.step-ok):not(.step-err):not(.step-running) { border: 0 !important; background: transparent !important; padding: 5px 13px !important; }
 .progress-step-row:not(.step-ok):not(.step-err):not(.step-running) .progress-step-text { color: var(--claude-muted) !important; font-size: 12.5px !important; }
 .progress-step-row:not(.step-ok):not(.step-err):not(.step-running):hover { border: 0 !important; background: transparent !important; }
+
+/* 打磨 C：小地图长会话密度分级 */
+.chat-minimap { max-height: 72vh; overflow: hidden; }
+.chat-minimap.dense { gap: 2px !important; }
+.chat-minimap.dense .minimap-tick { height: 9px !important; }
+.chat-minimap.super-dense { gap: 1px !important; }
+.chat-minimap.super-dense .minimap-tick { height: 6px !important; }

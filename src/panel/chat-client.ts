@@ -1889,6 +1889,11 @@ function renderMinimap(): void {
     return;
   }
   container.style.display = "flex";
+  // 长会话刻度压缩：数量超出视口容量时按级收紧间距与刻度高度
+  container.classList.toggle("dense", items.length > 24);
+  container.classList.toggle("super-dense", items.length > 44);
+  container.style.maxHeight = `${Math.round(window.innerHeight * 0.72)}px`;
+  container.style.overflow = "hidden";
 
   items.forEach((el, index) => {
     const isUser = el.classList.contains("message-user") || el.querySelector(".message-user");
