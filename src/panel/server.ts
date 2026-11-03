@@ -662,7 +662,6 @@ export class PanelServer {
     // it ran in. The run binding is already unlocked by the time the settle
     // callback fires, so scope it by sessionId instead of this.run.
     const canvasSettlement = Boolean(message.role === "progress-card" && message.finished === true && messageSessionId && messageSessionId === this.sessionId);
-    if (message.role === "progress-card") console.log("[panel][canvas-settle]", JSON.stringify({ msgSession: messageSessionId, curSession: this.sessionId, msgRun: messageRunId, curRun: this.run.runId, pass: canvasSettlement }));
     if (messageRunId && messageRunId !== this.run.runId && !orphanLongRunTerminal && !canvasSettlement) return;
     this.persistedChatHistory.push(message);
     if (this.persistedChatHistory.length > PanelServer.MAX_PERSISTED_MESSAGES) {
@@ -931,7 +930,6 @@ export class PanelServer {
       }
       return m;
     });
-    if (process.env.PANEL_DEBUG_SNAPSHOT === "1") console.log("[panel][snapshot]", JSON.stringify({ session: this.sessionId, chatLen: chat.length, tailRoles: chat.slice(-3).map((m) => (m as { role?: string }).role) }));
     return {
       mode: this.activeMode,
       activeScenarioId: this.activeScenarioId,
@@ -3365,7 +3363,7 @@ function tokenBudgetForModel(model: string, maxTokens: number): Record<string, n
 export function defaultPageHtml(): string {
   return `<!doctype html>
 <html lang="zh">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SceneFlow</title><link rel="stylesheet" href="/app.css?v=sceneflow-d32"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SceneFlow</title><link rel="stylesheet" href="/app.css?v=sceneflow-d33"></head>
 <body>
   <div class="app-shell" data-mode="work">
       <header class="topbar" role="banner">
@@ -3481,7 +3479,7 @@ export function defaultPageHtml(): string {
   <div id="tasks-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="tasks-title">
     <div class="settings-card"><div class="settings-head"><div><div id="tasks-title" class="inspector-title">后台任务</div><div class="inspector-subtitle">管理一次性、周期和事件触发的任务</div></div><button id="close-tasks" class="ghost-btn" type="button">关闭</button></div><div id="task-list" class="run-list"></div><details class="gate-advanced" open><summary>添加任务</summary><label class="settings-field">任务内容<input id="task-requirement" type="text" placeholder="例如：每天整理项目资料并生成摘要"></label><label class="settings-field">触发计划<input id="task-schedule" type="text" placeholder="once / every 1h / 09:00"></label><div class="settings-actions"><button id="save-task" class="primary-btn" type="button">添加任务</button></div><div id="task-result" class="settings-result"></div></details></div>
   </div>
-  <script type="module" src="/panel.js?v=sceneflow-d32"></script>
+  <script type="module" src="/panel.js?v=sceneflow-d33"></script>
 </body>
 </html>`;
 }
