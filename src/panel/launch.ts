@@ -641,6 +641,19 @@ async function main(): Promise<void> {
         const workspaceId = runBinding.workspaceId ?? (await repository.getDefaultWorkspace()).id;
         // 任务画布收口：工作模式运行结束 → 进度卡折叠为一行摘要
         panel.pushProgress(runId, { finished: true, line: result.status === "succeeded" ? "执行完成，产物已生成。" : result.status === "untested" ? "已生成说明，但缺少真实执行证据。" : "执行失败。" });
+        // 终态画布卡写入聊天历史：重载/换会话后任务画布仍在
+        panel.pushChat({
+          role: "progress-card", runId, finished: true,
+          steps: result.trace.map((step) => ({
+            at: Number(Date.parse(step.finishedAt)) || Date.now(),
+            text: step.status === "failed" ? `失败 · ${step.title}` : step.title,
+            nodeId: step.nodeId,
+            status: step.status === "success" || step.status === "skipped" ? "ok" : step.status === "failed" ? "err" : undefined,
+          })),
+          startedAt: Number(Date.parse(result.trace[0]?.startedAt ?? "")) || Date.now(),
+          finishedAt: Date.now(),
+          ts: Date.now(),
+        });
         await artifacts.create({ id: `artifact-${runId}-result`, workspaceId, projectId: runBinding.projectId, sessionId: runBinding.sessionId, runId, name: `${scenario.name} 工作结果.md`, mediaType: "text/markdown", path: result.artifactPath, version: 1, checksum: artifactChecksum(result.artifactContent), status: result.status === "succeeded" ? "ready" : result.status === "untested" ? "draft" : "failed" });
         const finishedAt = new Date().toISOString();
         const storedRun = await runs.get(runId);
@@ -1234,6 +1247,19 @@ async function main(): Promise<void> {
       if (resumed && resumed.status === "waiting-user") await longRuns.update(run.id, { status: "running", slots: roundSlots }, resumed.revision);
     }
     await artifacts.create({ id: `artifact-${roundRunId}`, workspaceId: run.workspaceId, projectId: run.projectId, sessionId: run.sessionId, runId: run.id, name: `${scenario.name} 长程第${round}轮.md`, mediaType: "text/markdown", path: result.artifactPath, version: 1, checksum: artifactChecksum(result.artifactContent), status: result.status === "succeeded" ? "ready" : result.status === "failed" ? "failed" : "draft" });
+    // 长程轮次终态画布卡同样持久化
+    panel.pushChat({
+      role: "progress-card", runId: roundRunId, finished: true,
+      steps: result.trace.map((step) => ({
+        at: Number(Date.parse(step.finishedAt)) || Date.now(),
+        text: step.status === "failed" ? `失败 · ${step.title}` : step.title,
+        nodeId: step.nodeId,
+        status: step.status === "success" || step.status === "skipped" ? "ok" : step.status === "failed" ? "err" : undefined,
+      })),
+      startedAt: Number(Date.parse(result.trace[0]?.startedAt ?? "")) || Date.now(),
+      finishedAt: Date.now(),
+      ts: Date.now(),
+    });
     if (!scenario.definition) { scenario.definition = definition; await library.save(scenario); }
     if (result.status !== "untested" && result.status !== "cancelled") {
       await library.execute(scenario.id, roundSlots, async () => ({ ok: result.status === "succeeded" }));
