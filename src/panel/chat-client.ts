@@ -1218,8 +1218,20 @@ function progressDoneSummary(card: ProgressCardMessage): string {  const seconds
 }
 
 /** SceneFlow 进度卡：DeepSeek 思考块式——进行中展开实时流出，完成后折叠为一行摘要。 */
-function renderProgressCard(card: ProgressCardMessage): HTMLElement {
-  const done = card.finishedAt !== null;
+function renderProgressCard(rawCard: ProgressCardMessage): HTMLElement {
+  // 持久化消息可能缺字段（早期收口只写 runId/steps/finishedAt）：渲染前归一
+  const card: ProgressCardMessage = {
+    ...rawCard,
+    steps: Array.isArray(rawCard.steps) ? rawCard.steps : [],
+    sources: Array.isArray(rawCard.sources) ? rawCard.sources : [],
+    sourcesTotal: rawCard.sourcesTotal ?? 0,
+    narration: rawCard.narration ?? "",
+    line: rawCard.line ?? "",
+    phase: rawCard.phase ?? null,
+    startedAt: rawCard.startedAt ?? rawCard.ts ?? Date.now(),
+    finishedAt: rawCard.finishedAt ?? null,
+  };
+  const done = card.finishedAt !== null && card.finishedAt !== undefined;
   const root = node("article", "message progress-message assistant");
   const cardEl = node("div", `progress-card ${done ? "finished" : "live"}`);
   cardEl.dataset.runId = card.runId;
@@ -2033,7 +2045,18 @@ function renderChat(): void {
     $("chat-left-progress")?.replaceChildren();
     return;
   }
-  for (const message of condensedMessages(messages)) root.append(renderMessage(message));
+  // 单条消息渲染失败不应毁掉整个聊天流：隔离异常、显示错误条、保留现场日志
+  for (const message of condensedMessages(messages)) {
+    try {
+      root.append(renderMessage(message));
+    } catch (error) {
+      console.error("[sceneflow] message render failed:", error instanceof Error ? error.message : error, JSON.stringify(message).slice(0, 200));
+      const errCard = node("div", "status-card event-card");
+      errCard.style.borderColor = "var(--claude-accent)";
+      errCard.textContent = `这条消息渲染失败：${error instanceof Error ? error.message : String(error)}`;
+      root.append(errCard);
+    }
+  }
   if (resetPosition || wasAtBottom) root.scrollTop = root.scrollHeight;
   else root.scrollTop = previousTop;
   updateJumpButton(!wasAtBottom && root.scrollHeight > root.clientHeight && root.scrollTop < root.scrollHeight - root.clientHeight - 48);
@@ -2328,6 +2351,7 @@ function connect(): void {
       currentSnapshot = nextSnapshot;
       panelMode = currentSnapshot.mode ?? panelMode; applyMode(panelMode); renderRight(currentSnapshot);
       messages = normalizeChatMessages(Array.isArray(currentSnapshot.chat) ? currentSnapshot.chat : []);
+      if (window.location.search.includes("debug=1")) console.log("[sceneflow][snapshot]", JSON.stringify({ len: messages.length, canvas: messages.filter((m) => m.role === "progress-card").length, tail: messages.slice(-3).map((m) => m.role) }));
       // SceneFlow：进度卡不在服务端聊天历史里，快照重建后按 runId 挂回
       reattachProgressCards();
       renderChat();
