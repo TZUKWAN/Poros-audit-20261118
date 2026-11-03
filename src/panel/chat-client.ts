@@ -2423,6 +2423,10 @@ function connect(): void {
         if (meta?.type === "choose-project-folder") { const hint = $("new-session-folder-hint"); if (hint) hint.textContent = String(payload.error ?? "未绑定文件夹，当前项目没有变化。"); }
         setBusy(false); pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "操作失败") });
       }
+      else if (meta?.type === "control-long-run" || meta?.type === "control") {
+        // 成功反馈由 setLongRunState / build-status 推送驱动；这里只补失败路径
+        if (!ok) pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "运行控制失败。"), ts: Date.now() });
+      }
       else if (meta?.type === "version-artifact") {
         if (ok) pushMessage({ role: "build-status", tone: "ok", text: "产物新版本已创建。", ts: Date.now() });
         else pushMessage({ role: "build-status", tone: "err", text: String(payload.error ?? "产物新版本创建失败。"), ts: Date.now() });
@@ -3150,7 +3154,22 @@ function mount(): void {
     const timeoutMs = Number(($('setting-timeout') as HTMLInputElement | null)?.value ?? "45000");
      return { baseUrl, model, plannerModel, fallbackModel, temperature, maxTokens, timeoutMs, providerId: ($('setting-provider') as HTMLSelectElement | null)?.value || null, useHistory: Boolean(($('setting-use-history') as HTMLInputElement | null)?.checked), autoMemory: Boolean(($('setting-auto-memory') as HTMLInputElement | null)?.checked), temporarySession: Boolean(($('setting-temporary') as HTMLInputElement | null)?.checked), streaming: Boolean(($('setting-streaming') as HTMLInputElement | null)?.checked), syncEndpoint: ($('setting-sync-endpoint') as HTMLInputElement | null)?.value.trim() || null, ...(apiKey ? { apiKey } : {}), ...(syncToken ? { syncToken } : {}) };
   };
-  $("save-settings")?.addEventListener("click", () => sendPayload({ type: "update-settings", settings: readSettingsPatch() }));
+  $("save-settings")?.addEventListener("click", () => {
+    const patch = readSettingsPatch();
+    // 客户端前置校验：非法值在本地拦截，不给服务端 schema 拒绝的机会
+    const problems: string[] = [];
+    if (!patch.baseUrl || !/^https?:\/\//i.test(String(patch.baseUrl))) problems.push("API 地址需以 http(s):// 开头");
+    if (!patch.model) problems.push("请填写默认模型名");
+    const temp = Number(patch.temperature);
+    if (!Number.isFinite(temp) || temp < 0 || temp > 2) problems.push("Temperature 需在 0 到 2 之间");
+    if (patch.maxTokens !== null && (!Number.isFinite(Number(patch.maxTokens)) || Number(patch.maxTokens) < 1)) problems.push("Max Tokens 需为正整数");
+    const timeout = Number(patch.timeoutMs);
+    if (!Number.isFinite(timeout) || timeout < 1000) problems.push("超时时间至少 1000ms");
+    const result = $("settings-result");
+    if (problems.length) { if (result) result.textContent = problems.join("；"); return; }
+    if (result) result.textContent = "";
+    sendPayload({ type: "update-settings", settings: patch });
+  });
   $("test-settings")?.addEventListener("click", () => { const result = $("settings-result"); if (result) result.textContent = "正在验证 models + chat completion……"; sendPayload({ type: "test-settings", settings: readSettingsPatch(), full: true }); });
   $("sync-preview")?.addEventListener("click", () => { const result = $("settings-result"); if (result) result.textContent = "正在读取远端同步 revision……"; sendPayload({ type: "sync-preview" }); });
   $("sync-apply")?.addEventListener("click", () => { if (!window.confirm("同步会把当前工作区项目和场景发送到已配置端点，默认不包含 Memory。继续吗？")) return; const result = $("settings-result"); if (result) result.textContent = "正在应用同步……"; sendPayload({ type: "sync-apply", includeMemory: false }); });
