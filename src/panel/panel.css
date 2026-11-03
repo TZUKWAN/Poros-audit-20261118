@@ -2133,3 +2133,8 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .memory-actions #delete-selected-memory:hover {
   border-color: var(--claude-danger) !important; color: var(--claude-danger) !important;
 }
+
+/* 弹窗底部呼吸空间：展开大表单时不截断底部按钮 */
+.settings-card { padding-bottom: 32px !important; }
+.gate-advanced[open] { padding-bottom: 20px !important; }
+.settings-actions { margin-top: 18px !important; margin-bottom: 6px !important; }
