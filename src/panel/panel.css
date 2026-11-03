@@ -2572,3 +2572,20 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .chat-minimap.dense .minimap-tick { height: 9px !important; }
 .chat-minimap.super-dense { gap: 1px !important; }
 .chat-minimap.super-dense .minimap-tick { height: 6px !important; }
+
+/* ============================================================
+   打磨 D — 闸门卡主题化（旧蓝紫主题残留清除）
+   ============================================================ */
+.message-gate-card .avatar { display: none !important; }
+.message-gate-card { grid-template-columns: minmax(0, 1fr) !important; }
+.gate-card { padding: 16px 18px !important; border: 1px solid var(--claude-line) !important; border-left: 3px solid var(--claude-accent) !important; border-radius: 12px !important; background: var(--claude-raised) !important; box-shadow: none !important; }
+.gate-title { color: var(--claude-ink) !important; font-size: 14px !important; font-weight: 700 !important; margin-top: 0 !important; }
+.gate-card .status-card, .gate-card .awaiting-user-question { color: var(--claude-muted) !important; }
+.gate-actions { gap: 9px !important; margin-top: 12px !important; }
+.gate-actions button { font-size: 13px !important; font-weight: 600 !important; padding: 7px 16px !important; border-radius: 8px !important; transition: transform .14s ease, opacity .14s ease !important; }
+.gate-actions button:active { transform: scale(.98); }
+.gate-approve { color: #fff !important; background: var(--claude-accent) !important; }
+.gate-approve:hover { background: var(--claude-accent-strong) !important; }
+.gate-reject { color: var(--claude-ink) !important; background: transparent !important; border: 1px solid var(--claude-line) !important; }
+.gate-reject:hover { background: var(--claude-hover) !important; }
+.awaiting-user-fields .gate-approve { color: #fff !important; background: var(--claude-accent) !important; }
