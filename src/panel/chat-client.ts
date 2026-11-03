@@ -497,10 +497,11 @@ function renderHeaderContext(snap: PanelSnapshot): void {
   const project = snap.projects.find((item) => item.id === snap.projectId);
   const untested = snap.run.status === "failed" && /未验证|Provider 不可用/.test(snap.run.text ?? "");
   const configuredModel = snap.settings?.model ?? snap.settings?.plannerModel;
+  const runState = untested ? "上次未验证" : snap.run.status === "running" || snap.run.status === "idle" ? friendlyRunStatus(snap.run.status) : `上次${friendlyRunStatus(snap.run.status)}`;
   const chips = [
     project ? `项目 · ${project.name}` : "未选择项目",
     snap.preview.context.providerModel ? `模型 · ${snap.preview.context.providerModel}` : configuredModel ? `模型 · ${configuredModel}` : "模型 · 默认",
-    untested ? "状态 · 未验证" : `状态 · ${friendlyRunStatus(snap.run.status)}`,
+    `状态 · ${runState}`,
     `记忆 · ${snap.preview.context.memoryCount}`,
   ];
   for (const value of chips) strip.append(textBlock(value, "context-chip"));
