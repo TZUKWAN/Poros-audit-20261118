@@ -1204,19 +1204,24 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
   const phase = node("span", "progress-phase");
   phase.textContent = done ? "完成" : card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
   const title = node("span", "progress-title");
-  title.textContent = done ? progressDoneSummary(card) : "正在思考与执行";
+  // finished 卡：一行摘要即全部；title 只在 live 态显示
+  title.textContent = done ? "" : "正在思考与执行";
+  if (!title.textContent) title.style.display = "none";
   const sourceCount = node("span", "progress-source-count");
-  sourceCount.textContent = card.sourcesTotal > 0 ? `${card.sources.filter((s) => s.done).length} / ${card.sourcesTotal} 源` : "";
+  sourceCount.textContent = done ? "" : card.sourcesTotal > 0 ? `${card.sources.filter((s) => s.done).length} / ${card.sourcesTotal} 源` : "";
+  if (!sourceCount.textContent) sourceCount.style.display = "none";
   head.append(pulse, phase, title, sourceCount);
 
   const narration = node("div", "progress-narration");
-  narration.textContent = card.narration;
-  if (!card.narration) narration.classList.add("empty");
+  narration.textContent = done ? "" : card.narration;
+  if (!narration.textContent) narration.classList.add("empty");
 
   const line = node("div", "progress-line");
-  if (card.line) line.textContent = card.line;
+  if (card.line && !done) line.textContent = card.line;
+  else if (done) line.style.display = "none";
 
   const chips = node("div", "progress-source-chips");
+  if (done) chips.style.display = "none";
   chips.replaceChildren(...card.sources.map((s) => {
     const chip = node("span", `progress-source-chip ${s.ok ? "ok" : "err"}`);
     chip.textContent = s.id;
@@ -1237,6 +1242,15 @@ function renderProgressCard(card: ProgressCardMessage): HTMLElement {
     row.append(timeEl, textEl);
     return row;
   }));
+  if (done && card.line) {
+    const row = node("div", "progress-step-row");
+    const timeEl = node("span", "progress-step-time");
+    timeEl.textContent = new Date(card.finishedAt ?? card.ts ?? Date.now()).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const textEl = node("span", "progress-step-text");
+    textEl.textContent = card.line;
+    row.append(timeEl, textEl);
+    steps.append(row);
+  }
   details.append(summary, steps);
   // DeepSeek 行为：进行中默认展开（过程实时可见），完成即折叠
   if (!done) details.setAttribute("open", "");
@@ -2243,7 +2257,15 @@ function updateProgressDom(card: ProgressCardMessage, deltaOnly = false): void {
   const phaseTextEl = root.querySelector<HTMLElement>(".progress-phase");
   if (phaseTextEl) phaseTextEl.textContent = done ? "完成" : card.phase ? (PROGRESS_PHASE_LABELS[card.phase] ?? card.phase) : "准备中";
   const titleEl = root.querySelector<HTMLElement>(".progress-title");
-  if (titleEl) titleEl.textContent = done ? progressDoneSummary(card) : "正在思考与执行";
+  if (titleEl) {
+    titleEl.textContent = done ? "" : "正在思考与执行";
+    titleEl.style.display = done || !titleEl.textContent ? "none" : "";
+  }
+  const countEl2 = root.querySelector<HTMLElement>(".progress-source-count");
+  if (countEl2) {
+    countEl2.textContent = done ? "" : card.sourcesTotal > 0 ? `${card.sources.filter((s) => s.done).length} / ${card.sourcesTotal} 源` : "";
+    countEl2.style.display = countEl2.textContent ? "" : "none";
+  }
   root.classList.toggle("finished", done);
 }
 

@@ -1796,3 +1796,6 @@ label.scope-field input[type="checkbox"] { width: 15px; height: 15px; accent-col
 
 /* 搜索空结果：不渲染黑条 */
 .search-results:empty, .search-result-list:empty, #search-result:empty { display: none !important; }
+
+/* 完成态 phase 标签用 success 色（非橙红），摘要行即全部 */
+.progress-card.finished .progress-phase { color: var(--claude-success) !important; }
