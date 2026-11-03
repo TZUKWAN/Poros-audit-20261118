@@ -764,9 +764,10 @@ function renderSessions(snap: PanelSnapshot): void {
       const open = node("button", "session-open"); open.type = "button"; open.dataset.sessionId = item.id; open.dataset.sessionAction = item.archived ? "restore-session" : "open-session";
       open.append(textBlock(item.title || "未命名对话", "session-title"), textBlock(`${item.mode === "work" ? "工作" : "构建"} · ${item.messageCount} 条消息`, "session-meta"));
       const actions = node("div", "session-actions");
+      const rename = node("button", "session-action"); rename.type = "button"; rename.dataset.sessionId = item.id; rename.dataset.sessionAction = "rename-session"; rename.textContent = "重命名";
       const archive = node("button", "session-action"); archive.type = "button"; archive.dataset.sessionId = item.id; archive.dataset.sessionAction = item.archived ? "restore-session" : "archive-session"; archive.textContent = item.archived ? "恢复" : "归档";
       const remove = node("button", "session-action session-delete"); remove.type = "button"; remove.dataset.sessionId = item.id; remove.dataset.sessionAction = "delete-session"; remove.textContent = "删除";
-      actions.append(archive, remove); row.append(open, actions); fragment.append(row);
+      actions.append(rename, archive, remove); row.append(open, actions); fragment.append(row);
     }
     return fragment;
   };
@@ -817,11 +818,24 @@ function sessionAction(event: Event): void {
   if (!action || !sessionId) return;
   event.stopPropagation();
   if (action === "delete-session" && !window.confirm("删除后无法恢复，只删除这段对话记录，不影响场景库和 Memory。确定删除吗？")) return;
+  if (action === "archive-session" && !window.confirm("归档后对话会移入历史归档列表，可在其中恢复。确定归档吗？")) return;
+  if (action === "rename-session") {
+    const current = button.closest(".session-item")?.querySelector(".session-title")?.textContent?.trim() ?? "";
+    const title = window.prompt("重命名这段对话：", current);
+    if (title && title.trim() && title.trim() !== current) sendPayload({ type: "rename-session", sessionId, title: title.trim().slice(0, 120) });
+    return;
+  }
   // History navigation invalidates any long-run choice staged by the
   // new-session dialog. Without this guard, returning to a session that uses
   // the same scenario could unexpectedly launch a long run on the next send.
   pendingLongRunConfig = null;
-  const sent = sendPayload(action === "delete-session" ? { type: action, sessionId, confirm: true } : { type: action, sessionId });
+  // 归档/删除留在列表内：快照刷新即时更新列表，这本身就是反馈。
+  // open/restore 是导航语义（进入该对话），保持关抽屉让对话立即可见。
+  if (action === "archive-session" || action === "delete-session") {
+    sendPayload(action === "delete-session" ? { type: action, sessionId, confirm: true } : { type: action, sessionId });
+    return;
+  }
+  const sent = sendPayload({ type: action, sessionId });
   // A rail selection is a navigation action on touch screens.  Close the
   // drawer immediately so the newly opened conversation is visible instead
   // of leaving a dark overlay over the chat while the snapshot arrives.
