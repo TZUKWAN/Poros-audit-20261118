@@ -945,9 +945,20 @@ function renderFiles(snap: PanelSnapshot): void {
   }
 }
 
+let lastArtifactSignature = "";
 function renderArtifacts(snap: PanelSnapshot): void {
   const box = $("artifact-list"); if (!box) return;
   box.replaceChildren();
+  // 新产物到达时自动滑出任务详情抽屉（仅同会话内数量增长才触发；换会话/首载不弹）
+  const signature = `${snap.sessionId ?? ""}:${snap.artifacts.length}`;
+  if (lastArtifactSignature && signature !== lastArtifactSignature) {
+    const [lastSession, lastCount] = lastArtifactSignature.split(":");
+    if (lastSession === (snap.sessionId ?? "") && snap.artifacts.length > Number(lastCount)) {
+      const inspector = document.querySelector<HTMLElement>(".inspector");
+      if (inspector && !inspector.classList.contains("open")) setInspectorOpen(true);
+    }
+  }
+  lastArtifactSignature = signature;
   if (!snap.artifacts.length) { box.append(textBlock("运行后生成的产物会出现在这里", "inspector-subtitle")); return; }
   const artifacts = [...snap.artifacts].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const visible = artifactsExpanded ? artifacts : artifacts.slice(0, 12);
@@ -2905,11 +2916,12 @@ function mount(): void {
       } else if (actionButton.dataset.projectAction === "share") {
         if (sendPayload({ type: "create-share", resourceType: "project", resourceId: project.id, role: "viewer" })) setRailOpen(false);
       } else if (actionButton.dataset.projectAction === "pin") {
-        if (sendPayload({ type: "pin-project", projectId: project.id, pinned: !project.pinned })) setRailOpen(false);
+        // 置顶/归档/恢复留在抽屉内：快照刷新会更新按钮文案，本身就是反馈
+        sendPayload({ type: "pin-project", projectId: project.id, pinned: !project.pinned });
       } else if (actionButton.dataset.projectAction === "archive") {
-        if (sendPayload({ type: "archive-project", projectId: project.id })) setRailOpen(false);
+        sendPayload({ type: "archive-project", projectId: project.id });
       } else if (actionButton.dataset.projectAction === "restore") {
-        if (sendPayload({ type: "restore-project", projectId: project.id })) setRailOpen(false);
+        sendPayload({ type: "restore-project", projectId: project.id });
       } else if (actionButton.dataset.projectAction === "delete" && window.confirm("删除项目后会移除项目上下文和文件索引。确定删除吗？")) {
         if (sendPayload({ type: "delete-project", projectId: project.id, confirm: true })) setRailOpen(false);
       }
