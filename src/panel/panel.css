@@ -2484,3 +2484,57 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
   font-size: 10px !important;
   color: var(--claude-faint) !important;
 }
+
+/* ============================================================
+   Phase E — 对话流基本盘重做（任务画布形态第一步）
+   E-1 用户消息极简化 · E-2 执行过程折叠条 · E-3 动作按钮
+   E-4 hover 工具栏 · E-5 步骤卡片化
+   ============================================================ */
+
+/* E-1 用户消息：随内容收缩的轻量气泡，右对齐，去头部行 */
+.message.user { flex-direction: row !important; justify-content: flex-end !important; }
+.message.user .message-body { width: fit-content !important; max-width: 76% !important; margin-left: auto !important; border-radius: 14px 14px 4px 14px !important; padding: 9px 15px !important; background: var(--claude-user) !important; }
+.message.user .message-content { font-size: 14px !important; line-height: 1.65 !important; }
+.message.user .message-head { display: none !important; }
+
+/* E-2 「执行过程」折叠条：DeepSeek 式一行小字，去竖线去卡片感 */
+.run-timeline { border: 0 !important; border-left: 0 !important; background: transparent !important; border-radius: 0 !important; margin-left: 0 !important; overflow: visible !important; }
+.run-timeline-summary { padding: 5px 8px !important; font-size: 12px !important; border-radius: 8px !important; transition: background .14s ease !important; }
+.run-timeline-summary:hover { background: var(--claude-hover) !important; }
+.run-timeline-summary::before { font-size: 13px !important; }
+.run-timeline-label { font-weight: 500 !important; font-size: 12px !important; }
+.run-timeline-count { font-size: 12px !important; }
+.run-timeline-items { border-top: 0 !important; padding: 4px 8px 6px !important; }
+
+/* E-3 动作按钮：融入区块的主题色按钮，去紫色浮层感 */
+.status-actions { gap: 8px !important; margin-top: 12px !important; }
+.status-action { border: 1px solid var(--claude-accent) !important; border-radius: 8px !important; padding: 7px 16px !important; color: var(--claude-accent-strong) !important; background: transparent !important; font-size: 13px !important; font-weight: 600 !important; line-height: 1.4 !important; transition: background .14s ease, transform .14s ease !important; }
+.status-action:hover { background: color-mix(in srgb, var(--claude-accent) 9%, transparent) !important; }
+.status-action:active { transform: scale(.98); }
+.status-action:disabled { opacity: .55 !important; }
+
+/* E-4 消息工具栏（复制/重试/编辑）：hover 才浮现 */
+.message-actions { opacity: 0 !important; margin-top: 6px !important; transition: opacity .15s ease !important; }
+.message:hover .message-actions, .message:focus-within .message-actions { opacity: 1 !important; }
+@media (hover: none) { .message-actions { opacity: 1 !important; } }
+.message-copy, .message-action { font-size: 11px !important; padding: 3px 9px !important; border-radius: 6px !important; }
+
+/* E-5 进度卡步骤行 → 卡片化（每步一张卡，编辑/重做内嵌右侧） */
+.progress-step-row { display: grid !important; grid-template-columns: auto minmax(0, 1fr) auto !important; gap: 10px !important; align-items: start !important; padding: 10px 13px !important; margin-bottom: 8px !important; border: 1px solid var(--claude-line) !important; border-radius: 10px !important; background: var(--claude-raised) !important; transition: border-color .14s ease, background .14s ease !important; }
+.progress-step-row:hover { border-color: color-mix(in srgb, var(--claude-accent) 38%, var(--claude-line)) !important; }
+.progress-step-row:last-child { margin-bottom: 0 !important; }
+.progress-step-time { font-size: 11px !important; color: var(--claude-faint) !important; padding-top: 2px !important; font-variant-numeric: tabular-nums; }
+.progress-step-text { font-size: 13px !important; line-height: 1.55 !important; color: var(--claude-ink) !important; }
+.step-actions { position: static !important; opacity: 0 !important; transition: opacity .14s ease !important; padding-top: 1px !important; }
+.progress-step-row:hover .step-actions, .step-actions:focus-within { opacity: 1 !important; }
+@media (hover: none) { .step-actions { opacity: 1 !important; } }
+
+/* E-1b 气泡真凶：flex:1 1 0% 拉伸 —— 收回 */
+.message.user .message-body { flex: 0 0 auto !important; }
+/* E-2b 竖线真凶：.chat-stream .run-timeline 的思考竖线 —— 同 specificity 下后写胜出 */
+.chat-stream .run-timeline { border-left: 0 !important; padding: 2px 0 !important; }
+
+/* E-4b 消息工具栏不占布局空间：绝对定位浮于消息下方，hover 浮现（DeepSeek 模式） */
+.message { position: relative !important; }
+.message .message-actions { position: absolute !important; top: 100% !important; left: 0 !important; right: auto !important; margin-top: 2px !important; z-index: 5 !important; }
+.message.user .message-actions { left: auto !important; right: 0 !important; }
