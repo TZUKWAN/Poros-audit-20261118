@@ -3214,15 +3214,16 @@ function mount(): void {
     if (lifecycle?.dataset.scenarioId) {
       event.stopPropagation();
       if (lifecycle.dataset.scenarioAction === "export") {
-        fetch("/api/scenario?id=" + encodeURIComponent(lifecycle.dataset.scenarioId)).then(async (response) => { if (!response.ok) throw new Error("export failed"); const blob = new Blob([await response.text()], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `scenario-${lifecycle.dataset.scenarioId}.json`; anchor.click(); URL.revokeObjectURL(url); }).catch(() => pushMessage({ role: "build-status", tone: "err", text: "场景导出失败。" }));
-        setRailOpen(false); $("scenario-modal")?.classList.add("hidden"); return;
+        // 留在场景库弹窗内：下载开始即有反馈，不打断浏览
+        fetch("/api/scenario?id=" + encodeURIComponent(lifecycle.dataset.scenarioId)).then(async (response) => { if (!response.ok) throw new Error("export failed"); const blob = new Blob([await response.text()], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `scenario-${lifecycle.dataset.scenarioId}.json`; anchor.click(); URL.revokeObjectURL(url); pushMessage({ role: "build-status", tone: "ok", text: "场景已导出，下载已开始。", ts: Date.now() }); }).catch(() => pushMessage({ role: "build-status", tone: "err", text: "场景导出失败。", ts: Date.now() }));
+        return;
       }
-      if (lifecycle.dataset.scenarioAction === "share") { if (sendPayload({ type: "create-share", resourceType: "scenario", resourceId: lifecycle.dataset.scenarioId, role: "viewer" })) { setRailOpen(false); $("scenario-modal")?.classList.add("hidden"); } return; }
-      if (lifecycle.dataset.scenarioAction === "test") { if (sendPayload({ type: "test-scenario", scenarioId: lifecycle.dataset.scenarioId })) { setRailOpen(false); $("scenario-modal")?.classList.add("hidden"); } return; }
+      if (lifecycle.dataset.scenarioAction === "share") { sendPayload({ type: "create-share", resourceType: "scenario", resourceId: lifecycle.dataset.scenarioId, role: "viewer" }); return; }
+      if (lifecycle.dataset.scenarioAction === "test") { sendPayload({ type: "test-scenario", scenarioId: lifecycle.dataset.scenarioId }); return; }
       if (lifecycle.dataset.scenarioAction === "delete" && !window.confirm("删除场景后不会影响已有运行记录，但将无法继续复用。确定删除吗？")) return;
-      if (lifecycle.dataset.scenarioAction === "delete") { if (sendPayload({ type: "delete-scenario", scenarioId: lifecycle.dataset.scenarioId, confirm: true })) { setRailOpen(false); $("scenario-modal")?.classList.add("hidden"); } }
-      else if (lifecycle.dataset.scenarioAction === "restore") { if (sendPayload({ type: "restore-scenario", scenarioId: lifecycle.dataset.scenarioId })) { setRailOpen(false); $("scenario-modal")?.classList.add("hidden"); } }
-      else if (sendPayload({ type: "archive-scenario", scenarioId: lifecycle.dataset.scenarioId })) { setRailOpen(false); $("scenario-modal")?.classList.add("hidden"); }
+      if (lifecycle.dataset.scenarioAction === "delete") { sendPayload({ type: "delete-scenario", scenarioId: lifecycle.dataset.scenarioId, confirm: true }); }
+      else if (lifecycle.dataset.scenarioAction === "restore") { sendPayload({ type: "restore-scenario", scenarioId: lifecycle.dataset.scenarioId }); }
+      else { sendPayload({ type: "archive-scenario", scenarioId: lifecycle.dataset.scenarioId }); }
       return;
     }
     const button = target.closest<HTMLButtonElement>("button[data-scenario-use]");

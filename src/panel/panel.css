@@ -2685,3 +2685,14 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .scenario-card .scenario-actions .session-action:hover { color: var(--claude-ink) !important; border-color: var(--claude-accent) !important; background: color-mix(in srgb, var(--claude-accent) 8%, transparent) !important; }
 .scenario-card .scenario-actions .session-action:first-child { font-size: 12px !important; font-weight: 650 !important; color: var(--claude-accent-strong) !important; border-color: color-mix(in srgb, var(--claude-accent) 42%, var(--claude-line)) !important; }
 .scenario-card .scenario-actions .session-action:first-child:hover { background: color-mix(in srgb, var(--claude-accent) 12%, transparent) !important; }
+
+/* 项目卡片操作：宽视口下与会话/场景一致，hover 或键盘聚焦时展开 */
+@media (min-width: 1121px) {
+  .project-item-actions {
+    max-height: 0; margin-top: 0; overflow: hidden; opacity: 0; pointer-events: none;
+    transition: max-height .16s ease, opacity .16s ease, margin-top .16s ease;
+  }
+  .project-item-row:hover .project-item-actions, .project-item-row:focus-within .project-item-actions {
+    max-height: 40px; margin-top: 6px; opacity: 1; pointer-events: auto;
+  }
+}
