@@ -1756,6 +1756,44 @@ function renderHelpCard(text: string): HTMLElement {
   return card;
 }
 
+/** 闸5 签约面清单（§14）：待签约（可勾选）+ 已生效（可退役）——decided 卡也保留可溯 */
+function appendLedgerSignatures(card: HTMLElement, message: GateCardMessage): void {
+  const decided = Boolean(message.decided);
+  if (message.ledgerProposals?.length) {
+    const ledgerBox = node("div", "gate-ledger-list");
+    ledgerBox.append(textBlock(`本轮构建你教了它 ${message.ledgerProposals.length} 条分寸：`, "gate-field-label"));
+    for (const proposal of message.ledgerProposals) {
+      const row = node("label", "gate-structured-row gate-ledger-row");
+      if (!decided) {
+        const checkbox = node("input") as HTMLInputElement;
+        checkbox.type = "checkbox";
+        checkbox.checked = true;
+        checkbox.dataset.ledgerProposal = proposal.tempId;
+        row.append(checkbox);
+      } else {
+        row.append(textBlock("✓", "gate-field-label"));
+      }
+      const kindLabel = proposal.kind === "must_contain" ? "标准" : "偏好";
+      row.append(textBlock(`[${kindLabel}] ${proposal.clause}${proposal.conflictWith ? " ⚠ 与已有条款疑似冲突" : ""}`, "gate-field-label"));
+      ledgerBox.append(row);
+    }
+    ledgerBox.append(textBlock(decided ? "已签约进场景账本。" : "勾选的条款会写进场景账本，下次运行自动检查。", "gate-ledger-hint"));
+    card.append(ledgerBox);
+  }
+  if (message.ledgerExisting?.length) {
+    const existing = node("div", "gate-ledger-list");
+    existing.append(textBlock(`已生效条款（${message.ledgerExisting.length}）`, "gate-field-label"));
+    for (const constraint of message.ledgerExisting) {
+      const row = node("div", "gate-structured-row gate-ledger-row");
+      row.append(textBlock(`[${constraint.kind === "advisory" ? "偏好" : "标准"}] ${constraint.clause} · 命中 ${constraint.hits}`, "gate-field-label"));
+      const retire = node("button", "gate-reject"); retire.type = "button"; retire.dataset.retireConstraint = constraint.id; retire.dataset.retireScenario = message.ledgerExistingScenarioId ?? ""; retire.textContent = "退役";
+      row.append(retire);
+      existing.append(row);
+    }
+    card.append(existing);
+  }
+}
+
 function renderGateCard(message: GateCardMessage): HTMLElement {
   const card = node("div", "gate-card");
   card.dataset.gate = String(message.gate);
@@ -1767,6 +1805,8 @@ function renderGateCard(message: GateCardMessage): HTMLElement {
   top.append(heading, textBlock(message.decided ? "已处理" : "等待确认", "gate-pending"));
   card.append(top, textBlock(gateGuidance(message.gate, Boolean(message.decided)), "gate-guidance"));
   card.append(renderGateOverview(message));
+  // 闸5 账本清单在已处理卡上也保留（签了什么要可溯）
+  if (message.gate === 5 && (message.ledgerProposals?.length || message.ledgerExisting?.length)) appendLedgerSignatures(card, message);
   if (message.stale) {
     card.append(textBlock("这是服务恢复前的旧卡片，当前这一轮请使用最新的确认卡片。", "receipt"));
     return card;
@@ -1832,35 +1872,6 @@ function renderGateCard(message: GateCardMessage): HTMLElement {
   }
   const actions = node("div", "gate-actions");
   if (message.gate === 5) {
-    // 签约面（§14）：本轮你教了它 N 条分寸——默认全选，取消勾选 = 不签约（留 30 天过期）
-    if (message.ledgerProposals?.length) {
-      const ledgerBox = node("div", "gate-ledger-list");
-      ledgerBox.append(textBlock(`本轮构建你教了它 ${message.ledgerProposals.length} 条分寸：`, "gate-field-label"));
-      for (const proposal of message.ledgerProposals) {
-        const row = node("label", "gate-structured-row gate-ledger-row");
-        const checkbox = node("input") as HTMLInputElement;
-        checkbox.type = "checkbox";
-        checkbox.checked = true;
-        checkbox.dataset.ledgerProposal = proposal.tempId;
-        const kindLabel = proposal.kind === "must_contain" ? "标准" : "偏好";
-        row.append(checkbox, textBlock(`[${kindLabel}] ${proposal.clause}${proposal.conflictWith ? " ⚠ 与已有条款疑似冲突" : ""}`, "gate-field-label"));
-        ledgerBox.append(row);
-      }
-      ledgerBox.append(textBlock("勾选的条款会写进场景账本，下次运行自动检查。", "gate-ledger-hint"));
-      card.append(ledgerBox);
-    }
-    if (message.ledgerExisting?.length) {
-      const existing = node("div", "gate-ledger-list");
-      existing.append(textBlock(`已生效条款（${message.ledgerExisting.length}）`, "gate-field-label"));
-      for (const constraint of message.ledgerExisting) {
-        const row = node("div", "gate-structured-row gate-ledger-row");
-        row.append(textBlock(`[${constraint.kind === "advisory" ? "偏好" : "标准"}] ${constraint.clause} · 命中 ${constraint.hits}`, "gate-field-label"));
-        const retire = node("button", "gate-reject"); retire.type = "button"; retire.dataset.retireConstraint = constraint.id; retire.dataset.retireScenario = message.ledgerExistingScenarioId ?? ""; retire.textContent = "退役";
-        row.append(retire);
-        existing.append(row);
-      }
-      card.append(existing);
-    }
     const pin = node("button", "gate-approve"); pin.dataset.action = "pin"; pin.dataset.gate = String(message.gate); pin.textContent = "保存为场景";
     if (message.canPin === false) { pin.disabled = true; pin.textContent = "检查通过后保存"; pin.title = "还有检查没有通过，请先重新检查"; }
     const rerun = node("button", "gate-edit"); rerun.dataset.action = "rerun"; rerun.dataset.gate = String(message.gate); rerun.textContent = "重新检查一次";
