@@ -84,14 +84,15 @@ export function computeOutputDiff(original: string, revised: string): EditBlock[
     ops.push({ t: "ins", line: b[j]! });
     j += 1;
   }
-  // 连续非 eq 游程 → 改动块；锚 = 游程上方最近的非空 eq 行
+  // 连续非 eq 游程 → 改动块；锚 = 游程上方最近的非空 eq 行（跳过执行器内部标记行）
   const blocks: EditBlock[] = [];
   let anchor = "（开头）";
   let k = 0;
   while (k < ops.length) {
     if (ops[k]!.t === "eq") {
       const line = ops[k]!.line.trim();
-      if (line) anchor = truncate(line, MAX_ANCHOR);
+      // GOAL_MET/执行器内部标记不作锚——锚应指向人类可读的正文
+      if (line && !/^(?:GOAL_MET|STEP_STATUS|EXEC_)[:_]/.test(line)) anchor = truncate(line, MAX_ANCHOR);
       k += 1;
       continue;
     }

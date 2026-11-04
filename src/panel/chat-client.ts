@@ -763,9 +763,11 @@ function renderLedgerPanel(detail: HTMLElement, item: ScenarioSummary): void {
   box.append(head);
   // 介入曲线（北极星：第 N 次人工介入次数——单调下降 = 越用越牛逼的数学形式）
   box.append(textBlock("人工介入曲线（最近运行）", "section-label"));
-  const svg = ledgerSparkline(ledger.curve.map((point) => point.total));
-  svg.setAttribute("aria-label", "人工介入次数曲线");
-  box.append(svg);
+  if (ledger.curve.length >= 2) {
+    const svg = ledgerSparkline(ledger.curve.map((point) => point.total));
+    svg.setAttribute("aria-label", "人工介入次数曲线");
+    box.append(svg);
+  }
   if (!ledger.curve.length) box.append(textBlock("还没有运行记录——跑一次后这里会出现曲线。", "ledger-empty"));
   else box.append(textBlock(`运行 ${ledger.runStats.runs} · 通过 ${ledger.runStats.accepted} · 打回 ${ledger.runStats.rejected} · 纠正 ${ledger.runStats.corrected} · 连胜 ${ledger.runStats.consecutiveClean}`, "ledger-empty"));
   // 条款清单：已生效（hits 可见，可退役）+ 待签约（确认/退役）

@@ -811,6 +811,8 @@ export class PanelServer {
         return next as ScenarioLedger;
       })
       .catch(() => undefined);
+    // §12 步骤08：结算落账后广播快照——sparkline/曲线/条款即时刷新
+    await this.pushSnapshot();
   }
 
   /**
