@@ -89,6 +89,10 @@ type RunBinding = {
   workspaceId: string | null;
   projectId: string | null;
   sessionId: string | null;
+  /** §6 双路路由（full 档）：本次运行的重规划目标场景与注入文本——
+   *  挂在 binding 上而非闭包变量：并发构建（如定时任务同时重规划）互不覆盖 */
+  replanScenarioId?: string | null;
+  replanConstraintText?: string;
 };
 
 function attachPlannerStream(planner: unknown, panel: PanelServer): void {
@@ -453,8 +457,7 @@ async function main(): Promise<void> {
    */
   // §6 双路路由（full 档）：重规划命中既有场景时，收尾更新它而不是新建副本；
   // 约束模板 A/B 注入重规划上下文（计划是缓存，账本不动）。
-  let replanTargetScenarioId: string | null = null;
-  let replanConstraintText = "";
+  // 目标与注入文本挂在每运行的 binding 上（并发构建互不覆盖）。
   const attachBuildLedger = (scenario: ScenarioRecord, final: BuildContext): { scenario: ScenarioRecord; signed: Constraint[] } => {
     const seeds = panel.drainBuildLedgerProposals();
     let ledger = scenario.ledger ?? emptyLedger();
@@ -490,8 +493,7 @@ async function main(): Promise<void> {
     let savedScenario: ScenarioRecord | undefined;
     let signedLedgerConstraints: Constraint[] = [];
     if (shouldPin) {
-      const replanId = replanTargetScenarioId;
-      replanTargetScenarioId = null;
+      const replanId = binding?.replanScenarioId ?? null;
       const existing = replanId ? await library.get(replanId) : undefined;
       if (existing) {
         // 计划是缓存（§0 铁律 2）：重规划整个换掉计划，账本不动；版本+1 留痕
@@ -515,8 +517,6 @@ async function main(): Promise<void> {
         signedLedgerConstraints = seeded.signed;
         await library.save(savedScenario);
       }
-    } else {
-      replanTargetScenarioId = null;
     }
     const memorySettings = await settings.get();
     const usage = (runPlanner as { lastUsage?: { totalTokens: number } }).lastUsage;
@@ -852,12 +852,12 @@ async function main(): Promise<void> {
           const route = routingMode === "full" ? resolveRoute(ensureLedger(match.scenario), { degraded: match.degraded, digest: runDigest }) : null;
           if (route && route.mode === "replan") {
             // 重规划：整个换掉计划（计划是缓存），账本不动；约束/先例注入规划上下文
-            replanTargetScenarioId = match.scenario.id;
+            runBinding.replanScenarioId = match.scenario.id;
             // 抽查态闸门：重规划关联既有账本（gateStats 支撑自动通过）
             panel.setBuildLedgerScenarioId(match.scenario.id);
             const ledgerOfMatch = ensureLedger(match.scenario);
             const parts = [templateA(activeConstraints(ledgerOfMatch)), templateB(ledgerOfMatch.inputPatterns)].filter(Boolean);
-            replanConstraintText = parts.join("\n\n");
+            runBinding.replanConstraintText = parts.join("\n\n");
             pushRunProgress("planning", route.healthCheck
               ? "强制体检：这个场景已连续重放多次，重新规划一次以检查世界是否变化……"
               : `分寸账本判定本次重新规划（${route.reason}）……`);
@@ -887,7 +887,7 @@ async function main(): Promise<void> {
       } else if (match.tier === "partial" && match.scenario) {
          pushRunProgress("planning", `发现相近场景 ${match.scenario.id}（相似度 ${(match.score * 100).toFixed(0)}%），将结合当前需求重新规划。`);
       }
-      if (mode === "work" && !replanTargetScenarioId) {
+      if (mode === "work" && !runBinding.replanScenarioId) {
         // Keep the user's original requirement attached to the terminal
         // outcome so the UI can offer a one-click, lossless hand-off into
         // construction. Requiring the user to retype a long request here is
@@ -1053,7 +1053,7 @@ async function main(): Promise<void> {
         const connectorRefs = workspaceId ? (await connectors.list(workspaceId)).map((connector) => ({ id: connector.id, name: connector.name, kind: connector.kind, permissionScopes: connector.permissionScopes, status: connector.status })) : [];
         const desktopContexts = workspaceId ? (await contexts.list(workspaceId, projectId)).filter((context) => context.enabled).slice(0, 20).map((context) => ({ id: context.id, kind: context.kind, origin: context.origin, label: context.label, content: context.content })) : [];
         const selected = await workspaceProvider(project?.providerId ?? providerSettings.providerId);
-        return { projectId, projectInstructions: [project?.instructions ?? "", replanConstraintText].filter(Boolean).join("\n\n"), files: fileRefs, memories: memoryRefs, connectors: connectorRefs, desktopContexts, provider: { id: selected?.id ?? project?.providerId ?? providerSettings.providerId ?? null, baseUrl: selected?.baseUrl ?? providerSettings.baseUrl, model: selected?.model ?? providerSettings.plannerModel ?? providerSettings.model, timeoutMs: selected?.timeoutMs ?? providerSettings.timeoutMs } };
+        return { projectId, projectInstructions: [project?.instructions ?? "", runBinding.replanConstraintText ?? ""].filter(Boolean).join("\n\n"), files: fileRefs, memories: memoryRefs, connectors: connectorRefs, desktopContexts, provider: { id: selected?.id ?? project?.providerId ?? providerSettings.providerId ?? null, baseUrl: selected?.baseUrl ?? providerSettings.baseUrl, model: selected?.model ?? providerSettings.plannerModel ?? providerSettings.model, timeoutMs: selected?.timeoutMs ?? providerSettings.timeoutMs } };
       })();
       orch.start(requirement, buildId, runtimeContext, "construction");
       // R5+ 收尾：start 之后的异常不得再报"构建启动失败"——orchestrator 已在跑、
@@ -1067,9 +1067,9 @@ async function main(): Promise<void> {
           // 只有真实执行与三层验收全部通过、且闸门5明确选择 pin 时才固化。
           const shouldPin = final.outcome === "completed" && final.finalizeChoice === "pin";
           // §6 回退：重规划未固化（规划器异常/用户放弃）→ 旧计划兜底直接执行 + 交付卡标注
-          if (replanTargetScenarioId && !shouldPin) {
-            const fallbackId = replanTargetScenarioId;
-            replanTargetScenarioId = null;
+          if (runBinding.replanScenarioId && !shouldPin) {
+            const fallbackId = runBinding.replanScenarioId;
+            runBinding.replanScenarioId = null;
             const cached = await library.get(fallbackId).catch(() => undefined);
             if (cached) {
               pushRunChat({ role: "build-status", tone: "info", text: "重规划未完成，回退旧计划直接执行（旧计划兜底）。", ts: Date.now() });
