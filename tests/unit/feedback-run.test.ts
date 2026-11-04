@@ -1,8 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { WebSocket } from "ws";
+import { z } from "zod";
 import { jsonStore } from "@/core/store";
 import { ScenarioLibrary, ScenarioRecordSchema, type ScenarioRecord } from "@/scenario/library";
 import { PanelServer, defaultPageHtml } from "@/panel/server";
@@ -159,5 +160,67 @@ describe("PR-signal-run 反应窗与 attended 规则", () => {
     expect(ledger.runStats.rejected).toBe(1);
     expect(ledger.runStats.runs).toBe(1);
     expect(ledger.inputPatterns.map((e) => e.outcome)).toEqual(["rejected"]);
+  });
+});
+
+import { ArtifactRepository } from "@/product/artifacts";
+import { ArtifactSchema } from "@/product/contracts";
+import { WorkspaceRepository } from "@/product/repository";
+import { WorkspaceSchema, ProjectSchema } from "@/product/contracts";
+import { writeFile } from "node:fs/promises";
+
+describe("PR-edit-accept revise-output 竞态（§7/§18）", () => {
+  it("沉默窗内编辑 → 撤销 pending 沉默改记 corrected + 提案；编辑后 👍 被忽略(409)", async () => {
+    const dir2 = await mkdtemp(path.join(tmpdir(), "revise-output-"));
+    try {
+      const lib = new ScenarioLibrary({ store: jsonStore({ filePath: path.join(dir2, "scenarios.json"), schema: ScenarioRecordSchema }) });
+      await lib.save(baseRecord("sc-r"));
+      const artifactPath = path.join(dir2, "result.md");
+      await writeFile(artifactPath, "# 报告\n旧的结论行\n# 数据\n表格内容", "utf8");
+      const repository = new WorkspaceRepository(
+        jsonStore({ filePath: path.join(dir2, "workspaces.json"), schema: WorkspaceSchema }),
+        jsonStore({ filePath: path.join(dir2, "projects.json"), schema: ProjectSchema }),
+        jsonStore({ filePath: path.join(dir2, "project-files.json"), schema: z.unknown() }),
+      );
+      const workspace = await repository.getDefaultWorkspace();
+      const artifacts = new ArtifactRepository(jsonStore({ filePath: path.join(dir2, "artifacts.json"), schema: ArtifactSchema }));
+      await artifacts.create({ id: "artifact-r1", workspaceId: workspace.id, projectId: null, sessionId: null, runId: "run-r1", name: "结果.md", mediaType: "text/markdown", path: artifactPath, version: 1, status: "ready" });
+      const srv = new PanelServer({ library: lib, artifacts, repository, pageHtml: defaultPageHtml(), artifactRoot: dir2, feedbackWindowMs: 60_000 });
+      const port2 = await srv.start(0);
+      const ws2 = new WebSocket(`ws://127.0.0.1:${port2}`);
+      await new Promise((resolve) => ws2.once("open", resolve));
+      try {
+        // 反应窗开着（有人值守成功）
+        const meta = (srv as unknown as { runLedgerMeta: Map<string, unknown> }).runLedgerMeta;
+        meta.set("run-r1", { scenarioId: "sc-r", digest: "d-r1", attended: true, mode: "work" });
+        (srv as unknown as { settleWorkRunLedgerOutcome: (id: string, status: "succeeded") => void }).settleWorkRunLedgerOutcome("run-r1", "succeeded");
+        // 窗内编辑产出
+        const revised = "# 报告\n新的结论行（含负责人和截止日）\n# 数据\n表格内容";
+        const sent = await send(srv, ws2, { type: "revise-output", runId: "run-r1", content: revised });
+        expect(sent.ok).toBe(true);
+        let ledger = (await lib.get("sc-r"))?.ledger as ScenarioLedger;
+        // 沉默被撤销 → corrected（而不是 accepted）
+        expect(ledger.runStats.corrected).toBe(1);
+        expect(ledger.runStats.accepted).toBe(0);
+        expect(ledger.runStats.consecutiveClean).toBe(0);
+        expect(ledger.constraints.length).toBeGreaterThanOrEqual(1);
+        // 产出文件已写为改后版本
+        expect(await readFile(artifactPath, "utf8")).toBe(revised);
+        // 编辑后 👍 被忽略（窗口已关）
+        const lateUp = await send(srv, ws2, { type: "feedback-run", runId: "run-r1", verdict: "up" });
+        expect(lateUp.ok).toBe(false);
+        expect(lateUp.error).toContain("409");
+        // 同 runId 再编辑 → corrected 只计 1 次，提案去重
+        const again = await send(srv, ws2, { type: "revise-output", runId: "run-r1", content: "# 报告\n新的结论行（含负责人和截止日）\n# 数据\n表格内容加边框" });
+        expect(again.ok).toBe(true);
+        ledger = (await lib.get("sc-r"))?.ledger as ScenarioLedger;
+        expect(ledger.runStats.corrected).toBe(1);
+      } finally {
+        ws2.close();
+        await srv.stop().catch(() => undefined);
+      }
+    } finally {
+      await rm(dir2, { recursive: true, force: true });
+    }
   });
 });

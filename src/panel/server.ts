@@ -16,8 +16,9 @@ import { renderGateView } from "@/gates/views.js";
 import { classifyGateDecision, type GateProposalDraft } from "@/panel/gate-classify.js";
 import { memoryTree, type MemoryTreeNode } from "@/memory/memory.js";
 import { ScenarioRecordSchema, scenarioMatchesScope, scenarioNameFromRequirement, type ScenarioLibrary, type ScenarioRecord } from "@/scenario/library.js";
-import { proposeConstraint, recordRunOutcome, stripNegationPrefix, type ScenarioLedger } from "@/scenario/ledger.js";
+import { proposeConstraint, recordRunOutcome, stripNegationPrefix, applyOutputCorrection, type ScenarioLedger, type RevisionProposal } from "@/scenario/ledger.js";
 import { inputDigest } from "@/scenario/digest.js";
+import { computeOutputDiff, blocksToProposals } from "@/panel/outputdiff.js";
 import type { GoalLoop, LoopEvent } from "@/execution/loop.js";
 import type { ClusterEvent } from "@/execution/cluster.js";
 import type { RunController } from "@/execution/repair.js";
@@ -277,6 +278,7 @@ export const PanelActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("import-scenario"), content: z.string().min(2).max(2_000_000) }),
   z.object({ type: z.literal("gate-decision"), decision: GateDecisionSchema, /** 闸5 签约面：用户取消勾选的提案 tempId（不签约，留 pendingConfirm） */ excludeProposals: z.array(z.string().min(1).max(60)).max(50).optional() }),
   z.object({ type: z.literal("feedback-run"), runId: z.string().min(1), verdict: z.enum(["up", "down"]), reason: z.string().min(1).max(8_000).optional() }),
+  z.object({ type: z.literal("revise-output"), runId: z.string().min(1), content: z.string().min(1).max(200_000) }),
   z.object({ type: z.literal("control"), action: z.enum(["pause", "resume", "terminate"]) }),
   z.object({ type: z.literal("answer-run"), runId: z.string().min(1), values: z.record(z.string(), z.string().max(20_000)) }),
   z.object({ type: z.literal("guide-run"), instruction: z.string().min(2).max(8_000) }),
@@ -689,7 +691,11 @@ export class PanelServer {
    */
   private settleWorkRunLedgerOutcome(runId: string, terminalStatus: "succeeded" | "failed" | "cancelled"): void {
     const meta = this.runLedgerMeta.get(runId);
-    this.runLedgerMeta.delete(runId);
+    // 保留 meta（供事后产出修订定位场景），只做 FIFO 封顶
+    if (this.runLedgerMeta.size > 100) {
+      const oldest = this.runLedgerMeta.keys().next().value;
+      if (oldest) this.runLedgerMeta.delete(oldest);
+    }
     if (!meta || meta.mode !== "work" || !meta.scenarioId || !this.deps.library) return;
     const scenarioId = meta.scenarioId;
     if (terminalStatus === "cancelled") return;
@@ -698,8 +704,7 @@ export class PanelServer {
       return;
     }
     const guides = this.runGuidanceNotes.get(runId) ?? [];
-    this.runGuidanceNotes.delete(runId);
-    if (guides.length) {
+    this.runGuidanceNotes.delete(runId);    if (guides.length) {
       void this.recordScenarioOutcome(scenarioId, { runId, attended: meta.attended, outcome: "corrected", digest: meta.digest, guides });
       return;
     }
@@ -1624,6 +1629,27 @@ export class PanelServer {
       let content: string | undefined;
       try { if (artifact.mediaType.startsWith("text/") || /json|csv|markdown/.test(artifact.mediaType)) content = await readFile(artifact.path, "utf8"); } catch { content = undefined; }
       await this.deps.artifacts.createVersion(action.artifactId, content === undefined ? undefined : { content, checksum: createHash("sha256").update(content).digest("hex") });
+      // §7 产出编辑点位：版本快照即"用户认可的历史版本"——与当前正文的差异是最强分寸信号
+      if (content !== undefined && artifact.runId && this.deps.library) {
+        const lastVersion = [...artifact.versions].sort((a, b) => b.version - a.version)[0]?.content;
+        if (lastVersion !== undefined) {
+          const blocks = computeOutputDiff(lastVersion, content);
+          const proposals: RevisionProposal[] = blocksToProposals(blocks).map((p) => ({
+            clause: p.clause,
+            scope: p.scope,
+            kind: p.kind,
+            pattern: p.pattern,
+            upgradePattern: p.kind_source === "added" && p.addedText && p.addedText.length <= 60 && !/\n/.test(p.addedText) ? p.addedText : undefined,
+            origin: { type: "artifact-edit", text: `版本对比: ${p.clause}`, at: new Date().toISOString(), runId: artifact.runId },
+          }));
+          const scenarioId = this.runLedgerMeta.get(artifact.runId)?.scenarioId ?? null;
+          if (scenarioId && proposals.length) {
+            await this.deps.library
+              .updateLedger(scenarioId, (ledger) => applyOutputCorrection(ledger, { runId: artifact.runId!, proposals, at: new Date().toISOString() }))
+              .catch(() => undefined);
+          }
+        }
+      }
       await this.pushSnapshot(); return { ok: true };
     }
     if (action.type === "create-provider") {
@@ -2408,6 +2434,61 @@ export class PanelServer {
       });
       await this.pushSnapshot();
       return { ok: true };
+    }
+    if (action.type === "revise-output") {
+      // §7 Edit-to-Accept：最强信号——用户亲手改产出。原子三件事：
+      // ① diff → pendingConfirm 提案 ② corrected++/断连胜 ③ interventions 记 1 次纠正
+      const artifacts = this.deps.artifacts;
+      if (!artifacts || !this.workspace) return { ok: false, error: "产物中心未准备好" };
+      const listed = await artifacts.list(this.workspace.id).catch(() => []);
+      const artifact = listed.find((item) => item.runId === action.runId && item.status !== "deleted");
+      if (!artifact) return { ok: false, error: "找不到该运行的产出文件" };
+      let original = "";
+      try {
+        original = await readFile(artifact.path, "utf8");
+      } catch {
+        return { ok: false, error: "产出文件不可读" };
+      }
+      const blocks = computeOutputDiff(original, action.content);
+      if (!blocks.length) return { ok: false, error: "没有检测到改动" };
+      const proposals: RevisionProposal[] = blocksToProposals(blocks).map((p) => ({
+        clause: p.clause,
+        scope: p.scope,
+        kind: p.kind,
+        pattern: p.pattern,
+        upgradePattern: p.kind_source === "added" && p.addedText && p.addedText.length <= 60 && !/\n/.test(p.addedText) ? p.addedText : undefined,
+        origin: { type: "artifact-edit", text: `${p.kind_source}: ${p.clause}`, at: new Date().toISOString(), runId: action.runId },
+      }));
+      // 竞态（§7 表）：沉默窗内编辑 → 撤销 pending 沉默，改记 corrected（先到先得，编辑优先）
+      const cancelled = this.cancelFeedbackWindow(action.runId);
+      const metaScenario = (cancelled?.scenarioId ?? this.runLedgerMeta.get(action.runId)?.scenarioId ?? null);
+      let scenarioId = metaScenario;
+      if (!scenarioId && this.deps.runs) {
+        const run = await this.deps.runs.get(action.runId).catch(() => undefined);
+        scenarioId = run?.scenarioId ?? null;
+      }
+      if (scenarioId && this.deps.library) {
+        const digest = cancelled?.digest ?? this.runLedgerMeta.get(action.runId)?.digest;
+        await this.deps.library
+          .updateLedger(scenarioId, (ledger) => applyOutputCorrection(ledger, { runId: action.runId, digest, proposals }))
+          .catch(() => undefined);
+      }
+      // 产出落地为改后版本（正文写回文件 + 版本留痕，原文可溯）
+      try {
+        await writeFile(artifact.path, action.content, "utf8");
+        await artifacts.createVersion(artifact.id, { content: action.content, checksum: createHash("sha256").update(action.content).digest("hex") });
+      } catch {
+        /* 版本化失败不阻塞修订（正文已写不进账本原文） */
+      }
+      this.pushChat({
+        role: "build-status",
+        tone: "info",
+        text: `已由你修订产出（${blocks.length} 处改动${proposals.length ? `，沉淀 ${proposals.length} 条分寸候选` : ""}）。连击已清零。`,
+        runId: action.runId,
+        ts: Date.now(),
+      });
+      await this.pushSnapshot();
+      return { ok: true, data: { blocks: blocks.length, proposals: proposals.length } };
     }
     if (action.type === "gate-decision") {
       const orch = this.deps.orchestrator;

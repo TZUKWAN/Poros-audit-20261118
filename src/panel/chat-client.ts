@@ -1557,17 +1557,22 @@ function renderMessage(message: Record<string, unknown>): HTMLElement {
       }
       // 分寸账本（PR-signal-run）：有人值守成功的反应窗——👍/👎+原因（先到先得）
       if (status.workRun && status.runStatus === "succeeded" && status.runId) {
+        const runIdForCard = status.runId;
         const feedback = node("div", "ledger-feedback-row");
-        feedback.dataset.feedbackRun = status.runId;
+        feedback.dataset.feedbackRun = runIdForCard;
         const label = textBlock("这次结果怎么样？", "ledger-feedback-label");
         const up = node("button", "ledger-feedback-btn") as HTMLButtonElement;
-        up.type = "button"; up.dataset.feedbackVerdict = "up"; up.dataset.feedbackRunId = status.runId; up.textContent = "👍 通过";
+        up.type = "button"; up.dataset.feedbackVerdict = "up"; up.dataset.feedbackRunId = runIdForCard; up.textContent = "👍 通过";
         const down = node("button", "ledger-feedback-btn") as HTMLButtonElement;
-        down.type = "button"; down.dataset.feedbackVerdict = "down"; down.dataset.feedbackRunId = status.runId; down.textContent = "👎 打回";
+        down.type = "button"; down.dataset.feedbackVerdict = "down"; down.dataset.feedbackRunId = runIdForCard; down.textContent = "👎 打回";
         feedback.append(label, up, down);
         const reason = node("input", "ledger-feedback-reason") as HTMLInputElement;
-        reason.type = "text"; reason.placeholder = "哪里不对？（打回必填）"; reason.dataset.feedbackReason = status.runId;
+        reason.type = "text"; reason.placeholder = "哪里不对？（打回必填）"; reason.dataset.feedbackReason = runIdForCard;
         feedback.append(reason);
+        // Edit-to-Accept（§7）：直接改产出——最强分寸信号
+        const revise = node("button", "ledger-feedback-btn") as HTMLButtonElement;
+        revise.type = "button"; revise.dataset.reviseOutput = runIdForCard; revise.textContent = "修改产出";
+        feedback.append(revise);
         card.append(feedback);
       }
       body.append(card);
@@ -3334,7 +3339,7 @@ function mount(): void {
       if (input) { input.focus(); input.value = "/"; renderCommandMenu("/"); }
     }
   });
-  document.getElementById("chat-root")?.addEventListener("click", (event) => {
+  document.getElementById("chat-root")?.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
     const messageAction = target.closest<HTMLButtonElement>("button[data-message-action]");
     if (messageAction?.dataset.messageAction === "edit") {
@@ -3394,6 +3399,48 @@ function mount(): void {
         const row = feedback.closest(".ledger-feedback-row");
         if (row) row.replaceChildren(textBlock(verdict === "up" ? "已记录：通过 ✓" : `已记录打回：「${reason}」`, "ledger-feedback-label"));
       } else feedback.disabled = false;
+    }
+    // Edit-to-Accept（§7）：就地展开 textarea，原文预填；1.5s debounce 提交最终 diff
+    const reviseBtn = target.closest<HTMLButtonElement>("button[data-revise-output]");
+    if (reviseBtn?.dataset.reviseOutput) {
+      const runId = reviseBtn.dataset.reviseOutput;
+      const card = reviseBtn.closest(".status-card");
+      if (!card || card.querySelector("[data-revise-area]")) return;
+      reviseBtn.disabled = true;
+      const artifactId = currentSnapshot?.artifacts.find((item) => item.runId === runId)?.id;
+      let original = "";
+      try {
+        if (artifactId) {
+          const response = await fetch(`/api/artifact?id=${encodeURIComponent(artifactId)}`);
+          if (response.ok) original = await response.text();
+        }
+      } catch { /* 拉不到原文就空编辑——服务端 diff 空改会被拒绝 */ }
+      const area = node("textarea", "ledger-revise-area") as HTMLTextAreaElement;
+      area.value = original;
+      area.dataset.reviseArea = runId;
+      area.placeholder = "直接修改产出的内容；保存后会计算你改了什么。";
+      const save = node("button", "gate-approve") as HTMLButtonElement;
+      save.type = "button"; save.textContent = "保存修订";
+      save.addEventListener("click", () => {
+        if (save.disabled) return;
+        save.disabled = true; save.textContent = "保存中…";
+        window.setTimeout(() => {
+          const ok = sendPayload({ type: "revise-output", runId, content: area.value });
+          if (!ok) { save.disabled = false; save.textContent = "保存修订"; return; }
+          const box = area.closest(".ledger-revise-box");
+          if (box) box.replaceChildren(textBlock("已由你修订 ✓ 分寸候选已沉淀。", "ledger-feedback-label"));
+        }, 1500);
+      });
+      const cancel = node("button", "gate-reject") as HTMLButtonElement;
+      cancel.type = "button"; cancel.textContent = "取消";
+      const box = node("div", "ledger-revise-box");
+      cancel.addEventListener("click", () => box.remove());
+      box.append(textBlock("修订产出", "section-label"), area);
+      const actionsRow = node("div", "gate-actions");
+      actionsRow.append(save, cancel);
+      box.append(actionsRow);
+      card.append(box);
+      area.focus();
     }
   });
   document.getElementById("scenario-cards")?.addEventListener("click", (event) => {

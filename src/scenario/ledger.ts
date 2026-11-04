@@ -366,3 +366,55 @@ export function activeConstraints(ledger: ScenarioLedger): Constraint[] {
 export function pendingConstraints(ledger: ScenarioLedger): Constraint[] {
   return ledger.constraints.filter((c) => c.confirmedAt === null && c.active && c.supersededBy === null);
 }
+
+export type RevisionProposal = ProposeInput & { /** added 块的稳定子串（两次命中升级 must_contain 的 pattern） */ upgradePattern?: string };
+
+/**
+ * 产出编辑修正事务（§7 Edit-to-Accept）：
+ *  - 反应窗内（runId 未结算）→ 走 recordRunOutcome 的 corrected 完整事务（编辑优先于沉默）；
+ *  - 沉默已入账（interventions 已有该 runId 且 correctionsGiven=0）→ 撤销错误自动接受：
+ *    accepted--、corrected++、断连胜、interventions 行 correctionsGiven++；
+ *  - 同 runId 多次编辑 → 只合并提案（条款去重），corrected 只计 1 次（首次纠正时的分支已锁死）；
+ *  - added 类条款与既有 advisory 同义 → 机械升级 must_contain（§4 两次命中规则）。
+ */
+export function applyOutputCorrection(ledger: ScenarioLedger, params: { runId: string; digest?: string; at?: string; proposals: RevisionProposal[] }): ScenarioLedger {
+  const at = params.at ?? new Date().toISOString();
+  let next = ledger;
+  const ivRow = next.interventions.find((i) => i.runId === params.runId);
+  if (!ivRow) {
+    next = recordRunOutcome(next, {
+      runId: params.runId,
+      attended: true,
+      outcome: "corrected",
+      digest: params.digest,
+      at,
+      interventions: { gatesAnswered: 0, questionsAnswered: 0, correctionsGiven: 1 },
+    });
+  } else if (ivRow.correctionsGiven === 0) {
+    // 沉默 accepted 已入账 → 修正为 corrected（撤销错误的自动接受）
+    const runStats = { ...next.runStats };
+    if (runStats.accepted > 0) runStats.accepted -= 1;
+    runStats.corrected += 1;
+    runStats.consecutiveClean = 0;
+    const interventions = next.interventions.map((i) =>
+      i.runId === params.runId ? { ...i, correctionsGiven: i.correctionsGiven + 1, total: i.total + 1 } : i,
+    );
+    next = { ...next, runStats, interventions };
+  }
+  for (const proposal of params.proposals) {
+    // §4 机械升级：added 块命中既有 advisory → 升级 must_contain（pattern=稳定子串），不再新增
+    const upgradePattern = proposal.upgradePattern;
+    if (upgradePattern) {
+      const key = clauseKey(proposal.clause);
+      const existing = next.constraints.find((c) => c.kind === "advisory" && c.active && c.supersededBy === null && clauseKey(c.clause) === key);
+      if (existing) {
+        next = upgradeToMustContain(next, existing.id, upgradePattern);
+        continue;
+      }
+    }
+    const { upgradePattern: _ignored, ...input } = proposal;
+    const proposed = proposeConstraint(next, input);
+    if (proposed) next = proposed.ledger;
+  }
+  return next;
+}
