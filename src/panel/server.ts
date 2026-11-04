@@ -16,7 +16,8 @@ import { renderGateView } from "@/gates/views.js";
 import { classifyGateDecision, type GateProposalDraft } from "@/panel/gate-classify.js";
 import { memoryTree, type MemoryTreeNode } from "@/memory/memory.js";
 import { ScenarioRecordSchema, scenarioMatchesScope, scenarioNameFromRequirement, type ScenarioLibrary, type ScenarioRecord } from "@/scenario/library.js";
-import { proposeConstraint, recordRunOutcome, stripNegationPrefix, applyOutputCorrection, type ScenarioLedger, type RevisionProposal } from "@/scenario/ledger.js";
+import { proposeConstraint, recordRunOutcome, stripNegationPrefix, applyOutputCorrection, ensureLedger as ensureLedgerOf, activeConstraints, pendingConstraints, confirmConstraints, retireConstraint, type ScenarioLedger, type RevisionProposal } from "@/scenario/ledger.js";
+import { confidence, tierOfLedger } from "@/scenario/confidence.js";
 import { inputDigest } from "@/scenario/digest.js";
 import { computeOutputDiff, blocksToProposals } from "@/panel/outputdiff.js";
 import type { GoalLoop, LoopEvent } from "@/execution/loop.js";
@@ -165,7 +166,7 @@ export interface PanelSnapshot {
   trace: unknown[];
   cluster: ClusterEvent[];
   loop: LoopEvent[];
-  scenarios: Array<{ id: string; name: string; goal: string; projectId: string | null; uses: number; successes: number; degraded: boolean; version: number; status: string; historyCount: number; versionHistory: Array<{ version: number; capabilityIds: string[]; createdAt: string; reason: string }>; slotDefs: Array<{ name: string; type?: string; required?: boolean; description?: string }>; capabilityCount: number; source: string }>;
+  scenarios: Array<{ id: string; name: string; goal: string; projectId: string | null; uses: number; successes: number; degraded: boolean; version: number; status: string; historyCount: number; versionHistory: Array<{ version: number; capabilityIds: string[]; createdAt: string; reason: string }>; slotDefs: Array<{ name: string; type?: string; required?: boolean; description?: string }>; capabilityCount: number; source: string; ledger?: { tier: "replay" | "spot" | "full"; confidence: number; activeCount: number; pendingCount: number; constraints: Array<{ id: string; clause: string; kind: string; hits: number; confirmed: boolean; active: boolean; supersededBy: string | null }>; curve: Array<{ at: string; total: number }>; runStats: { runs: number; accepted: number; rejected: number; corrected: number; consecutiveClean: number } } }>;
   availableScenarios: PanelSnapshot["scenarios"];
   memoryTree: MemoryTreeNode | null;
   memoryItems: Array<{ id: string; name: string; scope: string; enabled: boolean; sourceType: string; sourceId: string | null; path: string | null; updatedAt: string }>;
@@ -279,6 +280,8 @@ export const PanelActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("gate-decision"), decision: GateDecisionSchema, /** 闸5 签约面：用户取消勾选的提案 tempId（不签约，留 pendingConfirm） */ excludeProposals: z.array(z.string().min(1).max(60)).max(50).optional() }),
   z.object({ type: z.literal("feedback-run"), runId: z.string().min(1), verdict: z.enum(["up", "down"]), reason: z.string().min(1).max(8_000).optional() }),
   z.object({ type: z.literal("revise-output"), runId: z.string().min(1), content: z.string().min(1).max(200_000) }),
+  z.object({ type: z.literal("retire-constraint"), scenarioId: z.string().min(1), constraintId: z.string().min(1) }),
+  z.object({ type: z.literal("confirm-constraints"), scenarioId: z.string().min(1), ids: z.array(z.string().min(1).max(60)).min(1).max(50) }),
   z.object({ type: z.literal("control"), action: z.enum(["pause", "resume", "terminate"]) }),
   z.object({ type: z.literal("answer-run"), runId: z.string().min(1), values: z.record(z.string(), z.string().max(20_000)) }),
   z.object({ type: z.literal("guide-run"), instruction: z.string().min(2).max(8_000) }),
@@ -381,6 +384,10 @@ export class PanelServer {
   private excludedProposalIds: string[] = [];
   /** 最近各闸门载荷（闸3 候选名 → 分寸条款人话化） */
   private readonly gatePayloads = new Map<number, unknown>();
+  /** 抽查态闸门（§16）：本轮构建关联的既有场景账本（重规划时由 launcher 绑定） */
+  private buildLedgerScenarioId: string | null = null;
+  /** 已在本构建内自动通过的闸门（一次性防循环） */
+  private readonly autoPassedGates = new Set<number>();
   /** 分寸账本（PR-signal-run）：run 元数据（digest/attended/场景绑定），收尾结算用 */
   private readonly runLedgerMeta = new Map<string, { scenarioId: string | null; digest: string; attended: boolean; mode: "work" | "build" }>();
   /** 有人值守成功的反应窗（§12 沉默超时 10min，先到先得） */
@@ -585,6 +592,8 @@ export class PanelServer {
     this.buildLedgerProposals = [];
     this.excludedProposalIds = [];
     this.gatePayloads.clear();
+    this.autoPassedGates.clear();
+    this.buildLedgerScenarioId = null;
     // Capture ownership when the orchestrator is attached. Reading the
     // mutable current run inside callbacks would retag a late event from an
     // old session as the newer run after navigation.
@@ -622,7 +631,38 @@ export class PanelServer {
         void this.pushSnapshot();
         return;
       }
-      const view = renderGateView(request.gate, request.payload);
+      // 抽查态闸门（§16 spot/full）：账本统计足够的闸门自动通过，不重复打扰
+      void handleGatePending(request);
+    });
+
+    const handleGatePending = async (request: { gate: 1 | 2 | 3 | 4 | 5; payload: unknown; context: BuildContext }): Promise<void> => {
+      const gateKey = String(request.gate);
+      if (!this.autoPassedGates.has(request.gate) && this.deps.library && this.buildLedgerScenarioId) {
+        const routingMode = (await this.deps.settings?.get().catch(() => undefined))?.routingMode ?? "legacy";
+        if (routingMode !== "legacy") {
+          const record = await this.deps.library.get(this.buildLedgerScenarioId).catch(() => undefined);
+          const stat = record?.ledger ? record.ledger.gateStats[gateKey] : undefined;
+          if (stat && stat.passes >= 3 && stat.rejects === 0 && stat.edits === 0) {
+            this.autoPassedGates.add(request.gate);
+            try {
+              await orch.decide({ gate: request.gate, action: "approve" });
+              this.pushChat(owned({ role: "build-status", tone: "info", text: `闸门${request.gate} 已按账本自动通过（历史通过 ${stat.passes} 次，无打回）。`, ts: Date.now() }));
+              await this.pushSnapshot();
+              return;
+            } catch {
+              /* 自动通过失败 → 落回人工卡片 */
+            }
+          }
+        }
+      }
+      const view = (() => {
+        try {
+          return renderGateView(request.gate, request.payload);
+        } catch {
+          // 载荷畸形（恢复/异常路径）也不能让闸门流程失联
+          return { title: `闸门${request.gate}`, lines: ["（闸门内容渲染失败，可直接批准或驳回）"] };
+        }
+      })();
       // 闸5 签约面（§14）：把本轮构建攒下的分寸提案带给卡片（勾选清单由客户端渲染）
       const ledgerProposals = request.gate === 5 && this.buildLedgerProposals.length
         ? this.buildLedgerProposals.map((p) => ({ tempId: p.tempId, clause: p.clause, scope: p.scope, kind: p.kind, ...(p.conflictWith ? { conflictWith: p.conflictWith } : {}) }))
@@ -639,8 +679,8 @@ export class PanelServer {
         decided: undefined,
         ts: Date.now(),
       }));
-      void this.pushSnapshot();
-    });
+      await this.pushSnapshot();
+    };
     orch.on("user:pending", ({ request, context }) => {
       const runId = orchestratorRunId ?? context.id;
       this.notifyBuildAwaitingUser(runId, request);
@@ -675,6 +715,11 @@ export class PanelServer {
     this.buildLedgerProposals = keptPending;
     this.excludedProposalIds = [];
     return seeds;
+  }
+
+  /** 抽查态闸门：launcher 在 match 命中重规划时绑定既有场景账本 */
+  setBuildLedgerScenarioId(scenarioId: string | null): void {
+    this.buildLedgerScenarioId = scenarioId;
   }
 
   /** launcher 在决定用哪个场景执行时绑定（match 命中路径 start-build 无 scenarioId） */
@@ -977,6 +1022,19 @@ export class PanelServer {
         slotDefs: (s.distilled.slotDefs as Array<{ name?: unknown; type?: unknown; required?: unknown; description?: unknown }>).map((slot) => ({ name: String(slot.name ?? "slot"), type: typeof slot.type === "string" ? slot.type : undefined, required: typeof slot.required === "boolean" ? slot.required : true, description: typeof slot.description === "string" ? slot.description : undefined })),
         capabilityCount: s.capabilityIds.length,
         source: s.source,
+        // 分寸账本摘要（PR-curve）：tier/置信度/条款/介入曲线（北极星）
+        ledger: (() => {
+          const ledger = ensureLedgerOf(s);
+          return {
+            tier: tierOfLedger(ledger),
+            confidence: Math.round(confidence(ledger) * 100) / 100,
+            activeCount: activeConstraints(ledger).length,
+            pendingCount: pendingConstraints(ledger).length,
+            constraints: ledger.constraints.slice(-30).map((c) => ({ id: c.id, clause: c.clause, kind: c.kind, hits: c.hits, confirmed: c.confirmedAt !== null, active: c.active, supersededBy: c.supersededBy })),
+            curve: ledger.interventions.slice(-30).map((i) => ({ at: i.at, total: i.total })),
+            runStats: ledger.runStats,
+          };
+        })(),
       });
     const scenarios = allScenarioRecords.filter((s) => this.scenarioInScope(s)).map(scenarioSummary);
     const availableScenarios = allScenarioRecords
@@ -2444,6 +2502,21 @@ export class PanelServer {
         text: action.verdict === "up" ? "已记录：这次结果通过。" : `已记录打回${action.reason ? `：「${action.reason.trim()}」` : ""}，连击清零；这条原因会沉淀为分寸候选。`,
         ts: Date.now(),
       });
+      await this.pushSnapshot();
+      return { ok: true };
+    }
+    if (action.type === "retire-constraint") {
+      // §14：退役 = active=false（不删，可溯）
+      if (!this.deps.library) return { ok: false, error: "场景库未准备好" };
+      await this.deps.library.updateLedger(action.scenarioId, (ledger) => retireConstraint(ledger, action.constraintId)).catch((error: unknown) => ({ error }));
+      await this.pushSnapshot();
+      return { ok: true };
+    }
+    if (action.type === "confirm-constraints") {
+      // §14：签约 = 批量填 confirmedAt（工作模式 pendingConfirm 的确认通道）
+      if (!this.deps.library) return { ok: false, error: "场景库未准备好" };
+      await this.deps.library.updateLedger(action.scenarioId, (ledger) => confirmConstraints(ledger, action.ids)).catch((error: unknown) => ({ error }));
+      this.pushChat({ role: "build-status", tone: "ok", text: `已签约 ${action.ids.length} 条分寸，下次运行自检生效。`, ts: Date.now() });
       await this.pushSnapshot();
       return { ok: true };
     }

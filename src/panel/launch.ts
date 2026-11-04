@@ -853,6 +853,8 @@ async function main(): Promise<void> {
           if (route && route.mode === "replan") {
             // 重规划：整个换掉计划（计划是缓存），账本不动；约束/先例注入规划上下文
             replanTargetScenarioId = match.scenario.id;
+            // 抽查态闸门：重规划关联既有账本（gateStats 支撑自动通过）
+            panel.setBuildLedgerScenarioId(match.scenario.id);
             const ledgerOfMatch = ensureLedger(match.scenario);
             const parts = [templateA(activeConstraints(ledgerOfMatch)), templateB(ledgerOfMatch.inputPatterns)].filter(Boolean);
             replanConstraintText = parts.join("\n\n");

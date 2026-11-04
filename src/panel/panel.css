@@ -2979,3 +2979,23 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
   gap: 4px;
   margin-top: 8px;
 }
+
+/* 分寸账本面板（PR-curve）：曲线/条款/灰度 */
+.ledger-panel {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--claude-line);
+  border-radius: 10px;
+  background: var(--claude-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ledger-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ledger-tier { color: var(--claude-muted); font-size: 12px; }
+.ledger-sparkline { width: 100%; height: 48px; color: var(--claude-accent, #c9694b); background: color-mix(in srgb, var(--claude-accent, #c9694b) 5%, transparent); border-radius: 6px; }
+.ledger-empty { color: var(--claude-muted); font-size: 12px; }
+.ledger-constraint-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.ledger-constraint-text { font-size: 12.5px; color: var(--claude-ink); flex: 1; }
+.ledger-mode-row { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.ledger-mode-select { border: 1px solid var(--claude-line); background: var(--claude-panel, transparent); color: var(--claude-ink); border-radius: 8px; padding: 4px 8px; font-size: 12.5px; }

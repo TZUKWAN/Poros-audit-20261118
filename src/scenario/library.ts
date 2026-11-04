@@ -5,6 +5,7 @@ import type { BuildContext } from "@/orchestrator/context.js";
 import { cosineSimilarity, type DistilledScenario, type IntentSignature, type SlotDef } from "@/distill/distill.js";
 import { ScenarioDefinitionSchema, type ScenarioDefinition } from "./definition.js";
 import { emptyLedger, ensureLedger as ensureLedgerOf, ScenarioLedgerSchema, type ScenarioLedger } from "./ledger.js";
+import { confidence } from "./confidence.js";
 
 /**
  * 6.2 场景库：持久化 + 命中三档 + 填槽执行 + 漂移检测 + 治理指标。
@@ -265,11 +266,15 @@ export class ScenarioLibrary {
     return scenario;
   }
 
-  /** 6.2.5 治理：成功率 <50%（≥2 次）标降级 */
+  /**
+   * 6.2.5 治理（P7 统一降级）：旧成功率规则保留为底线（老记录行为不变），
+   * 分寸账本置信度为负（近期打回/纠正压过连胜）同样判降级——干预曲线取代裸成功率。
+   */
   private applyGovernance(scenario: ScenarioRecord): void {
-    if (scenario.stats.uses >= 2) {
-      scenario.degraded = scenario.stats.successes / scenario.stats.uses < 0.5;
-    }
+    if (scenario.stats.uses < 2) return;
+    const rateRule = scenario.stats.successes / scenario.stats.uses < 0.5;
+    const ledgerRule = confidence(ensureLedgerOf(scenario)) < 0;
+    scenario.degraded = rateRule || ledgerRule;
   }
 
   /** 6.2.4 漂移检测：复用前逐能力探活；失效 → drift → 局部换型（replacement 注入）→ 版本+1 */

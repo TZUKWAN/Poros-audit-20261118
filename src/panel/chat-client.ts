@@ -77,9 +77,19 @@ interface ScenarioSummary {
   slotDefs: Array<{ name: string; type?: string; required?: boolean; description?: string }>;
   capabilityCount: number;
   source: string;
+  /** 分寸账本摘要（PR-curve）：tier/置信度/条款/介入曲线 */
+  ledger?: {
+    tier: "replay" | "spot" | "full";
+    confidence: number;
+    activeCount: number;
+    pendingCount: number;
+    constraints: Array<{ id: string; clause: string; kind: string; hits: number; confirmed: boolean; active: boolean; supersededBy: string | null }>;
+    curve: Array<{ at: string; total: number }>;
+    runStats: { runs: number; accepted: number; rejected: number; corrected: number; consecutiveClean: number };
+  };
 }
 interface SessionSummary { id: string; title: string; mode: PanelMode; projectId: string | null; messageCount: number; createdAt: string; updatedAt: string; archived: boolean; }
-interface PublicSettings { baseUrl: string; model: string; plannerModel: string | null; fallbackModel: string | null; temperature: number; maxTokens: number | null; timeoutMs: number; hasApiKey: boolean; apiKeyMasked: string; useHistory: boolean; autoMemory: boolean; temporarySession: boolean; providerId: string | null; streaming: boolean; syncEndpoint: string | null; hasSyncToken: boolean; syncTokenMasked: string; }
+interface PublicSettings { baseUrl: string; model: string; plannerModel: string | null; fallbackModel: string | null; temperature: number; maxTokens: number | null; timeoutMs: number; hasApiKey: boolean; apiKeyMasked: string; useHistory: boolean; autoMemory: boolean; temporarySession: boolean; routingMode: "legacy" | "spot" | "full"; providerId: string | null; streaming: boolean; syncEndpoint: string | null; hasSyncToken: boolean; syncTokenMasked: string; }
 interface ProjectSummary {
   id: string;
   name: string;
@@ -739,10 +749,80 @@ function renderScenarios(snap: PanelSnapshot): void {
   }
 }
 
+/** 分寸账本面板（PR-curve）：北极星介入曲线 sparkline + tier 徽章 + 条款清单（确认/退役） + 灰度开关 */
+function renderLedgerPanel(detail: HTMLElement, item: ScenarioSummary): void {
+  const ledger = item.ledger;
+  if (!ledger) return;
+  const box = node("div", "ledger-panel");
+  const tierLabel = { replay: "重放", spot: "抽查", full: "全开" }[ledger.tier];
+  const head = node("div", "ledger-panel-head");
+  head.append(textBlock("分寸账本", "section-label"), textBlock(`置信度 ${ledger.confidence} · 闸门 ${tierLabel}`, "ledger-tier"));
+  box.append(head);
+  // 介入曲线（北极星：第 N 次人工介入次数——单调下降 = 越用越牛逼的数学形式）
+  box.append(textBlock("人工介入曲线（最近运行）", "section-label"));
+  const svg = ledgerSparkline(ledger.curve.map((point) => point.total));
+  svg.setAttribute("aria-label", "人工介入次数曲线");
+  box.append(svg);
+  if (!ledger.curve.length) box.append(textBlock("还没有运行记录——跑一次后这里会出现曲线。", "ledger-empty"));
+  else box.append(textBlock(`运行 ${ledger.runStats.runs} · 通过 ${ledger.runStats.accepted} · 打回 ${ledger.runStats.rejected} · 纠正 ${ledger.runStats.corrected} · 连胜 ${ledger.runStats.consecutiveClean}`, "ledger-empty"));
+  // 条款清单：已生效（hits 可见，可退役）+ 待签约（确认/退役）
+  const active = ledger.constraints.filter((c) => c.active && !c.supersededBy);
+  if (active.length) {
+    box.append(textBlock(`条款（${ledger.activeCount} 条生效）`, "section-label"));
+    for (const constraint of active) {
+      const row = node("div", "ledger-constraint-row");
+      const badge = constraint.confirmed ? (constraint.kind === "advisory" ? "偏好" : "标准") : "待确认";
+      row.append(textBlock(`[${badge}] ${constraint.clause} · 命中 ${constraint.hits}`, "ledger-constraint-text"));
+      const retire = node("button", "session-action"); retire.type = "button"; retire.dataset.retireConstraint = constraint.id; retire.dataset.retireScenario = item.id; retire.textContent = constraint.confirmed ? "退役" : "忽略";
+      row.append(retire);
+      if (!constraint.confirmed) {
+        const confirm = node("button", "session-action"); confirm.type = "button"; confirm.dataset.confirmConstraint = constraint.id; confirm.dataset.confirmScenario = item.id; confirm.textContent = "签约";
+        row.append(confirm);
+      }
+      box.append(row);
+    }
+  }
+  // 灰度开关（§16）：legacy 只记不用 / spot 自检 / full 双路路由+体检
+  const settings = currentSnapshot?.settings;
+  if (settings) {
+    const modeRow = node("label", "ledger-mode-row");
+    modeRow.append(textBlock("账本路由", "section-label"));
+    const select = node("select", "ledger-mode-select") as HTMLSelectElement;
+    select.dataset.routingMode = "1";
+    select.append(new Option("legacy · 只记录不生效", "legacy"), new Option("spot · 自检启用", "spot"), new Option("full · 双路路由+体检", "full"));
+    select.value = settings.routingMode;
+    select.addEventListener("change", () => { sendPayload({ type: "update-settings", settings: { routingMode: select.value as "legacy" | "spot" | "full" } }); });
+    modeRow.append(select);
+    box.append(modeRow);
+  }
+  detail.append(box);
+}
+
+/** 介入曲线 sparkline：SVG 折线，零依赖 */
+function ledgerSparkline(values: number[]): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "ledger-sparkline");
+  svg.setAttribute("viewBox", "0 0 240 48");
+  svg.setAttribute("preserveAspectRatio", "none");
+  if (values.length < 2) return svg;
+  const max = Math.max(1, ...values);
+  const stepX = 240 / (values.length - 1);
+  const points = values.map((value, index) => `${(index * stepX).toFixed(1)},${(44 - (value / max) * 40).toFixed(1)}`).join(" ");
+  const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  polyline.setAttribute("points", points);
+  polyline.setAttribute("fill", "none");
+  polyline.setAttribute("stroke", "currentColor");
+  polyline.setAttribute("stroke-width", "1.5");
+  polyline.setAttribute("stroke-linejoin", "round");
+  svg.append(polyline);
+  return svg;
+}
+
 function renderScenarioDetail(item: ScenarioSummary): void {
   const detail = $("scenario-detail"); if (!detail) return;
   detail.replaceChildren();
   detail.append(textBlock(item.name, "scenario-detail-title"), textBlock(`${item.goal || "未填写目标"} · v${item.version} · 使用 ${item.uses} 次 · 成功 ${item.successes} 次`, "scenario-detail-meta"), textBlock(`能力 ${item.capabilityCount} 个 · 来源 ${item.source} · 状态 ${item.status} · 历史版本 ${item.historyCount}${item.degraded ? " · 已降级" : ""}`, "scenario-detail-meta"));
+  renderLedgerPanel(detail, item);
   if (item.versionHistory.length) {
     detail.append(textBlock("版本历史", "section-label"));
     for (const version of item.versionHistory) {
@@ -3408,6 +3488,19 @@ function mount(): void {
         const row = feedback.closest(".ledger-feedback-row");
         if (row) row.replaceChildren(textBlock(verdict === "up" ? "已记录：通过 ✓" : `已记录打回：「${reason}」`, "ledger-feedback-label"));
       } else feedback.disabled = false;
+    }
+    // 分寸账本（§14）：条款签约 / 退役（不删，可溯）
+    const confirmBtn = target.closest<HTMLButtonElement>("button[data-confirm-constraint]");
+    if (confirmBtn?.dataset.confirmScenario) {
+      confirmBtn.disabled = true;
+      sendPayload({ type: "confirm-constraints", scenarioId: confirmBtn.dataset.confirmScenario, ids: [confirmBtn.dataset.confirmConstraint ?? ""] });
+      return;
+    }
+    const retireBtn = target.closest<HTMLButtonElement>("button[data-retire-constraint]");
+    if (retireBtn?.dataset.retireScenario) {
+      retireBtn.disabled = true;
+      sendPayload({ type: "retire-constraint", scenarioId: retireBtn.dataset.retireScenario, constraintId: retireBtn.dataset.retireConstraint ?? "" });
+      return;
     }
     // Edit-to-Accept（§7）：就地展开 textarea，原文预填；1.5s debounce 提交最终 diff
     const reviseBtn = target.closest<HTMLButtonElement>("button[data-revise-output]");
