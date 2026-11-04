@@ -643,7 +643,7 @@ async function main(): Promise<void> {
         panel.pushProgress(runId, { finished: true, line: result.status === "succeeded" ? "执行完成，产物已生成。" : result.status === "untested" ? "已生成说明，但缺少真实执行证据。" : "执行失败。" });
         // 终态画布卡写入聊天历史：重载/换会话后任务画布仍在
         panel.pushChat({
-          role: "progress-card", runId, finished: true,
+          role: "progress-card", runId, finished: true, sessionId: runBinding.sessionId,
           steps: result.trace.map((step) => ({
             at: Number(Date.parse(step.finishedAt)) || Date.now(),
             text: step.status === "failed" ? `失败 · ${step.title}` : step.title,
@@ -730,6 +730,17 @@ async function main(): Promise<void> {
       }
       if (match.tier === "hit" && match.scenario) {
         if (mode === "work") {
+          // 治理边界：降级场景拦下自动化触发（无人监督的定时任务），
+          // 但放行用户显式请求——成功一次即由治理自动解除降级。
+          if (match.degraded && source === "task") {
+            pushRunChat({ role: "build-status", tone: "err", text: `定时任务命中了已降级场景“${match.scenario.name}”（近期成功率不足），已跳过自动执行；请在工作台手动重跑以解除降级。`, terminal: true, ts: Date.now() });
+            await panel.refresh();
+            clearPlannerAbort();
+            launchBusy = false;
+            return { ok: false, error: "degraded scenario blocked for automated run" };
+          }
+          // 降级场景的显式重跑：告知风险但放行——成功一次即由治理自动解除降级
+          if (match.degraded) pushRunChat({ role: "build-status", tone: "info", text: `场景“${match.scenario.name}”近期执行成功率较低，本次为你重试执行，成功后会自动解除降级。`, ts: Date.now() });
           pushRunChat({ role: "build-status", tone: "info", text: `已命中场景“${match.scenario.name}”，正在检查能力漂移并尝试真实工具执行……`, ts: Date.now() });
           let reused: Awaited<ReturnType<typeof tryReuseScenario>>;
           try {
@@ -862,13 +873,13 @@ async function main(): Promise<void> {
         },
         store: buildStore,
       });
-      panel.attachOrchestrator(orch, { interactive: false });
-      // SceneFlow：编排器阶段迁移驱动进度卡步进器（interactive=false 不刷聊天）
+      panel.attachOrchestrator(orch, { interactive: true });
+      // SceneFlow：编排器阶段迁移驱动进度卡步进器
       orch.on("state:enter", ({ to }: { to: string }) => {
         if (to !== "done") panel.pushPhaseProgress(panelRunId, to);
       });
-      // 构建模式默认自动过闸，避免用户学习状态机细节；高级决策仍保留在底层协议。
-      attachVirtualUser(orch, new VirtualUser({ kind: "approve-all" }));
+      // 五闸门交互确认：构建在每个闸门停下，等用户在积木卡上确认后再继续。
+      // （此前这里挂了 approve-all VirtualUser 自动过闸，导致闸门卡从不出现。）
       current = orch;
       currentDone = false;
       const domain = routeDomain(requirement);
@@ -1249,7 +1260,7 @@ async function main(): Promise<void> {
     await artifacts.create({ id: `artifact-${roundRunId}`, workspaceId: run.workspaceId, projectId: run.projectId, sessionId: run.sessionId, runId: run.id, name: `${scenario.name} 长程第${round}轮.md`, mediaType: "text/markdown", path: result.artifactPath, version: 1, checksum: artifactChecksum(result.artifactContent), status: result.status === "succeeded" ? "ready" : result.status === "failed" ? "failed" : "draft" });
     // 长程轮次终态画布卡同样持久化
     panel.pushChat({
-      role: "progress-card", runId: roundRunId, finished: true,
+      role: "progress-card", runId: roundRunId, finished: true, sessionId: run.sessionId,
       steps: result.trace.map((step) => ({
         at: Number(Date.parse(step.finishedAt)) || Date.now(),
         text: step.status === "failed" ? `失败 · ${step.title}` : step.title,

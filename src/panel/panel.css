@@ -2823,3 +2823,32 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
   .app-shell[data-mode="build"] .message-gate-block.block-seat-in { animation: none; }
   .app-shell[data-mode="build"] .gate-card:not(.has-decided):not(.is-stale) { animation: none; }
 }
+
+/* ===== Phase T2：构建模式去聊天化 =====
+   用户消息不再是聊天气泡，而是居中的"构建需求"胶囊条 */
+.app-shell[data-mode="build"] .message-user { margin: 16px auto 8px !important; max-width: fit-content !important; }
+.app-shell[data-mode="build"] .message-user .message-body {
+  background: transparent !important;
+  border: 1px dashed var(--claude-line) !important;
+  border-radius: 999px !important;
+  padding: 7px 16px !important;
+  color: var(--claude-muted) !important;
+  font-size: 13px !important;
+}
+.app-shell[data-mode="build"] .message-user .message-body::before {
+  content: "构建需求 · ";
+  color: var(--claude-faint);
+}
+.app-shell[data-mode="build"] .message-user .message-body .message-head { display: none !important; }
+.app-shell[data-mode="build"] .message-user .message-body .message-content { font-size: 13px !important; }
+.app-shell[data-mode="build"] .message-user .message-actions { display: none !important; }
+
+/* 运行中旁白（status-card progress/info）收紧为细注脚，不再像聊天气泡 */
+.app-shell[data-mode="build"] .run-group-card > .message:not(.message-user):not(.message-gate-block) .status-card {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 2px 0 !important;
+  color: var(--claude-muted) !important;
+  font-size: 12.5px !important;
+}
