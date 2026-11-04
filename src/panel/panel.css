@@ -2696,3 +2696,130 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
     max-height: 40px; margin-top: 6px; opacity: 1; pointer-events: auto;
   }
 }
+
+/* ===== Phase T：构建模式积木化（搭积木形态） =====
+   构建模式里闸门卡不再是聊天气泡，而是自上而下叠放的积木块：
+   顶部有积木榫头条（teeth），确认后落座收起，当前块发光可编辑。 */
+
+/* 剥掉闸门消息的对话壳（头像/表头/气泡底），让积木块独占堆叠轨道 */
+.app-shell[data-mode="build"] .message-gate-block {
+  background: none; border: none; box-shadow: none; padding: 0; margin: 0;
+}
+.app-shell[data-mode="build"] .message-gate-block .avatar,
+.app-shell[data-mode="build"] .message-gate-block .message-head { display: none; }
+
+/* 积木块本体（!important 对抗 1691/2581 两批 Claude 面板层的 gate-card !important） */
+.app-shell[data-mode="build"] .gate-card {
+  --block-accent: var(--accent, #7c6cf6);
+  position: relative;
+  margin: 30px 10px 12px !important;
+  padding: 18px 20px 16px !important;
+  border: 1.5px solid var(--claude-line) !important;
+  border-left: 1.5px solid var(--claude-line) !important;
+  border-radius: 16px !important;
+  background: var(--claude-raised) !important;
+  box-shadow: none !important;
+}
+.app-shell[data-mode="build"] .gate-card::before {
+  /* 顶部榫头条：四个积木凸点 */
+  content: "";
+  position: absolute;
+  top: -9px; left: 50%;
+  width: 132px; height: 18px;
+  transform: translateX(-50%);
+  background: var(--block-accent);
+  opacity: .9;
+  border-radius: 7px;
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 22px, transparent 22px 33px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 22px, transparent 22px 33px);
+}
+/* 各阶段积木的accent色：一眼区分堆叠顺序 */
+.app-shell[data-mode="build"] .gate-card[data-gate="1"] { --block-accent: #e08545; }
+.app-shell[data-mode="build"] .gate-card[data-gate="2"] { --block-accent: #4c9de0; }
+.app-shell[data-mode="build"] .gate-card[data-gate="3"] { --block-accent: #6a8f3c; }
+.app-shell[data-mode="build"] .gate-card[data-gate="4"] { --block-accent: #9a6de0; }
+.app-shell[data-mode="build"] .gate-card[data-gate="5"] { --block-accent: #d05a8a; }
+
+/* 当前块：呼吸描边引导确认 */
+@keyframes block-breath {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--block-accent) 32%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--block-accent) 18%, transparent); }
+}
+.app-shell[data-mode="build"] .gate-card:not(.has-decided):not(.is-stale) {
+  border: 1.5px solid color-mix(in srgb, var(--block-accent) 55%, var(--claude-line)) !important;
+  animation: block-breath 2.6s ease-in-out infinite;
+}
+
+/* 已落座（decided）块：收起、降饱和、盖“已锁定”印章 */
+.app-shell[data-mode="build"] .gate-card.has-decided {
+  opacity: .78;
+  padding: 10px 20px !important;
+  margin-top: 26px !important;
+  border-color: var(--claude-line) !important;
+  animation: none !important;
+}
+.app-shell[data-mode="build"] .gate-card.has-decided .gate-overview { display: none; }
+.app-shell[data-mode="build"] .gate-card.has-decided .gate-guidance { display: none; }
+.app-shell[data-mode="build"] .gate-card.has-decided::before { opacity: .38; }
+.app-shell[data-mode="build"] .gate-card.has-decided .gate-top .gate-pending { color: #3d9a52; font-weight: 600; }
+
+/* 落座动画：只对新出现的块播放一次（JS 只给首渲染的块加 seat-in） */
+@keyframes block-seat {
+  0% { opacity: 0; transform: translateY(-16px) scale(.985); }
+  62% { opacity: 1; transform: translateY(2px); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.app-shell[data-mode="build"] .message-gate-block.block-seat-in { animation: block-seat .44s cubic-bezier(.24,.9,.32,1.18); }
+
+/* 下一块积木的空位占位 */
+.block-slot {
+  margin: 22px 10px 6px;
+  padding: 15px 18px;
+  border: 1.5px dashed var(--claude-line);
+  border-radius: 16px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--claude-muted);
+  opacity: .55;
+}
+
+/* 构建模式空态 = 积木底座 */
+.empty-blocks { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 24px 28px; }
+.empty-block-ph {
+  width: min(430px, 86%); height: 44px;
+  border: 1.5px dashed var(--claude-line);
+  border-radius: 13px;
+  position: relative;
+  opacity: .62;
+}
+.empty-block-ph::before {
+  content: "";
+  position: absolute; top: -7px; left: 50%;
+  width: 96px; height: 14px;
+  transform: translateX(-50%);
+  background: var(--claude-line);
+  border-radius: 6px;
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 15px, transparent 15px 24px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 15px, transparent 15px 24px);
+}
+.empty-block-base {
+  width: min(460px, 92%); height: 18px;
+  border-radius: 8px;
+  background: var(--claude-line);
+  opacity: .8;
+}
+.empty-blocks h3 { margin: 18px 0 0; font-size: 16.5px; color: var(--claude-ink); }
+.empty-blocks p { margin: 4px 0 0; max-width: 430px; text-align: center; font-size: 13px; color: var(--claude-muted); line-height: 1.65; }
+
+/* 窄屏：积木收窄、榫头条缩短 */
+@media (max-width: 720px) {
+  .app-shell[data-mode="build"] .gate-card { margin: 26px 2px 10px !important; padding: 15px 13px 13px !important; }
+  .app-shell[data-mode="build"] .gate-card::before { width: 88px; height: 15px; top: -8px; }
+  .block-slot { margin: 18px 2px 4px; }
+}
+
+/* 动画偏好尊重 */
+@media (prefers-reduced-motion: reduce) {
+  .app-shell[data-mode="build"] .message-gate-block.block-seat-in { animation: none; }
+  .app-shell[data-mode="build"] .gate-card:not(.has-decided):not(.is-stale) { animation: none; }
+}

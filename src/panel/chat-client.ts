@@ -190,6 +190,12 @@ const timelineExpanded = new Map<string, boolean>();
 // complete, the user's last disclosure choice is retained.
 const thinkingExpanded = new Map<string, boolean>();
 const toolExpanded = new Map<string, boolean>();
+// 构建模式积木落座动画只对“新出现”的闸门块播放一次：记录已播过的 gate:ts 键，
+// 避免 renderChat 全量重建 DOM 时每次重放所有块的下落动画。
+const seatedGateKeys = new Set<string>();
+// 视觉 QA（?demo-blocks=1）状态：等首帧快照回灌后再注入 demo 积木，只注一次。
+let demoBlocksRequested = false;
+let demoBlocksSeeded = false;
 // Model output can arrive as dozens of small chunks per second. Rebuilding
 // the entire conversation DOM for each chunk makes the stream visibly jump
 // and needlessly reflows the side panels. Keep the authoritative message list
@@ -460,7 +466,7 @@ function friendlyRunStatus(status: string): string {
 function modeText(mode: PanelMode): { kicker: string; title: string; description: string; copy: string; placeholder: string } {
   return mode === "work"
     ? { kicker: "当前项目 · 工作模式", title: "你现在想完成什么？", description: "直接描述目标。我会先判断已有场景和可用工具，需要新能力时再进入构建。", copy: "描述目标，直接开始一次工作。", placeholder: "例如：整理 /data/meeting.md 并生成行动项" }
-    : { kicker: "SceneFlow · 场景构建", title: "把一次工作变成可复用场景", description: "先确认目标、步骤和工具，再决定是否保存为场景。", copy: "把重复工作整理成下次可直接使用的场景。", placeholder: "例如：每周整理销售数据并生成周报" };
+    : { kicker: "SceneFlow · 场景构建", title: "把一次工作搭成可复用场景", description: "每个阶段是一块积木：确认一块、落座一块，搭完整摞即可保存。", copy: "把重复工作整理成下次可直接使用的场景。", placeholder: "例如：每周整理销售数据并生成周报" };
 }
 
 function applyMode(mode: PanelMode): void {
@@ -1483,6 +1489,12 @@ function renderMessage(message: Record<string, unknown>): HTMLElement {
   if (role === "progress-card") return renderProgressCard(message as unknown as ProgressCardMessage);
   const streaming = (role === "model-stream" || role === "model-thinking") && message.streaming !== false;
   const wrapper = node("article", `message message-${role || "event"} ${role === "user" ? "user" : "assistant"}${streaming ? " message-streaming" : ""}`);
+  if (role === "gate-card") {
+    // 构建模式积木化：闸门卡脱离对话气泡，落座为积木块（视觉仅由 [data-mode=build] 作用域驱动）
+    wrapper.classList.add("message-gate-block");
+    const seatKey = `gate-${String(message.gate)}:${String(message.ts ?? message.approvalIndex ?? "")}`;
+    if (!seatedGateKeys.has(seatKey)) { wrapper.classList.add("block-seat-in"); seatedGateKeys.add(seatKey); }
+  }
   const timestamp = Number(message.ts ?? message.timestamp ?? 0);
   const time = timestamp > 0 ? new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
   if (role === "user") {
@@ -1627,6 +1639,9 @@ function renderHelpCard(text: string): HTMLElement {
 
 function renderGateCard(message: GateCardMessage): HTMLElement {
   const card = node("div", "gate-card");
+  card.dataset.gate = String(message.gate);
+  if (message.decided) card.classList.add("has-decided");
+  if (message.stale) card.classList.add("is-stale");
   const top = node("div", "gate-top");
   const heading = node("div");
   heading.append(textBlock(`阶段 ${message.gate} / 5`, "gate-step"), textBlock(gateTitle(message.gate), "gate-title"));
@@ -1805,6 +1820,23 @@ function gateApproveLabel(gate: number): string {
 
 function gateRejectLabel(gate: number): string {
   return ({ 1: "重新说明目标", 2: "返回调整步骤", 3: "换一批能力", 4: "返回调整流程" } as Record<number, string>)[gate] ?? "返回修改";
+}
+
+/** 视觉 QA：?demo-blocks=1 时本地注入一块已锁定积木与一块待确认积木，仅客户端内存，不落库。
+ *  ts 必须固定：快照会反复重注，固定键让 seat-in 落座动画只对同一块播一次，不会闪。 */
+function seedBlockDemo(): void {
+  const now = 1751600000000;
+  pushMessage({
+    role: "gate-card", gate: 1, title: gateTitle(1), lines: ["目标：每周整理销售数据并生成周报"], decided: { action: "approve" }, ts: now - 120000,
+  });
+  pushMessage({
+    role: "gate-card", gate: 2, title: gateTitle(2), lines: ["第 1 步 读取销售原始数据", "第 2 步 汇总本周关键指标", "第 3 步 生成周报文档"],
+    editSeed: { dag: { nodes: [
+      { id: "node-1", title: "读取销售原始数据", deps: [], expectedOutput: "原始数据表" },
+      { id: "node-2", title: "汇总本周关键指标", deps: ["node-1"], expectedOutput: "指标汇总" },
+      { id: "node-3", title: "生成周报文档", deps: ["node-2"], expectedOutput: "周报" },
+    ] } }, ts: now,
+  });
 }
 
 function nodeNumberForUi(id: string): string {
@@ -2069,12 +2101,33 @@ function renderChat(): void {
   const liveStream = messages.some((message) => (message.role === "model-stream" || message.role === "model-thinking") && message.streaming !== false);
   root.setAttribute("aria-busy", String(liveStream));
   root.replaceChildren();
-  if (!messages.length) {
+  // 后台通知（task-notification / 非终态 build-status）不算真实内容：
+  // 新会话常被它们占位导致空态永不出现，空态判定只看“用户可见的工作内容”。
+  const hasRealContent = messages.some((message) => !isNoiseMessage(message));
+  if (!messages.length || (!hasRealContent && panelMode === "build")) {
     const empty = node("div", "chat-empty");
-    const card = node("div", "empty-card");
-    const h = node("h3"); h.textContent = panelMode === "work" ? "把重复工作交给 SceneFlow 场景" : "从一句话开始，构建可复用场景";
-    const p = node("p"); p.textContent = panelMode === "work" ? "系统会优先复用已固化场景，并把运行过程显示在右侧检查台。" : "确认每一个关键阶段，把一次成功流程沉淀成下次可以直接调用的场景。";
-    card.append(h, p); empty.append(card); root.append(empty); updateJumpButton(false);
+    if (panelMode === "build") {
+      // 构建模式空态 = 积木底座：底座上两块虚线占位块，说明“一块一块搭场景”的形态
+      const stack = node("div", "empty-blocks");
+      const ph2 = node("div", "empty-block-ph"); const ph1 = node("div", "empty-block-ph");
+      const base = node("div", "empty-block-base");
+      const h = node("h3"); h.textContent = "把一次成功流程，一块一块搭成场景";
+      const p = node("p"); p.textContent = "每确认一个阶段就落下一块积木：目标 → 步骤 → 能力 → 流程 → 保存。搭完整摞，就是下次可以直接调用的场景。";
+      stack.append(ph2, ph1, base, h, p); empty.append(stack);
+    } else {
+      const card = node("div", "empty-card");
+      const h = node("h3"); h.textContent = "把重复工作交给 SceneFlow 场景";
+      const p = node("p"); p.textContent = "系统会优先复用已固化场景，并把运行过程显示在右侧检查台。";
+      card.append(h, p); empty.append(card);
+    }
+    root.append(empty);
+    // 底座下方保留通知（折叠成一条执行过程），不丢信息也不挡空态
+    if (messages.length) {
+      for (const message of condensedMessages(messages)) {
+        try { root.append(renderMessage(message)); } catch { /* 通知渲染失败可忽略 */ }
+      }
+    }
+    updateJumpButton(false);
     $("chat-minimap")?.replaceChildren();
     $("chat-left-progress")?.replaceChildren();
     return;
@@ -2091,6 +2144,13 @@ function renderChat(): void {
       root.append(errCard);
     }
   }
+  // 构建模式积木堆：只要当前会话里出现过闸门块，就在堆顶下方留一个“空位”，
+  // 提示下一块积木会在这里落座（可视化整个 5 块结构，而不是无尽聊天流）。
+  if (panelMode === "build" && messages.some((message) => message.role === "gate-card")) {
+    const slot = node("div", "block-slot");
+    slot.textContent = "◇ 完成上面未确认的积木后，下一块会在这里落座";
+    root.append(slot);
+  }
   if (resetPosition || wasAtBottom) root.scrollTop = root.scrollHeight;
   else root.scrollTop = previousTop;
   updateJumpButton(!wasAtBottom && root.scrollHeight > root.clientHeight && root.scrollTop < root.scrollHeight - root.clientHeight - 48);
@@ -2100,8 +2160,15 @@ function renderChat(): void {
   if (currentSnapshot) renderLeftProgress(currentSnapshot);
 }
 
-function condensedMessages(source: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-  const output: Array<Record<string, unknown>> = [];
+/** 后台噪声消息：task-notification 与非终态 info build-status。不参与空态判定。 */
+function isNoiseMessage(message: Record<string, unknown>): boolean {
+  const role = String(message.role ?? "");
+  if (role === "task-notification") return true;
+  if (role === "build-status" && message.terminal !== true && String(message.tone ?? "info") === "info" && !String(message.text ?? "").startsWith("/help ·")) return true;
+  return false;
+}
+
+function condensedMessages(source: Array<Record<string, unknown>>): Array<Record<string, unknown>> {  const output: Array<Record<string, unknown>> = [];
   for (const message of source) {
     const role = String(message.role ?? "");
     if (role === "gate-card" && message.stale === true) continue;
@@ -2386,6 +2453,16 @@ function connect(): void {
       hasReceivedSnapshot = true;
       currentSnapshot = nextSnapshot;
       panelMode = currentSnapshot.mode ?? panelMode; applyMode(panelMode); renderRight(currentSnapshot);
+      // 视觉 QA（?demo-blocks=1）：demo 通道独占消息流——忽略服务端聊天历史，
+      // 每次快照回灌后重注两块积木（避免真实浏览器并发快照把 demo 冲掉）。
+      if (demoBlocksRequested) {
+        demoBlocksSeeded = true; applyMode("build");
+        messages = [];
+        seedBlockDemo();
+        renderChat();
+        setBusy(currentSnapshot.busy);
+        return;
+      }
       messages = normalizeChatMessages(Array.isArray(currentSnapshot.chat) ? currentSnapshot.chat : []);
       if (window.location.search.includes("debug=1")) console.log("[sceneflow][snapshot]", JSON.stringify({ len: messages.length, canvas: messages.filter((m) => m.role === "progress-card").length, tail: messages.slice(-3).map((m) => m.role) }));
       // SceneFlow：进度卡不在服务端聊天历史里，快照重建后按 runId 挂回
@@ -2762,6 +2839,9 @@ function mount(): void {
   $("open-runs")?.addEventListener("click", () => { $("runs-modal")?.classList.remove("hidden"); if (currentSnapshot) renderRuns(currentSnapshot); focusModalControl("runs-modal", "close-runs"); });
   $("open-tasks")?.addEventListener("click", () => { $("tasks-modal")?.classList.remove("hidden"); if (currentSnapshot) renderTasks(currentSnapshot); focusModalControl("tasks-modal", "task-requirement"); });
   applyMode(panelMode);
+  // 视觉 QA 通道：?demo-blocks=1 会在首帧快照回灌之后注入两块积木（见 snapshot 分支），
+  // 因为快照会整体覆盖 messages 与 panelMode，提前注入会被冲掉。
+  if (new URLSearchParams(location.search).get("demo-blocks") === "1") demoBlocksRequested = true;
   const modeButtons = [...document.querySelectorAll<HTMLButtonElement>(".mode-btn")];
   modeButtons.forEach((button, index) => {
     button.addEventListener("click", () => setMode(button.dataset.mode as PanelMode));
