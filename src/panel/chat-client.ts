@@ -22,13 +22,16 @@ interface GateCardMessage {
 }
 
 interface BuildStatusMessage {
-  role: "build-status";
-  tone: Tone;
+  role: "build-status";  tone: Tone;
   text: string;
   terminal?: boolean;
   /** Optional next step shown inline when the current mode cannot continue. */
   action?: "switch-to-build";
   requirement?: string;
+  /** 分寸账本：工作模式成功终态 → 渲染 👍/👎 反应行（10 分钟反应窗） */
+  workRun?: boolean;
+  runId?: string;
+  runStatus?: string;
   ts?: number;
 }
 
@@ -1551,6 +1554,21 @@ function renderMessage(message: Record<string, unknown>): HTMLElement {
         switchButton.textContent = "切换到场景构建";
         actions.append(switchButton);
         card.append(actions);
+      }
+      // 分寸账本（PR-signal-run）：有人值守成功的反应窗——👍/👎+原因（先到先得）
+      if (status.workRun && status.runStatus === "succeeded" && status.runId) {
+        const feedback = node("div", "ledger-feedback-row");
+        feedback.dataset.feedbackRun = status.runId;
+        const label = textBlock("这次结果怎么样？", "ledger-feedback-label");
+        const up = node("button", "ledger-feedback-btn") as HTMLButtonElement;
+        up.type = "button"; up.dataset.feedbackVerdict = "up"; up.dataset.feedbackRunId = status.runId; up.textContent = "👍 通过";
+        const down = node("button", "ledger-feedback-btn") as HTMLButtonElement;
+        down.type = "button"; down.dataset.feedbackVerdict = "down"; down.dataset.feedbackRunId = status.runId; down.textContent = "👎 打回";
+        feedback.append(label, up, down);
+        const reason = node("input", "ledger-feedback-reason") as HTMLInputElement;
+        reason.type = "text"; reason.placeholder = "哪里不对？（打回必填）"; reason.dataset.feedbackReason = status.runId;
+        feedback.append(reason);
+        card.append(feedback);
       }
       body.append(card);
     }
@@ -3362,6 +3380,21 @@ function mount(): void {
     }
     const proposal = target.closest<HTMLButtonElement>("button[data-memory-proposal]"); if (proposal?.dataset.memoryProposal === "save") sendPayload({ type: "save-memory-proposal", name: proposal.dataset.memoryName ?? "运行记录", content: proposal.dataset.memoryContent ?? "" });
     if (proposal?.dataset.memoryProposal === "discard") proposal.closest(".message")?.remove();
+    // 分寸账本（PR-signal-run）：反应窗 👍/👎（先到先得；👎原因必填）
+    const feedback = target.closest<HTMLButtonElement>("button[data-feedback-verdict]");
+    if (feedback?.dataset.feedbackRunId) {
+      const runId = feedback.dataset.feedbackRunId;
+      const verdict = feedback.dataset.feedbackVerdict as "up" | "down";
+      const reasonInput = document.querySelector<HTMLInputElement>(`[data-feedback-reason="${CSS.escape(runId)}"]`);
+      const reason = reasonInput?.value.trim();
+      if (verdict === "down" && !reason) { reasonInput?.focus(); reasonInput?.classList.add("is-error"); return; }
+      feedback.disabled = true;
+      const ok = sendPayload({ type: "feedback-run", runId, verdict, ...(reason ? { reason } : {}) });
+      if (ok) {
+        const row = feedback.closest(".ledger-feedback-row");
+        if (row) row.replaceChildren(textBlock(verdict === "up" ? "已记录：通过 ✓" : `已记录打回：「${reason}」`, "ledger-feedback-label"));
+      } else feedback.disabled = false;
+    }
   });
   document.getElementById("scenario-cards")?.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;

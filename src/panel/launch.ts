@@ -19,6 +19,7 @@ import { routeDomain, profileOf } from "@/domains/profile.js";
 import { migrateDomainLibraries } from "@/domains/migrate.js";
 import { migrateLedgers, applyGateEvents, confirmConstraints, proposeConstraint, emptyLedger, type Constraint } from "@/scenario/ledger.js";
 import { gateEventsFromApprovals } from "@/panel/gate-classify.js";
+import { inputDigest } from "@/scenario/digest.js";
 import { PanelServer, defaultPageHtml } from "@/panel/server.js";
 import { PanelHistory, PanelSessionSchema } from "@/panel/history.js";
 import { PanelSettingsSchema, PanelSettingsStore } from "@/panel/settings.js";
@@ -713,7 +714,7 @@ async function main(): Promise<void> {
         const untestedText = result.error === "model provider unavailable"
           ? "场景已加载，但模型 Provider 不可用；已保存未验证的执行记录，不会伪报完成。"
           : `场景已生成说明，但没有形成可验证的任务结果：${result.error ?? "缺少真实执行证据"}。`;
-        panel.pushChat({ role: "build-status", tone: ok ? "ok" : result.status === "untested" ? "info" : "err", runStatus: result.status === "succeeded" ? "succeeded" : result.status === "cancelled" ? "cancelled" : "failed", text: ok ? `场景执行完成 ✓ 已生成“${scenario.name} 工作结果.md”。` : result.status === "untested" ? untestedText : `场景执行失败：${result.error ?? "模型或步骤未通过"}。结果已保存，修复配置后可重试。`, terminal: true, runId: panelRunId ?? undefined, ts: Date.now() });
+        panel.pushChat({ role: "build-status", tone: ok ? "ok" : result.status === "untested" ? "info" : "err", runStatus: result.status === "succeeded" ? "succeeded" : result.status === "cancelled" ? "cancelled" : "failed", text: ok ? `场景执行完成 ✓ 已生成“${scenario.name} 工作结果.md”。` : result.status === "untested" ? untestedText : `场景执行失败：${result.error ?? "模型或步骤未通过"}。结果已保存，修复配置后可重试。`, terminal: true, runId: panelRunId ?? undefined, ...(ok ? { workRun: true } : {}), ts: Date.now() });
         await panel.refresh();
         // An untested run is a handled, auditable outcome. Keep it out of the
         // generic WS action-error path; the terminal chat card already says
@@ -733,6 +734,8 @@ async function main(): Promise<void> {
           launchBusy = false;
           return { ok: false, error: "scenario not found" };
         }
+        // 分寸账本：绑定实际执行的场景 + 输入 digest（反应窗结算读它）
+        if (panelRunId) panel.bindRunScenario(panelRunId, selected.id, inputDigest(requirement, _providedSlots ?? {}));
         return await executeSavedDefinition(selected);
       }
        const executionProject = executionProjectId ? await repository.getProject(executionProjectId) : undefined;
@@ -780,6 +783,8 @@ async function main(): Promise<void> {
           // 降级场景的显式重跑：告知风险但放行——成功一次即由治理自动解除降级
           if (match.degraded) pushRunChat({ role: "build-status", tone: "info", text: `场景“${match.scenario.name}”近期执行成功率较低，本次为你重试执行，成功后会自动解除降级。`, ts: Date.now() });
           pushRunChat({ role: "build-status", tone: "info", text: `已命中场景“${match.scenario.name}”，正在检查能力漂移并尝试真实工具执行……`, ts: Date.now() });
+          // 分寸账本：绑定 match 命中的场景 + 意图槽位 digest（反应窗结算读它）
+          if (panelRunId) panel.bindRunScenario(panelRunId, match.scenario.id, inputDigest(requirement, Object.fromEntries((parsedIntent.slots ?? []).map((s) => [s.name, s.value ?? ""]))));
           let reused: Awaited<ReturnType<typeof tryReuseScenario>>;
           try {
             reused = await tryReuseScenario({ library, scenario: match.scenario, requirement, intent: parsedIntent, search: searchForBuild, invoker: executionInvoker, checkpoint: () => controller.checkpoint(), signal: runAbort.signal });
@@ -788,7 +793,7 @@ async function main(): Promise<void> {
             throw error;
           }
           if (reused.handled) {
-            pushRunChat({ role: "build-status", tone: reused.ok ? "ok" : "err", text: reused.ok ? `真实能力执行完成 ✓ ${match.scenario.name}` : `真实能力执行失败：${reused.error ?? "能力调用未通过"}`, terminal: true, ts: Date.now() });
+            pushRunChat({ role: "build-status", tone: reused.ok ? "ok" : "err", text: reused.ok ? `真实能力执行完成 ✓ ${match.scenario.name}` : `真实能力执行失败：${reused.error ?? "能力调用未通过"}`, terminal: true, ...(reused.ok ? { workRun: true } : {}), ts: Date.now() });
             await panel.refresh();
             clearPlannerAbort();
             launchBusy = false;

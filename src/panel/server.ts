@@ -16,6 +16,8 @@ import { renderGateView } from "@/gates/views.js";
 import { classifyGateDecision, type GateProposalDraft } from "@/panel/gate-classify.js";
 import { memoryTree, type MemoryTreeNode } from "@/memory/memory.js";
 import { ScenarioRecordSchema, scenarioMatchesScope, scenarioNameFromRequirement, type ScenarioLibrary, type ScenarioRecord } from "@/scenario/library.js";
+import { proposeConstraint, recordRunOutcome, stripNegationPrefix, type ScenarioLedger } from "@/scenario/ledger.js";
+import { inputDigest } from "@/scenario/digest.js";
 import type { GoalLoop, LoopEvent } from "@/execution/loop.js";
 import type { ClusterEvent } from "@/execution/cluster.js";
 import type { RunController } from "@/execution/repair.js";
@@ -274,6 +276,7 @@ export const PanelActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("delete-scenario"), scenarioId: z.string().min(1), confirm: z.literal(true) }),
   z.object({ type: z.literal("import-scenario"), content: z.string().min(2).max(2_000_000) }),
   z.object({ type: z.literal("gate-decision"), decision: GateDecisionSchema, /** 闸5 签约面：用户取消勾选的提案 tempId（不签约，留 pendingConfirm） */ excludeProposals: z.array(z.string().min(1).max(60)).max(50).optional() }),
+  z.object({ type: z.literal("feedback-run"), runId: z.string().min(1), verdict: z.enum(["up", "down"]), reason: z.string().min(1).max(8_000).optional() }),
   z.object({ type: z.literal("control"), action: z.enum(["pause", "resume", "terminate"]) }),
   z.object({ type: z.literal("answer-run"), runId: z.string().min(1), values: z.record(z.string(), z.string().max(20_000)) }),
   z.object({ type: z.literal("guide-run"), instruction: z.string().min(2).max(8_000) }),
@@ -317,6 +320,8 @@ export interface PanelDeps {
   onStartLongRun?: (run: LongRun) => Promise<{ ok: boolean; error?: string }>;
   onControlLongRun?: (run: LongRun, action: "pause" | "resume" | "stop") => Promise<{ ok: boolean; error?: string }>;
   hostExecution?: HostExecutionStatus;
+  /** 反应窗时长（§12 沉默超时默认 10 分钟；测试注入缩短） */
+  feedbackWindowMs?: number;
   onTestScenario?: (scenarioId: string) => Promise<{ passed: boolean; skipped?: boolean; reason?: string; attempts: Array<{ inputs: Record<string, string>; passed: boolean; error?: string }> }>;
   /** SceneFlow 步骤级操作：单步编辑、独立重做当前步、级联重做后续依赖步骤 */
   onStepAction?: (payload: { runId: string; stepId: string; action: "edit" | "redo-single" | "redo-cascade"; updatedTitle?: string; updatedInstruction?: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -374,6 +379,12 @@ export class PanelServer {
   private excludedProposalIds: string[] = [];
   /** 最近各闸门载荷（闸3 候选名 → 分寸条款人话化） */
   private readonly gatePayloads = new Map<number, unknown>();
+  /** 分寸账本（PR-signal-run）：run 元数据（digest/attended/场景绑定），收尾结算用 */
+  private readonly runLedgerMeta = new Map<string, { scenarioId: string | null; digest: string; attended: boolean; mode: "work" | "build" }>();
+  /** 有人值守成功的反应窗（§12 沉默超时 10min，先到先得） */
+  private readonly pendingFeedback = new Map<string, { timer: ReturnType<typeof setTimeout>; scenarioId: string; digest: string; attended: boolean }>();
+  /** 运行中引导（guide-run）按 runId 归集：收尾 corrected + 提案 */
+  private readonly runGuidanceNotes = new Map<string, string[]>();
   readonly bus = new EventEmitter();
 
   /** Pause a work run at a missing required scenario input until the user
@@ -664,6 +675,91 @@ export class PanelServer {
     return seeds;
   }
 
+  /** launcher 在决定用哪个场景执行时绑定（match 命中路径 start-build 无 scenarioId） */
+  bindRunScenario(runId: string, scenarioId: string, digest?: string): void {
+    const meta = this.runLedgerMeta.get(runId);
+    if (meta) this.runLedgerMeta.set(runId, { ...meta, scenarioId, ...(digest ? { digest } : {}) });
+  }
+
+  /**
+   * 工作运行收尾（§5/§9/§12）：run 收尾一个事务。
+   * failed → rejected（失败自证，无人值守同样记）；cancelled → 不记（中止非验证）；
+   * 运行中有 guide → corrected + 提案；无人值守成功 → 只 runs++；
+   * 有人值守成功 → 10 分钟反应窗（👍/👎/guide/编辑先到先得，沉默超时 = 弱 accepted）。
+   */
+  private settleWorkRunLedgerOutcome(runId: string, terminalStatus: "succeeded" | "failed" | "cancelled"): void {
+    const meta = this.runLedgerMeta.get(runId);
+    this.runLedgerMeta.delete(runId);
+    if (!meta || meta.mode !== "work" || !meta.scenarioId || !this.deps.library) return;
+    const scenarioId = meta.scenarioId;
+    if (terminalStatus === "cancelled") return;
+    if (terminalStatus === "failed") {
+      void this.recordScenarioOutcome(scenarioId, { runId, attended: meta.attended, outcome: "rejected", digest: meta.digest });
+      return;
+    }
+    const guides = this.runGuidanceNotes.get(runId) ?? [];
+    this.runGuidanceNotes.delete(runId);
+    if (guides.length) {
+      void this.recordScenarioOutcome(scenarioId, { runId, attended: meta.attended, outcome: "corrected", digest: meta.digest, guides });
+      return;
+    }
+    if (!meta.attended) {
+      void this.recordScenarioOutcome(scenarioId, { runId, attended: false, outcome: "unattended-success", digest: meta.digest });
+      return;
+    }
+    const windowMs = this.deps.feedbackWindowMs ?? 10 * 60 * 1000;
+    const timer = setTimeout(() => {
+      this.pendingFeedback.delete(runId);
+      void this.recordScenarioOutcome(scenarioId, { runId, attended: true, outcome: "silent-accepted", digest: meta.digest });
+    }, windowMs);
+    if (typeof timer === "object" && "unref" in timer) timer.unref();
+    this.pendingFeedback.set(runId, { timer, scenarioId, digest: meta.digest, attended: true });
+  }
+
+  /** 账本结算：recordRunOutcome 原子事务 + guide 文本转 pendingConfirm 提案（§4 原话即条款） */
+  private async recordScenarioOutcome(
+    scenarioId: string,
+    params: { runId: string; attended: boolean; outcome: "accepted" | "rejected" | "corrected" | "silent-accepted" | "unattended-success"; digest: string; guides?: string[] },
+  ): Promise<void> {
+    const library = this.deps.library;
+    if (!library) return;
+    const at = new Date().toISOString();
+    await library
+      .updateLedger(scenarioId, (ledger) => {
+        let next = recordRunOutcome(ledger, {
+          runId: params.runId,
+          attended: params.attended,
+          outcome: params.outcome,
+          digest: params.digest,
+          at,
+          interventions: { gatesAnswered: 0, questionsAnswered: 0, correctionsGiven: params.guides?.length ?? 0 },
+        });
+        for (const guide of params.guides ?? []) {
+          const proposed = proposeConstraint(next, { clause: stripNegationPrefix(guide), scope: "output", origin: { type: "guide", text: guide, at, runId: params.runId } });
+          if (proposed) next = proposed.ledger;
+        }
+        return next as ScenarioLedger;
+      })
+      .catch(() => undefined);
+  }
+
+  /**
+   * 反应窗主动撤销（PR-edit-accept 的 revise-output 复用）：沉默 accepted 未落账时
+   * 先到先得——编辑优先于沉默（§7 竞态表）。返回 false = 窗口已关（沉默已入账）。
+   */
+  cancelFeedbackWindow(runId: string): { scenarioId: string; digest: string } | null {
+    const pending = this.pendingFeedback.get(runId);
+    if (!pending) return null;
+    clearTimeout(pending.timer);
+    this.pendingFeedback.delete(runId);
+    return { scenarioId: pending.scenarioId, digest: pending.digest };
+  }
+
+  /** 反馈窗口是否开着（客户端决定是否渲染 👍/👎 行） */
+  feedbackWindowOpen(runId: string): boolean {
+    return this.pendingFeedback.has(runId);
+  }
+
   /** 聊天历史（左栏对话；重连经快照恢复） */
   private readonly chatHistory: Array<Record<string, unknown>> = [];
   /** Full session history for persistence; chatHistory is only the render window. */
@@ -742,6 +838,9 @@ export class PanelServer {
       this.run = { ...this.run, status: terminalStatus, text: String(message.text ?? "") };
       const terminalRunId = this.run.runId;
       const terminalContext = this.deps.orchestrator?.ctx;
+      // 分寸账本（PR-signal-run）：工作运行收尾一个事务——失败自证记 rejected，
+      // 有人值守成功进反应窗（沉默超时=弱 accepted），无人值守成功只 runs++（§9）。
+      if (terminalRunId && this.run.kind === "work") this.settleWorkRunLedgerOutcome(terminalRunId, terminalStatus);
       if (this.deps.runs && terminalRunId) {
         void (async () => {
           const stored = await this.deps.runs?.get(terminalRunId);
@@ -2220,6 +2319,8 @@ export class PanelServer {
       const runModel = selectedProvider?.model ?? (action.mode === "build" ? providerSettings?.plannerModel ?? providerSettings?.model : providerSettings?.model) ?? "local-template";
       const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       this.run.runId = runId;
+      // 分寸账本（§6/§9）：digest 用于重放路由命中；attended 按触发源打标（task=无人值守）
+      this.runLedgerMeta.set(runId, { scenarioId: action.scenarioId ?? null, digest: inputDigest(action.requirement, action.slots ?? {}), attended: (action.source ?? "user") !== "task", mode: action.mode });
       await this.deps.runs?.create({ id: runId, workspaceId: this.workspace?.id ?? "workspace-local", projectId: executionProjectId, sessionId: this.sessionId, mode: action.mode, scenarioId: action.scenarioId ?? null, providerId: selectedProvider?.id ?? providerSettings?.providerId ?? null, model: runModel, status: "running", requirement: action.requirement.trim(), startedAt: new Date().toISOString(), finishedAt: null, error: null, retryCount: action.retryCount ?? 0, details: { source: action.source ?? "user" } });
       if (this.workspace && this.deps.memories) {
         const enabledMemoryCount = (await this.visibleMemories()).filter((item) => item.enabled).length;
@@ -2279,6 +2380,33 @@ export class PanelServer {
             /* 兜底失败只能放弃 */
           }
         });
+      return { ok: true };
+    }
+    if (action.type === "feedback-run") {
+      // §12 反应窗先到先得；§18 矩阵：👎 无 reason→400 / 重复 runId→409 幂等
+      if (action.verdict === "down" && !action.reason?.trim()) return { ok: false, error: "400: 👎 需要告诉它哪里不对（原因必填）" };
+      const pending = this.pendingFeedback.get(action.runId);
+      if (!pending) return { ok: false, error: "409: 该运行的反馈已处理或反应窗已关闭" };
+      clearTimeout(pending.timer);
+      this.pendingFeedback.delete(action.runId);
+      const at = new Date().toISOString();
+      await this.recordScenarioOutcome(pending.scenarioId, { runId: action.runId, attended: pending.attended, outcome: action.verdict === "up" ? "accepted" : "rejected", digest: pending.digest });
+      if (action.verdict === "down" && this.deps.library) {
+        // 👎+原因 = 分寸提案（output scope，pendingConfirm；签约面/过期机制同构建侧）
+        await this.deps.library
+          .updateLedger(pending.scenarioId, (ledger) => {
+            const proposed = proposeConstraint(ledger, { clause: stripNegationPrefix(action.reason!.trim()), scope: "output", origin: { type: "feedback", text: action.reason!.trim(), at, runId: action.runId } });
+            return proposed ? proposed.ledger : ledger;
+          })
+          .catch(() => undefined);
+      }
+      this.pushChat({
+        role: "build-status",
+        tone: action.verdict === "up" ? "ok" : "info",
+        text: action.verdict === "up" ? "已记录：这次结果通过。" : `已记录打回${action.reason ? `：「${action.reason.trim()}」` : ""}，连击清零；这条原因会沉淀为分寸候选。`,
+        ts: Date.now(),
+      });
+      await this.pushSnapshot();
       return { ok: true };
     }
     if (action.type === "gate-decision") {
@@ -2371,6 +2499,10 @@ export class PanelServer {
         this.deps.controller.guide(instruction);
       }
       this.pushChat({ role: "user", content: instruction, guidance: true, timestamp: Date.now() });
+      // 分寸账本（§8）：guide-run 纠正 = corrected 信号 + 提案素材（run 收尾入账）
+      const notes = this.runGuidanceNotes.get(this.run.runId) ?? [];
+      notes.push(instruction);
+      this.runGuidanceNotes.set(this.run.runId, notes);
       this.pushChat({ role: "build-status", tone: "info", text: "已收到运行中引导，将从下一个可执行步骤开始生效；当前正在执行的模型调用不会被篡改。", ts: Date.now(), runId: this.run.runId });
       await this.persistSession();
       await this.pushSnapshot();
