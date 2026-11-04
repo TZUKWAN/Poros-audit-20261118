@@ -4,6 +4,7 @@ import type { Store } from "@/core/store.js";
 import type { BuildContext } from "@/orchestrator/context.js";
 import { cosineSimilarity, type DistilledScenario, type IntentSignature, type SlotDef } from "@/distill/distill.js";
 import { ScenarioDefinitionSchema, type ScenarioDefinition } from "./definition.js";
+import { emptyLedger, ensureLedger as ensureLedgerOf, ScenarioLedgerSchema, type ScenarioLedger } from "./ledger.js";
 
 /**
  * 6.2 场景库：持久化 + 命中三档 + 填槽执行 + 漂移检测 + 治理指标。
@@ -42,6 +43,8 @@ export const ScenarioRecordSchema = z.object({
   tags: z.array(z.string().max(40)).default([]),
   /** SceneFlow 领域归属：core 通用 / ares 竞赛 / metis 学术（迁移自领域仓的记录带上原域标记） */
   domain: z.enum(["core", "ares", "metis"]).default("core"),
+  /** 分寸账本（§3）：约束/先例/统计；老记录缺省，读时折算补齐，启动迁移落盘 */
+  ledger: ScenarioLedgerSchema.optional(),
   versionHistory: z.array(z.object({ version: z.number().int().min(1), capabilityIds: z.array(z.string()), createdAt: z.string(), reason: z.string().default("updated") })).default([]),
   createdAt: z.string(),
 });
@@ -159,6 +162,29 @@ export class ScenarioLibrary {
     return await this.deps.store.entries().then((entries) => entries.map(([, v]) => ScenarioRecordSchema.parse(v)));
   }
 
+  /**
+   * 分寸账本唯一写入通道（§3）：store 锁外再按 id 串行排队（与 save 共用队列），
+   * read→fn→validate→write 原子；禁止任何调用方直接改 record.ledger。
+   * 老记录无账本时以折算账本为基底（migratedLedger）。
+   */
+  async updateLedger(id: string, fn: (ledger: ScenarioLedger) => ScenarioLedger): Promise<void> {
+    const previous = this.saveQueues.get(id) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
+      const record = await this.get(id);
+      if (!record) {
+        throw new ScenarioError({ code: ScenarioErrorCode.NOT_FOUND, message: `scenario ${id} not found`, phase: "executing" });
+      }
+      const next = ScenarioLedgerSchema.parse(fn(ensureLedgerOf(record)));
+      await this.saveInner({ ...record, ledger: next });
+    });
+    this.saveQueues.set(id, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.saveQueues.get(id) === operation) this.saveQueues.delete(id);
+    }
+  }
+
   async archive(id: string): Promise<boolean> {
     const scenario = await this.get(id);
     if (!scenario) return false;
@@ -181,29 +207,22 @@ export class ScenarioLibrary {
   }
 
   /** 6.2.2 命中三档：当前默认词袋签名阈值为 hit=0.7 / partial=0.3。 */
-  async match(signature: IntentSignature, scope?: ScenarioScope): Promise<{ tier: "hit" | "partial" | "miss"; scenario?: ScenarioRecord; score: number }> {
-    let best: { scenario: ScenarioRecord; score: number } | undefined;
-    // 治理死锁防护：degraded 场景不参与自动命中，但保留为 partial 候选——
-    // 否则降级场景永远无法被再次执行，成功率永远无法回升，降级即永久封禁。
-    let degradedBest: { scenario: ScenarioRecord; score: number } | undefined;
+  async match(signature: IntentSignature, scope?: ScenarioScope): Promise<{ tier: "hit" | "partial" | "miss"; scenario?: ScenarioRecord; score: number; degraded?: boolean }> {
+    let best: { scenario: ScenarioRecord; score: number; degraded: boolean } | undefined;
+    // 治理语义：degraded 场景仍参与匹配并可达 hit——工作模式是用户显式请求，
+    // 拦截它会让降级场景永远无法再次执行（成功率永远无法回升，死锁）。
+    // 自动化路径（定时任务）在调用侧依据 degraded 标记自行拒绝。
     for (const scenario of await this.list()) {
       if (scope && !scenarioMatchesScope(scenario, scope)) continue;
       if (scenario.status !== "active") continue;
       const score = this.scoreMatch(signature, scenario.distilled.signature as unknown as IntentSignature);
       const rank = scope?.projectId && scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && scenario.workspaceId === scope.workspaceId ? 1 : 0;
-      if (scenario.degraded) {
-        if (!degradedBest || score > degradedBest.score) degradedBest = { scenario, score };
-        continue;
-      }
       const bestRank = best ? (scope?.projectId && best.scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && best.scenario.workspaceId === scope.workspaceId ? 1 : 0) : -1;
-      if (!best || rank > bestRank || (rank === bestRank && score > best.score)) best = { scenario, score };
+      if (!best || rank > bestRank || (rank === bestRank && score > best.score)) best = { scenario, score, degraded: Boolean(scenario.degraded) };
     }
-    if (!best) {
-      if (degradedBest && degradedBest.score >= this.matchThresholds.partial) return { tier: "partial", scenario: degradedBest.scenario, score: degradedBest.score };
-      return { tier: "miss", score: 0 };
-    }
-    if (best.score >= this.matchThresholds.hit) return { tier: "hit", scenario: best.scenario, score: best.score };
-    if (best.score >= this.matchThresholds.partial) return { tier: "partial", scenario: best.scenario, score: best.score };
+    if (!best) return { tier: "miss", score: 0 };
+    if (best.score >= this.matchThresholds.hit) return { tier: "hit", scenario: best.scenario, score: best.score, degraded: best.degraded };
+    if (best.score >= this.matchThresholds.partial) return { tier: "partial", scenario: best.scenario, score: best.score, degraded: best.degraded };
     return { tier: "miss", score: best.score };
   }
 
@@ -324,6 +343,7 @@ export function recordFromDistilled(params: {
     capabilityIds: [...new Set(params.capabilityIds)],
     source: "built",
     approvals: params.ctx.approvals,
+    ledger: emptyLedger(),
     stats: { uses: 0, successes: 0, lastUsedAt: null, driftCount: 0 },
     degraded: false,
     status: "active",

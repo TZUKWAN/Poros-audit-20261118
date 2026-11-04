@@ -17,6 +17,7 @@ import { RunController } from "@/execution/repair.js";
 import { federatedSearchFactory } from "@/federation/factory.js";
 import { routeDomain, profileOf } from "@/domains/profile.js";
 import { migrateDomainLibraries } from "@/domains/migrate.js";
+import { migrateLedgers } from "@/scenario/ledger.js";
 import { PanelServer, defaultPageHtml } from "@/panel/server.js";
 import { PanelHistory, PanelSessionSchema } from "@/panel/history.js";
 import { PanelSettingsSchema, PanelSettingsStore } from "@/panel/settings.js";
@@ -140,6 +141,8 @@ async function main(): Promise<void> {
   // SceneFlow 领域合并：把 ares/metis 两仓遗留场景库一次性迁入统一库（非破坏，
   // 原数据根不动；幂等——来源根场景数与已迁移标记比对，无新增即跳过）。
   await migrateDomainLibraries(library);
+  // 分寸账本迁移（§3）：存量场景折算补齐 ledger（幂等，已有账本跳过）。
+  await migrateLedgers(library);
   // Older panel builds used the raw request as the scenario name and could
   // leave several identical labels in the library. Normalize those legacy
   // request-shaped names first, then add readable suffixes so selection
