@@ -16,6 +16,8 @@ interface GateCardMessage {
   approvalIndex?: number;
   stale?: boolean;
   decided?: { action: "approve" | "reject" | "edit"; targetPhase?: string };
+  /** 闸5 签约面（§14）：本轮构建攒下的分寸提案清单 */
+  ledgerProposals?: Array<{ tempId: string; clause: string; scope: string; kind: string; conflictWith?: string }>;
   ts?: number;
 }
 
@@ -1713,6 +1715,23 @@ function renderGateCard(message: GateCardMessage): HTMLElement {
   }
   const actions = node("div", "gate-actions");
   if (message.gate === 5) {
+    // 签约面（§14）：本轮你教了它 N 条分寸——默认全选，取消勾选 = 不签约（留 30 天过期）
+    if (message.ledgerProposals?.length) {
+      const ledgerBox = node("div", "gate-ledger-list");
+      ledgerBox.append(textBlock(`本轮构建你教了它 ${message.ledgerProposals.length} 条分寸：`, "gate-field-label"));
+      for (const proposal of message.ledgerProposals) {
+        const row = node("label", "gate-structured-row gate-ledger-row");
+        const checkbox = node("input") as HTMLInputElement;
+        checkbox.type = "checkbox";
+        checkbox.checked = true;
+        checkbox.dataset.ledgerProposal = proposal.tempId;
+        const kindLabel = proposal.kind === "must_contain" ? "标准" : "偏好";
+        row.append(checkbox, textBlock(`[${kindLabel}] ${proposal.clause}${proposal.conflictWith ? " ⚠ 与已有条款疑似冲突" : ""}`, "gate-field-label"));
+        ledgerBox.append(row);
+      }
+      ledgerBox.append(textBlock("勾选的条款会写进场景账本，下次运行自动检查。", "gate-ledger-hint"));
+      card.append(ledgerBox);
+    }
     const pin = node("button", "gate-approve"); pin.dataset.action = "pin"; pin.dataset.gate = String(message.gate); pin.textContent = "保存为场景";
     if (message.canPin === false) { pin.disabled = true; pin.textContent = "检查通过后保存"; pin.title = "还有检查没有通过，请先重新检查"; }
     const rerun = node("button", "gate-edit"); rerun.dataset.action = "rerun"; rerun.dataset.gate = String(message.gate); rerun.textContent = "重新检查一次";
@@ -2394,8 +2413,12 @@ function decide(gate: number, action: "approve" | "reject" | "edit" | "pin" | "r
     }
   }
   if (action === "reject" || action === "rerun") { decision.targetPhase = targets[gate] ?? "planning"; if (comment) decision.comment = comment; }
+  // 闸5 签约面：未勾选的提案不签约（服务端保留为 pendingConfirm，30 天未确认过期）
+  const excludeProposals = gate === 5
+    ? [...document.querySelectorAll<HTMLInputElement>("[data-ledger-proposal]")].filter((box) => !box.checked).map((box) => box.dataset.ledgerProposal ?? "").filter(Boolean)
+    : [];
   pendingDecisions.add(gate);
-  const sent = sendPayload({ type: "gate-decision", decision });
+  const sent = sendPayload({ type: "gate-decision", decision, ...(excludeProposals.length ? { excludeProposals } : {}) });
   if (!sent) pendingDecisions.delete(gate);
 }
 

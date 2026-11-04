@@ -265,6 +265,21 @@ export function bumpConstraintHits(ledger: ScenarioLedger, id: string): Scenario
 
 export type GateEventSummary = Partial<Record<GateNumber, { passes?: number; rejects?: number; edits?: number }>>;
 
+/** gateStats 合并（recordRunOutcome 与构建收尾共用） */
+export function applyGateEvents(ledger: ScenarioLedger, gateEvents: GateEventSummary, at: string = new Date().toISOString()): ScenarioLedger {
+  const gateStats = { ...ledger.gateStats };
+  for (const [gate, ev] of Object.entries(gateEvents)) {
+    const prev = gateStats[gate] ?? { passes: 0, rejects: 0, edits: 0, lastEventAt: at };
+    gateStats[gate] = {
+      passes: prev.passes + (ev.passes ?? 0),
+      rejects: prev.rejects + (ev.rejects ?? 0),
+      edits: prev.edits + (ev.edits ?? 0),
+      lastEventAt: at,
+    };
+  }
+  return { ...ledger, gateStats };
+}
+
 export type RunOutcomeParams = {
   runId: string;
   /** 无人值守：runs++ 可记 rejected，沉默绝不记 accepted、不推 consecutiveClean（§9） */
@@ -306,16 +321,7 @@ export function recordRunOutcome(ledger: ScenarioLedger, params: RunOutcomeParam
   if (negative || suspected) runStats.consecutiveClean = 0;
   else if (acceptedSemantics && params.attended) runStats.consecutiveClean += 1;
 
-  const gateStats = { ...ledger.gateStats };
-  for (const [gate, ev] of Object.entries(params.gateEvents ?? {})) {
-    const prev = gateStats[gate] ?? { passes: 0, rejects: 0, edits: 0, lastEventAt: at };
-    gateStats[gate] = {
-      passes: prev.passes + (ev.passes ?? 0),
-      rejects: prev.rejects + (ev.rejects ?? 0),
-      edits: prev.edits + (ev.edits ?? 0),
-      lastEventAt: at,
-    };
-  }
+  const gateStats = applyGateEvents(ledger, params.gateEvents ?? {}, at).gateStats;
 
   // inputPatterns 事件源（confidence 衰减计数 + 路由 digest 命中都读它）：
   // 有人值守 → 三种结果都记；无人值守 → 只记失败自证；suspected 不记。

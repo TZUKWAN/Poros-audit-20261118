@@ -13,6 +13,7 @@ import type { Orchestrator } from "@/orchestrator/state-machine.js";
 import type { WorkMissingInput } from "@/panel/work-execution.js";
 import type { BuildContext, BuildClarification } from "@/orchestrator/context.js";
 import { renderGateView } from "@/gates/views.js";
+import { classifyGateDecision, type GateProposalDraft } from "@/panel/gate-classify.js";
 import { memoryTree, type MemoryTreeNode } from "@/memory/memory.js";
 import { ScenarioRecordSchema, scenarioMatchesScope, scenarioNameFromRequirement, type ScenarioLibrary, type ScenarioRecord } from "@/scenario/library.js";
 import type { GoalLoop, LoopEvent } from "@/execution/loop.js";
@@ -272,7 +273,7 @@ export const PanelActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("restore-scenario"), scenarioId: z.string().min(1) }),
   z.object({ type: z.literal("delete-scenario"), scenarioId: z.string().min(1), confirm: z.literal(true) }),
   z.object({ type: z.literal("import-scenario"), content: z.string().min(2).max(2_000_000) }),
-  z.object({ type: z.literal("gate-decision"), decision: GateDecisionSchema }),
+  z.object({ type: z.literal("gate-decision"), decision: GateDecisionSchema, /** 闸5 签约面：用户取消勾选的提案 tempId（不签约，留 pendingConfirm） */ excludeProposals: z.array(z.string().min(1).max(60)).max(50).optional() }),
   z.object({ type: z.literal("control"), action: z.enum(["pause", "resume", "terminate"]) }),
   z.object({ type: z.literal("answer-run"), runId: z.string().min(1), values: z.record(z.string(), z.string().max(20_000)) }),
   z.object({ type: z.literal("guide-run"), instruction: z.string().min(2).max(8_000) }),
@@ -367,6 +368,12 @@ export class PanelServer {
   private interactiveBuild = true;
   /** 保留最近一次构建的最终上下文，避免终态事件与刷新之间丢失 DAG/trace。 */
   private lastBuildContext: BuildContext | undefined;
+  /** 分寸账本（PR-signal-build）：本次构建期间闸门产生的分寸提案（闸5 签约后入新场景账本） */
+  private buildLedgerProposals: Array<GateProposalDraft & { at: string; runId: string | null }> = [];
+  /** 闸5 签约面：用户取消勾选的提案 tempId */
+  private excludedProposalIds: string[] = [];
+  /** 最近各闸门载荷（闸3 候选名 → 分寸条款人话化） */
+  private readonly gatePayloads = new Map<number, unknown>();
   readonly bus = new EventEmitter();
 
   /** Pause a work run at a missing required scenario input until the user
@@ -561,6 +568,10 @@ export class PanelServer {
   attachOrchestrator(orch: Orchestrator, options: { interactive?: boolean } = {}): void {
     this.deps.orchestrator = orch;
     this.interactiveBuild = options.interactive ?? true;
+    // 新构建 = 新一页分寸（§2 数据流：闸门 reject/edit/guide 都是本构建的信号源）
+    this.buildLedgerProposals = [];
+    this.excludedProposalIds = [];
+    this.gatePayloads.clear();
     // Capture ownership when the orchestrator is attached. Reading the
     // mutable current run inside callbacks would retag a late event from an
     // old session as the newer run after navigation.
@@ -593,11 +604,16 @@ export class PanelServer {
     });
     orch.on("gate:pending", ({ request }) => {
       this.run = { ...this.run, kind: "build", status: this.interactiveBuild ? "waiting-gate" : "running" };
+      this.gatePayloads.set(request.gate, request.payload);
       if (!this.interactiveBuild) {
         void this.pushSnapshot();
         return;
       }
       const view = renderGateView(request.gate, request.payload);
+      // 闸5 签约面（§14）：把本轮构建攒下的分寸提案带给卡片（勾选清单由客户端渲染）
+      const ledgerProposals = request.gate === 5 && this.buildLedgerProposals.length
+        ? this.buildLedgerProposals.map((p) => ({ tempId: p.tempId, clause: p.clause, scope: p.scope, kind: p.kind, ...(p.conflictWith ? { conflictWith: p.conflictWith } : {}) }))
+        : undefined;
       this.pushChat(owned({
         role: "gate-card",
         gate: request.gate,
@@ -606,6 +622,7 @@ export class PanelServer {
         editSeed: editSeedFor(request.gate, request.context),
         canPin: request.gate !== 5 || canPinBuild(request.context),
         approvalIndex: request.context.approvals.length,
+        ...(ledgerProposals ? { ledgerProposals } : {}),
         decided: undefined,
         ts: Date.now(),
       }));
@@ -621,6 +638,30 @@ export class PanelServer {
   /** 构建完成后强制推送最新快照（场景库/Memory 生长可见） */
   async refresh(): Promise<void> {
     await this.pushSnapshot();
+  }
+
+  /** 闸3 候选载荷 → capabilityId → 人话名（分寸条款用，缺名回落 id） */
+  private capabilityNameMap(gate: number): Record<string, string> {
+    const payload = this.gatePayloads.get(gate) as Array<{ nodeId: string; candidates: Array<{ id: string; name: string }> }> | undefined;
+    if (!Array.isArray(payload)) return {};
+    const map: Record<string, string> = {};
+    for (const set of payload) for (const candidate of set.candidates ?? []) map[candidate.id] = candidate.name;
+    return map;
+  }
+
+  /**
+   * 分寸提案交接（§2 唯一写入点在 finishBuild）：launcher 在闸5 固化场景时取走
+   * 本轮攒下的提案（含排除清单过滤），拿去 propose+confirm 进新场景账本。取走即清空。
+   */
+  drainBuildLedgerProposals(): Array<GateProposalDraft & { at: string; runId: string | null }> {
+    const excluded = new Set(this.excludedProposalIds);
+    const seeds = this.buildLedgerProposals.filter((p) => !excluded.has(p.tempId));
+    const keptPending = this.buildLedgerProposals.filter((p) => excluded.has(p.tempId));
+    // 未签约的提案保留在 pending 侧（30 天未确认自动过期，§15），但不能再次入库——
+    // 这里交给调用方决定；面板侧只保留本次未签约清单供后续构建继续累积确认语义。
+    this.buildLedgerProposals = keptPending;
+    this.excludedProposalIds = [];
+    return seeds;
   }
 
   /** 聊天历史（左栏对话；重连经快照恢复） */
@@ -2243,10 +2284,30 @@ export class PanelServer {
     if (action.type === "gate-decision") {
       const orch = this.deps.orchestrator;
       if (!orch) return { ok: false, error: "no orchestrator attached" };
+      // 分类在 decide 之前做：需要决策前的选型/验收快照做 diff（§4）
+      const classifyContext = {
+        previousSelections: orch.ctx.selections.map((s) => ({ nodeId: s.nodeId, capabilityId: s.capabilityId })),
+        previousAcceptance: orch.ctx.acceptance.map((a) => ({ layer: a.layer, passed: a.passed })),
+        nodeTitles: Object.fromEntries(((orch.ctx.dag as { nodes?: Array<{ id?: string; title?: string }> } | null)?.nodes ?? []).map((n) => [String(n.id ?? ""), String(n.title ?? n.id ?? "")])),
+        capabilityNames: this.capabilityNameMap(3),
+      };
+      const classification = classifyGateDecision(action.decision, classifyContext);
+      const at = new Date().toISOString();
+      const runId = this.run.runId ?? null;
+      for (const draft of classification.proposals) this.buildLedgerProposals.push({ ...draft, at, runId });
+      if (action.decision.gate === 5 && action.excludeProposals) this.excludedProposalIds = [...action.excludeProposals];
       try {
         await orch.decide(action.decision);
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+      if (classification.proposals.length) {
+        this.pushChat({
+          role: "build-status",
+          tone: "info",
+          text: `已记下 ${classification.proposals.length} 条分寸候选：${classification.proposals.map((p) => `「${p.clause}」`).join("、")}。保存场景时可在闸门5确认。`,
+          ts: Date.now(),
+        });
       }
       if (action.decision.action !== "edit") {
         this.markGateCardDecided(action.decision.gate, action.decision.action, action.decision.targetPhase);

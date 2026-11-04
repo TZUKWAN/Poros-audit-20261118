@@ -17,7 +17,8 @@ import { RunController } from "@/execution/repair.js";
 import { federatedSearchFactory } from "@/federation/factory.js";
 import { routeDomain, profileOf } from "@/domains/profile.js";
 import { migrateDomainLibraries } from "@/domains/migrate.js";
-import { migrateLedgers } from "@/scenario/ledger.js";
+import { migrateLedgers, applyGateEvents, confirmConstraints, proposeConstraint, emptyLedger, type Constraint } from "@/scenario/ledger.js";
+import { gateEventsFromApprovals } from "@/panel/gate-classify.js";
 import { PanelServer, defaultPageHtml } from "@/panel/server.js";
 import { PanelHistory, PanelSessionSchema } from "@/panel/history.js";
 import { PanelSettingsSchema, PanelSettingsStore } from "@/panel/settings.js";
@@ -441,6 +442,34 @@ async function main(): Promise<void> {
     const modelName = selected?.model ?? providerSettings.model;
     return { model: new ModelClient({ baseUrl, apiKey: apiKey ?? "", model: modelName, fallbackModel: providerSettings.fallbackModel, temperature: providerSettings.temperature, maxTokens: providerSettings.maxTokens, reasoningEffort: "low", timeoutMs: selected?.timeoutMs ?? providerSettings.timeoutMs, streaming: providerSettings.streaming }), providerId: selected?.id ?? providerSettings.providerId, modelName };
   };
+  /**
+   * 分寸账本（PR-signal-build）：闸5 pin 时把本轮闸门攒下的分寸提案签约入新场景账本。
+   * 质量门槛/去重由 proposeConstraint 兜底；闸5 签约 = 批量填 confirmedAt（§14）；
+   * 本轮闸门事件（approve/edit/reject）一并计入 gateStats。
+   */
+  const attachBuildLedger = (scenario: ScenarioRecord, final: BuildContext): { scenario: ScenarioRecord; signed: Constraint[] } => {
+    const seeds = panel.drainBuildLedgerProposals();
+    let ledger = scenario.ledger ?? emptyLedger();
+    const confirmedIds: string[] = [];
+    const signed: Constraint[] = [];
+    for (const seed of seeds) {
+      const proposed = proposeConstraint(ledger, {
+        clause: seed.clause,
+        scope: seed.scope,
+        kind: seed.kind,
+        pattern: seed.pattern,
+        origin: { type: seed.originType, text: seed.originText, at: seed.at, runId: seed.runId },
+      });
+      if (proposed) {
+        ledger = proposed.ledger;
+        confirmedIds.push(proposed.constraint.id);
+        signed.push(proposed.constraint);
+      }
+    }
+    ledger = applyGateEvents(ledger, gateEventsFromApprovals(final.approvals));
+    ledger = confirmConstraints(ledger, confirmedIds);
+    return { scenario: { ...scenario, ledger }, signed };
+  };
   const finishBuild = async (final: BuildContext, requirement: string, runPlanner: unknown, buildId: string, binding?: RunBinding): Promise<void> => {
     // A clarification is a resumable suspension, not a terminal build
     // result. The orchestrator and PanelServer have already persisted/rendered
@@ -451,10 +480,14 @@ async function main(): Promise<void> {
     const distilled = final.distilled ? (final.distilled as Awaited<ReturnType<typeof distill>>) : await distill(final);
     const id = `sc-${buildId}`;
     let savedScenario: ScenarioRecord | undefined;
+    let signedLedgerConstraints: Constraint[] = [];
     if (shouldPin) {
       const existingNames = (await library.list()).map((scenario) => scenario.name);
       savedScenario = recordFromDistilled({ id, name: scenarioNameFromRequirement(requirement, existingNames), ctx: final, distilled, capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))], workspaceId: binding?.workspaceId ?? null, projectId: binding?.projectId ?? null });
       savedScenario.definition = definitionFromBuild(requirement, final);
+      const seeded = attachBuildLedger(savedScenario, final);
+      savedScenario = seeded.scenario;
+      signedLedgerConstraints = seeded.signed;
       await library.save(savedScenario);
     }
     const memorySettings = await settings.get();
@@ -468,7 +501,9 @@ async function main(): Promise<void> {
       if (await runs.get(binding.runId)) await runs.update(binding.runId, { tokenCount: usage.totalTokens, cost });
     }
     const sessionMemoryPath = path.join(memoryPaths(memoryRoot).sessions, `${final.id}.md`);
-    const sessionMemoryContent = sessionMemoryMd(final);
+    // §13 Memory 边界唯一交点：条款签约时同步写一行 memory（反向：memory 永不变条款）
+    const ledgerMemorySuffix = signedLedgerConstraints.map((c) => `[ledger] 新增约束 ${c.id}: ${c.clause}`).join("\n");
+    const sessionMemoryContent = ledgerMemorySuffix ? `${sessionMemoryMd(final)}\n\n${ledgerMemorySuffix}\n` : sessionMemoryMd(final);
     if (memorySettings.autoMemory) {
       await writeFile(sessionMemoryPath, sessionMemoryContent, "utf8");
       if (binding?.workspaceId) {
@@ -496,7 +531,7 @@ async function main(): Promise<void> {
         });
       }
     }
-    panel.pushChat({ role: "build-status", tone: shouldPin ? "ok" : "err", runStatus: shouldPin ? "succeeded" : "failed", runId: binding?.runId ?? undefined, error: shouldPin ? undefined : `构建结束但未固化：${final.outcome}`, text: shouldPin ? `构建完成 ✓ 场景已固化为「${savedScenario?.name ?? "新场景"}」（v1）。定义检查已通过，首次工作运行会继续验证外部能力。` : `构建结束但未固化：定义或流程检查未通过（${final.outcome}）。`, terminal: true, ts: Date.now() });
+    panel.pushChat({ role: "build-status", tone: shouldPin ? "ok" : "err", runStatus: shouldPin ? "succeeded" : "failed", runId: binding?.runId ?? undefined, error: shouldPin ? undefined : `构建结束但未固化：${final.outcome}`, text: shouldPin ? `构建完成 ✓ 场景已固化为「${savedScenario?.name ?? "新场景"}」（v1）。定义检查已通过，首次工作运行会继续验证外部能力。${signedLedgerConstraints.length ? `已签约 ${signedLedgerConstraints.length} 条分寸进账本。` : ""}` : `构建结束但未固化：定义或流程检查未通过（${final.outcome}）。`, terminal: true, ts: Date.now() });
     await panel.refresh();
   };
 
@@ -949,6 +984,7 @@ async function main(): Promise<void> {
           const distilled = final.distilled ? (final.distilled as Awaited<ReturnType<typeof distill>>) : await distill(final);
           const id = `sc-${buildId}`;
           let savedScenario: ScenarioRecord | undefined;
+          let signedLedgerConstraints: Constraint[] = [];
           if (shouldPin) {
             const existingNames = (await library.list()).map((scenario) => scenario.name);
             savedScenario = recordFromDistilled({
@@ -965,6 +1001,9 @@ async function main(): Promise<void> {
             // no definition after a normal build and silently fell back to
             // the generic three-step local definition on its first run.
             savedScenario.definition = definitionFromBuild(requirement, final);
+            const seeded = attachBuildLedger(savedScenario, final);
+            savedScenario = seeded.scenario;
+            signedLedgerConstraints = seeded.signed;
             await library.save(savedScenario);
           }
           const memorySettings = await settings.get();
@@ -975,7 +1014,8 @@ async function main(): Promise<void> {
             if (await runs.get(runBinding.runId)) await runs.update(runBinding.runId, { tokenCount: usage.totalTokens, cost });
           }
           const sessionMemoryPath = path.join(memoryPaths(memoryRoot).sessions, `${final.id}.md`);
-          const sessionMemoryContent = sessionMemoryMd(final);
+          const ledgerMemorySuffix = signedLedgerConstraints.map((c) => `[ledger] 新增约束 ${c.id}: ${c.clause}`).join("\n");
+          const sessionMemoryContent = ledgerMemorySuffix ? `${sessionMemoryMd(final)}\n\n${ledgerMemorySuffix}\n` : sessionMemoryMd(final);
           if (memorySettings.autoMemory) {
             await writeFile(sessionMemoryPath, sessionMemoryContent, "utf8");
             if (runBinding.workspaceId) {
@@ -1025,7 +1065,7 @@ async function main(): Promise<void> {
           }
           panel.pushChat({
             role: "build-status", tone: shouldPin ? "ok" : "err", runStatus: shouldPin ? "succeeded" : "failed", error: shouldPin ? undefined : `构建结束但未固化：${final.outcome}`,
-            text: shouldPin ? `构建完成 ✓ 场景已固化为「${savedScenario?.name ?? "新场景"}」（v1），会话已写入 Memory。` : `构建结束但未固化：验收或执行未全部通过（${final.outcome}）。`, terminal: true, runId: panelRunId ?? undefined,
+            text: shouldPin ? `构建完成 ✓ 场景已固化为「${savedScenario?.name ?? "新场景"}」（v1），会话已写入 Memory。${signedLedgerConstraints.length ? `已签约 ${signedLedgerConstraints.length} 条分寸进账本。` : ""}` : `构建结束但未固化：验收或执行未全部通过（${final.outcome}）。`, terminal: true, runId: panelRunId ?? undefined,
             ts: Date.now(),
           });
           await panel.refresh();

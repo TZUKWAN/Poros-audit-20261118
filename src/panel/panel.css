@@ -2852,3 +2852,64 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
   color: var(--claude-muted) !important;
   font-size: 12.5px !important;
 }
+
+/* ============================================================
+   Phase U · 分寸账本（docs/分寸账本改造方案.md）
+   闸5 签约面 / 黄标 / 角标 / 曲线 —— 变量绑定 --claude-*，双主题通用
+   ============================================================ */
+
+.gate-ledger-list {
+  margin: 10px 0 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--claude-line);
+  border-radius: 10px;
+  background: var(--claude-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gate-ledger-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+.gate-ledger-row input[type="checkbox"] {
+  margin-top: 3px;
+  accent-color: var(--claude-accent, #c9694b);
+  flex: none;
+}
+.gate-ledger-hint {
+  color: var(--claude-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+/* 自检未满足黄标（PR-route-check 启用，样式先行） */
+.status-card.ledger-flagged {
+  border-left: 3px solid #d9a441 !important;
+}
+.ledger-unmet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #d9a441 14%, transparent);
+  color: #a97b1f;
+  font-size: 12.5px;
+}
+[data-theme="dark"] .ledger-unmet { color: #d9b96a; }
+/* 产出已由用户修订角标（PR-edit-accept 启用，样式先行） */
+.revised-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--claude-line);
+  color: var(--claude-muted);
+  font-size: 11.5px;
+  vertical-align: middle;
+}
