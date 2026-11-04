@@ -1066,6 +1066,20 @@ async function main(): Promise<void> {
           if (buildWasClarified) return;
           // 只有真实执行与三层验收全部通过、且闸门5明确选择 pin 时才固化。
           const shouldPin = final.outcome === "completed" && final.finalizeChoice === "pin";
+          // §6 回退：重规划未固化（规划器异常/用户放弃）→ 旧计划兜底直接执行 + 交付卡标注
+          if (replanTargetScenarioId && !shouldPin) {
+            const fallbackId = replanTargetScenarioId;
+            replanTargetScenarioId = null;
+            const cached = await library.get(fallbackId).catch(() => undefined);
+            if (cached) {
+              pushRunChat({ role: "build-status", tone: "info", text: "重规划未完成，回退旧计划直接执行（旧计划兜底）。", ts: Date.now() });
+              clearPlannerAbort();
+              await executeSavedDefinition(cached);
+              await panel.refresh();
+              launchBusy = false;
+              return { ok: true };
+            }
+          }
           const distilled = final.distilled ? (final.distilled as Awaited<ReturnType<typeof distill>>) : await distill(final);
           const id = `sc-${buildId}`;
           let savedScenario: ScenarioRecord | undefined;

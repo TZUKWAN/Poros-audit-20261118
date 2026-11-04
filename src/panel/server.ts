@@ -388,6 +388,8 @@ export class PanelServer {
   private buildLedgerScenarioId: string | null = null;
   /** 已在本构建内自动通过的闸门（一次性防循环） */
   private readonly autoPassedGates = new Set<number>();
+  /** §7 步骤行编辑计数（runId:stepId → 次数；第二次改写升级分寸提案） */
+  private readonly stepEditCounts = new Map<string, number>();
   /** 分寸账本（PR-signal-run）：run 元数据（digest/attended/场景绑定），收尾结算用 */
   private readonly runLedgerMeta = new Map<string, { scenarioId: string | null; digest: string; attended: boolean; mode: "work" | "build" }>();
   /** 有人值守成功的反应窗（§12 沉默超时 10min，先到先得） */
@@ -655,6 +657,17 @@ export class PanelServer {
           }
         }
       }
+      // §14 签约面下半：已生效条款（重规划场景才有账本）——hits 可见，可退役
+      let ledgerExisting: Array<{ id: string; clause: string; kind: string; hits: number }> | undefined;
+      let ledgerExistingScenarioId: string | undefined;
+      if (request.gate === 5 && this.buildLedgerScenarioId && this.deps.library) {
+        const record = await this.deps.library.get(this.buildLedgerScenarioId).catch(() => undefined);
+        const active = record?.ledger ? activeConstraints(record.ledger) : [];
+        if (active.length) {
+          ledgerExisting = active.slice(0, 12).map((c) => ({ id: c.id, clause: c.clause, kind: c.kind, hits: c.hits }));
+          ledgerExistingScenarioId = this.buildLedgerScenarioId ?? undefined;
+        }
+      }
       const view = (() => {
         try {
           return renderGateView(request.gate, request.payload);
@@ -676,6 +689,7 @@ export class PanelServer {
         canPin: request.gate !== 5 || canPinBuild(request.context),
         approvalIndex: request.context.approvals.length,
         ...(ledgerProposals ? { ledgerProposals } : {}),
+        ...(ledgerExisting ? { ledgerExisting, ledgerExistingScenarioId } : {}),
         decided: undefined,
         ts: Date.now(),
       }));
@@ -1859,6 +1873,8 @@ export class PanelServer {
       this.activeMode = "work";
       this.activeScenarioId = scenario.id;
       this.run = { kind: "work", status: "running", runId: run.id, scenarioId: scenario.id, text: `长程场景：${scenario.name}` };
+      // §9 无人值守规则：长程运行按触发源打标——沉默绝不推连胜
+      this.runLedgerMeta.set(run.id, { scenarioId: scenario.id, digest: inputDigest(run.goal, run.slots ?? {}), attended: false, mode: "work" });
       // Long-run creation bypasses the ordinary start-build path, so echo
       // the user's requirement explicitly. Without this message the chat
       // stream starts with AI progress, the session remains titled “新对话",
@@ -1940,6 +1956,25 @@ export class PanelServer {
     }
     if (action.type === "step-action") {
       if (!this.deps.onStepAction) return { ok: false, error: "步骤操作未接入" };
+      // §7 其余编辑点位：指令措辞变 = 缓存更新（onStepAction 内）；
+      // 同一步骤第二次人工改写 → 升级 capability 偏好提案（教学→分寸的升级线）
+      if (action.action === "edit") {
+        const editKey = `${action.runId}:${action.stepId}`;
+        const count = (this.stepEditCounts.get(editKey) ?? 0) + 1;
+        this.stepEditCounts.set(editKey, count);
+        if (count >= 2 && action.updatedInstruction && this.deps.library) {
+          const scenarioId = this.runLedgerMeta.get(action.runId)?.scenarioId ?? this.run.scenarioId ?? null;
+          if (scenarioId) {
+            const clause = stripNegationPrefix(action.updatedInstruction.trim().split(/\r?\n/)[0]!.slice(0, 120));
+            await this.deps.library
+              .updateLedger(scenarioId, (ledger) => {
+                const proposed = proposeConstraint(ledger, { clause: `步骤「${action.stepId}」应按此方式执行：${clause}`, scope: "capability", origin: { type: "gate-edit", text: action.updatedInstruction!.slice(0, 300), at: new Date().toISOString(), runId: action.runId } });
+                return proposed ? proposed.ledger : ledger;
+              })
+              .catch(() => undefined);
+          }
+        }
+      }
       return await this.deps.onStepAction(action);
     }
     if (action.type === "create-memory") {

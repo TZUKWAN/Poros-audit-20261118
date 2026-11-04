@@ -18,6 +18,9 @@ interface GateCardMessage {
   decided?: { action: "approve" | "reject" | "edit"; targetPhase?: string };
   /** 闸5 签约面（§14）：本轮构建攒下的分寸提案清单 */
   ledgerProposals?: Array<{ tempId: string; clause: string; scope: string; kind: string; conflictWith?: string }>;
+  /** 闸5 签约面下半：已生效条款（重规划场景账本），hits 可见、可退役 */
+  ledgerExisting?: Array<{ id: string; clause: string; kind: string; hits: number }>;
+  ledgerExistingScenarioId?: string;
   ts?: number;
 }
 
@@ -1844,6 +1847,18 @@ function renderGateCard(message: GateCardMessage): HTMLElement {
       ledgerBox.append(textBlock("勾选的条款会写进场景账本，下次运行自动检查。", "gate-ledger-hint"));
       card.append(ledgerBox);
     }
+    if (message.ledgerExisting?.length) {
+      const existing = node("div", "gate-ledger-list");
+      existing.append(textBlock(`已生效条款（${message.ledgerExisting.length}）`, "gate-field-label"));
+      for (const constraint of message.ledgerExisting) {
+        const row = node("div", "gate-structured-row gate-ledger-row");
+        row.append(textBlock(`[${constraint.kind === "advisory" ? "偏好" : "标准"}] ${constraint.clause} · 命中 ${constraint.hits}`, "gate-field-label"));
+        const retire = node("button", "gate-reject"); retire.type = "button"; retire.dataset.retireConstraint = constraint.id; retire.dataset.retireScenario = message.ledgerExistingScenarioId ?? ""; retire.textContent = "退役";
+        row.append(retire);
+        existing.append(row);
+      }
+      card.append(existing);
+    }
     const pin = node("button", "gate-approve"); pin.dataset.action = "pin"; pin.dataset.gate = String(message.gate); pin.textContent = "保存为场景";
     if (message.canPin === false) { pin.disabled = true; pin.textContent = "检查通过后保存"; pin.title = "还有检查没有通过，请先重新检查"; }
     const rerun = node("button", "gate-edit"); rerun.dataset.action = "rerun"; rerun.dataset.gate = String(message.gate); rerun.textContent = "重新检查一次";
@@ -3531,6 +3546,8 @@ function mount(): void {
           if (!ok) { save.disabled = false; save.textContent = "保存修订"; return; }
           const box = area.closest(".ledger-revise-box");
           if (box) box.replaceChildren(textBlock("已由你修订 ✓ 分寸候选已沉淀。", "ledger-feedback-label"));
+          const badgeHost = reviseBtn.closest(".status-card");
+          if (badgeHost && !badgeHost.querySelector(".revised-badge")) badgeHost.append(textBlock("已由你修订", "revised-badge"));
         }, 1500);
       });
       const cancel = node("button", "gate-reject") as HTMLButtonElement;
