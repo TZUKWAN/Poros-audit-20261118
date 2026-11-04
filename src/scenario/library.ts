@@ -207,8 +207,12 @@ export class ScenarioLibrary {
     return true;
   }
 
-  /** 6.2.2 命中三档：当前默认词袋签名阈值为 hit=0.7 / partial=0.3。 */
-  async match(signature: IntentSignature, scope?: ScenarioScope): Promise<{ tier: "hit" | "partial" | "miss"; scenario?: ScenarioRecord; score: number; degraded?: boolean }> {
+  /**
+   * 6.2.2 命中三档：词袋签名阈值为 hit=0.7 / partial=0.3。
+   * requirementHint（原始需求文本）兜底：LLM 每次解析的关键词/改写目标会漂移，
+   * 同一文本的原始字面相似度是最稳的复用信号（0.9×token Jaccard，同一需求 ≈0.9 ≥ hit）。
+   */
+  async match(signature: IntentSignature, scope?: ScenarioScope, requirementHint?: string): Promise<{ tier: "hit" | "partial" | "miss"; scenario?: ScenarioRecord; score: number; degraded?: boolean }> {
     let best: { scenario: ScenarioRecord; score: number; degraded: boolean } | undefined;
     // 治理语义：degraded 场景仍参与匹配并可达 hit——工作模式是用户显式请求，
     // 拦截它会让降级场景永远无法再次执行（成功率永远无法回升，死锁）。
@@ -216,7 +220,9 @@ export class ScenarioLibrary {
     for (const scenario of await this.list()) {
       if (scope && !scenarioMatchesScope(scenario, scope)) continue;
       if (scenario.status !== "active") continue;
-      const score = this.scoreMatch(signature, scenario.distilled.signature as unknown as IntentSignature);
+      const base = this.scoreMatch(signature, scenario.distilled.signature as unknown as IntentSignature);
+      const hintScore = requirementHint ? 0.9 * jaccardTokens(requirementHint, scenario.goal) : 0;
+      const score = Math.max(base, hintScore);
       const rank = scope?.projectId && scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && scenario.workspaceId === scope.workspaceId ? 1 : 0;
       const bestRank = best ? (scope?.projectId && best.scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && best.scenario.workspaceId === scope.workspaceId ? 1 : 0) : -1;
       if (!best || rank > bestRank || (rank === bestRank && score > best.score)) best = { scenario, score, degraded: Boolean(scenario.degraded) };
@@ -308,6 +314,19 @@ export class ScenarioLibrary {
     }
     return { drifted, switched, newVersion: scenario.pinnedVersion };
   }
+}
+
+/** 原文 token Jaccard（match 的字面兜底信号） */
+function jaccardTokens(a: string, b: string): number {
+  const tokens = (t: string): Set<string> => new Set(
+    t.toLowerCase().replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).match(/[\p{L}\p{N}]+/gu) ?? [],
+  );
+  const sa = tokens(a);
+  const sb = tokens(b);
+  if (sa.size === 0 || sb.size === 0) return 0;
+  let inter = 0;
+  for (const x of sa) if (sb.has(x)) inter += 1;
+  return inter / (sa.size + sb.size - inter);
 }
 
 function jaccard(a: string[], b: string[]): number {

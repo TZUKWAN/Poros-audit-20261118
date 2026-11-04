@@ -825,7 +825,7 @@ async function main(): Promise<void> {
       let match: Awaited<ReturnType<typeof library.match>>;
       try {
         const signature = await intentSignature(parsedIntent.goal, parsedIntent.keywords);
-        match = await library.match(signature, { workspaceId: panel.currentWorkspaceId, projectId: executionProjectId });
+        match = await library.match(signature, { workspaceId: panel.currentWorkspaceId, projectId: executionProjectId }, requirement);
       } catch (error) {
         clearPlannerAbort();
         launchBusy = false;
