@@ -500,7 +500,7 @@ async function main(): Promise<void> {
         savedScenario = {
           ...existing,
           pinnedVersion: existing.pinnedVersion + 1,
-          distilled: { slotDefs: distilled.slotDefs, branches: distilled.branches, acceptanceTemplates: distilled.acceptanceTemplates, signature: distilled.signature, buildId: distilled.buildId, pinnedVersion: distilled.pinnedVersion },
+          distilled: { slotDefs: distilled.slotDefs, branches: distilled.branches, acceptanceTemplates: distilled.acceptanceTemplates, signature: distilled.signature, sourceSignature: existing.distilled.sourceSignature, buildId: distilled.buildId, pinnedVersion: distilled.pinnedVersion },
           capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))],
         };
         savedScenario.definition = definitionFromBuild(requirement, final);
@@ -1085,17 +1085,30 @@ async function main(): Promise<void> {
           let savedScenario: ScenarioRecord | undefined;
           let signedLedgerConstraints: Constraint[] = [];
           if (shouldPin) {
-            const existingNames = (await library.list()).map((scenario) => scenario.name);
-            savedScenario = recordFromDistilled({
-              id,
-              name: scenarioNameFromRequirement(requirement, existingNames),
-              ctx: final,
-              distilled,
-              capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))],
-              workspaceId: runBinding.workspaceId,
-              projectId: runBinding.projectId,
-              sourceSignature: await intentSignature(requirement, []),
-            });
+            const replanId = runBinding.replanScenarioId ?? null;
+            runBinding.replanScenarioId = null;
+            const replanExisting = replanId ? await library.get(replanId).catch(() => undefined) : undefined;
+            if (replanExisting) {
+              // 计划是缓存（§0 铁律 2）：重规划整个换掉计划，账本不动；版本+1 留痕
+              savedScenario = {
+                ...replanExisting,
+                pinnedVersion: replanExisting.pinnedVersion + 1,
+                distilled: { slotDefs: distilled.slotDefs, branches: distilled.branches, acceptanceTemplates: distilled.acceptanceTemplates, signature: distilled.signature, sourceSignature: replanExisting.distilled.sourceSignature, buildId: distilled.buildId, pinnedVersion: distilled.pinnedVersion },
+                capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))],
+              };
+            } else {
+              const existingNames = (await library.list()).map((scenario) => scenario.name);
+              savedScenario = recordFromDistilled({
+                id,
+                name: scenarioNameFromRequirement(requirement, existingNames),
+                ctx: final,
+                distilled,
+                capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))],
+                workspaceId: runBinding.workspaceId,
+                projectId: runBinding.projectId,
+                sourceSignature: await intentSignature(requirement, []),
+              });
+            }
             // Keep a runnable definition on the live build path as well as
             // the restart-recovery helper. Without this, a pinned scene had
             // no definition after a normal build and silently fell back to
