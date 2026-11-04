@@ -508,7 +508,7 @@ async function main(): Promise<void> {
         await library.save(savedScenario);
       } else {
         const existingNames = (await library.list()).map((scenario) => scenario.name);
-        savedScenario = recordFromDistilled({ id, name: scenarioNameFromRequirement(requirement, existingNames), ctx: final, distilled, capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))], workspaceId: binding?.workspaceId ?? null, projectId: binding?.projectId ?? null });
+        savedScenario = recordFromDistilled({ id, name: scenarioNameFromRequirement(requirement, existingNames), ctx: final, distilled, capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))], workspaceId: binding?.workspaceId ?? null, projectId: binding?.projectId ?? null, sourceSignature: await intentSignature(requirement, []) });
         savedScenario.definition = definitionFromBuild(requirement, final);
         const seeded = attachBuildLedger(savedScenario, final);
         savedScenario = seeded.scenario;
@@ -1094,6 +1094,7 @@ async function main(): Promise<void> {
               capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))],
               workspaceId: runBinding.workspaceId,
               projectId: runBinding.projectId,
+              sourceSignature: await intentSignature(requirement, []),
             });
             // Keep a runnable definition on the live build path as well as
             // the restart-recovery helper. Without this, a pinned scene had

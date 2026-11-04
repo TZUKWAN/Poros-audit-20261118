@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ScenarioError, ScenarioErrorCode } from "@/core/errors.js";
 import type { Store } from "@/core/store.js";
 import type { BuildContext } from "@/orchestrator/context.js";
-import { cosineSimilarity, type DistilledScenario, type IntentSignature, type SlotDef } from "@/distill/distill.js";
+import { cosineSimilarity, intentSignature, type DistilledScenario, type IntentSignature, type SlotDef } from "@/distill/distill.js";
 import { ScenarioDefinitionSchema, type ScenarioDefinition } from "./definition.js";
 import { emptyLedger, ensureLedger as ensureLedgerOf, ScenarioLedgerSchema, type ScenarioLedger } from "./ledger.js";
 import { confidence } from "./confidence.js";
@@ -24,6 +24,8 @@ export const ScenarioRecordSchema = z.object({
     branches: z.array(z.any()),
     acceptanceTemplates: z.array(z.any()),
     signature: z.object({ keywords: z.array(z.string()), embedding: z.array(z.number()), embedVia: z.string() }),
+    /** 原始需求（LLM 改写 goal 前）的签名——复用匹配的原文兜底信号（老记录缺省） */
+    sourceSignature: z.object({ keywords: z.array(z.string()), embedding: z.array(z.number()), embedVia: z.string() }).optional(),
     buildId: z.string(),
     pinnedVersion: z.number(),
   }),
@@ -214,6 +216,7 @@ export class ScenarioLibrary {
    */
   async match(signature: IntentSignature, scope?: ScenarioScope, requirementHint?: string): Promise<{ tier: "hit" | "partial" | "miss"; scenario?: ScenarioRecord; score: number; degraded?: boolean }> {
     let best: { scenario: ScenarioRecord; score: number; degraded: boolean } | undefined;
+    let hintSig: IntentSignature | undefined;
     // 治理语义：degraded 场景仍参与匹配并可达 hit——工作模式是用户显式请求，
     // 拦截它会让降级场景永远无法再次执行（成功率永远无法回升，死锁）。
     // 自动化路径（定时任务）在调用侧依据 degraded 标记自行拒绝。
@@ -221,7 +224,13 @@ export class ScenarioLibrary {
       if (scope && !scenarioMatchesScope(scenario, scope)) continue;
       if (scenario.status !== "active") continue;
       const base = this.scoreMatch(signature, scenario.distilled.signature as unknown as IntentSignature);
-      const hintScore = requirementHint ? 0.9 * jaccardTokens(requirementHint, scenario.goal) : 0;
+      let hintScore = 0;
+      if (requirementHint) {
+        hintScore = 0.9 * jaccardTokens(requirementHint, scenario.goal);
+        const sourceSig = scenario.distilled.sourceSignature as IntentSignature | undefined;
+        if (sourceSig && !hintSig) hintSig = await intentSignature(requirementHint, []);
+        if (sourceSig) hintScore = Math.max(hintScore, 0.9 * cosineSimilarity(hintSig!.embedding, sourceSig.embedding));
+      }
       const score = Math.max(base, hintScore);
       const rank = scope?.projectId && scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && scenario.workspaceId === scope.workspaceId ? 1 : 0;
       const bestRank = best ? (scope?.projectId && best.scenario.projectId === scope.projectId ? 2 : scope?.workspaceId && best.scenario.workspaceId === scope.workspaceId ? 1 : 0) : -1;
@@ -348,6 +357,8 @@ export function recordFromDistilled(params: {
   workspaceId?: string | null;
   projectId?: string | null;
   now?: Date;
+  /** 原始需求签名（LLM 改写 goal 前的字面），复用匹配的原文兜底 */
+  sourceSignature?: { keywords: string[]; embedding: number[]; embedVia: string };
 }): ScenarioRecord {
   return {
     workspaceId: params.workspaceId ?? null,
@@ -361,6 +372,7 @@ export function recordFromDistilled(params: {
       branches: params.distilled.branches,
       acceptanceTemplates: params.distilled.acceptanceTemplates,
       signature: params.distilled.signature,
+      ...(params.sourceSignature ? { sourceSignature: params.sourceSignature } : {}),
       buildId: params.distilled.buildId,
       pinnedVersion: params.distilled.pinnedVersion,
     },
