@@ -699,6 +699,12 @@ export class PanelServer {
     if (!meta || meta.mode !== "work" || !meta.scenarioId || !this.deps.library) return;
     const scenarioId = meta.scenarioId;
     if (terminalStatus === "cancelled") return;
+    // suspected（自检仍违规）：不进反应窗、不记 accepted——断连胜且两侧计数都不动（§10）
+    if (this.suspectedRuns.has(runId)) {
+      this.suspectedRuns.delete(runId);
+      void this.recordScenarioOutcome(scenarioId, { runId, attended: meta.attended, outcome: "suspected", digest: meta.digest });
+      return;
+    }
     if (terminalStatus === "failed") {
       void this.recordScenarioOutcome(scenarioId, { runId, attended: meta.attended, outcome: "rejected", digest: meta.digest });
       return;
@@ -724,7 +730,7 @@ export class PanelServer {
   /** 账本结算：recordRunOutcome 原子事务 + guide 文本转 pendingConfirm 提案（§4 原话即条款） */
   private async recordScenarioOutcome(
     scenarioId: string,
-    params: { runId: string; attended: boolean; outcome: "accepted" | "rejected" | "corrected" | "silent-accepted" | "unattended-success"; digest: string; guides?: string[] },
+    params: { runId: string; attended: boolean; outcome: "accepted" | "rejected" | "corrected" | "silent-accepted" | "unattended-success" | "suspected"; digest: string; guides?: string[] },
   ): Promise<void> {
     const library = this.deps.library;
     if (!library) return;
@@ -763,6 +769,12 @@ export class PanelServer {
   /** 反馈窗口是否开着（客户端决定是否渲染 👍/👎 行） */
   feedbackWindowOpen(runId: string): boolean {
     return this.pendingFeedback.has(runId);
+  }
+
+  /** 自检仍违规（§10）：run 标 suspected——断连胜但不写 accepted/rejected/corrected */
+  private readonly suspectedRuns = new Set<string>();
+  markRunSuspected(runId: string): void {
+    this.suspectedRuns.add(runId);
   }
 
   /** 聊天历史（左栏对话；重连经快照恢复） */

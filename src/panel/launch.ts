@@ -17,7 +17,10 @@ import { RunController } from "@/execution/repair.js";
 import { federatedSearchFactory } from "@/federation/factory.js";
 import { routeDomain, profileOf } from "@/domains/profile.js";
 import { migrateDomainLibraries } from "@/domains/migrate.js";
-import { migrateLedgers, applyGateEvents, confirmConstraints, proposeConstraint, emptyLedger, type Constraint } from "@/scenario/ledger.js";
+import { migrateLedgers, applyGateEvents, confirmConstraints, proposeConstraint, emptyLedger, ensureLedger, activeConstraints, bumpConstraintHits, type Constraint } from "@/scenario/ledger.js";
+import { runSelfCheck, repairPrompt } from "@/panel/selfcheck.js";
+import { resolveRoute } from "@/panel/route.js";
+import { templateA, templateB } from "@/panel/prompts.js";
 import { gateEventsFromApprovals } from "@/panel/gate-classify.js";
 import { inputDigest } from "@/scenario/digest.js";
 import { PanelServer, defaultPageHtml } from "@/panel/server.js";
@@ -448,6 +451,10 @@ async function main(): Promise<void> {
    * 质量门槛/去重由 proposeConstraint 兜底；闸5 签约 = 批量填 confirmedAt（§14）；
    * 本轮闸门事件（approve/edit/reject）一并计入 gateStats。
    */
+  // §6 双路路由（full 档）：重规划命中既有场景时，收尾更新它而不是新建副本；
+  // 约束模板 A/B 注入重规划上下文（计划是缓存，账本不动）。
+  let replanTargetScenarioId: string | null = null;
+  let replanConstraintText = "";
   const attachBuildLedger = (scenario: ScenarioRecord, final: BuildContext): { scenario: ScenarioRecord; signed: Constraint[] } => {
     const seeds = panel.drainBuildLedgerProposals();
     let ledger = scenario.ledger ?? emptyLedger();
@@ -483,13 +490,33 @@ async function main(): Promise<void> {
     let savedScenario: ScenarioRecord | undefined;
     let signedLedgerConstraints: Constraint[] = [];
     if (shouldPin) {
-      const existingNames = (await library.list()).map((scenario) => scenario.name);
-      savedScenario = recordFromDistilled({ id, name: scenarioNameFromRequirement(requirement, existingNames), ctx: final, distilled, capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))], workspaceId: binding?.workspaceId ?? null, projectId: binding?.projectId ?? null });
-      savedScenario.definition = definitionFromBuild(requirement, final);
-      const seeded = attachBuildLedger(savedScenario, final);
-      savedScenario = seeded.scenario;
-      signedLedgerConstraints = seeded.signed;
-      await library.save(savedScenario);
+      const replanId = replanTargetScenarioId;
+      replanTargetScenarioId = null;
+      const existing = replanId ? await library.get(replanId) : undefined;
+      if (existing) {
+        // 计划是缓存（§0 铁律 2）：重规划整个换掉计划，账本不动；版本+1 留痕
+        savedScenario = {
+          ...existing,
+          pinnedVersion: existing.pinnedVersion + 1,
+          distilled: { slotDefs: distilled.slotDefs, branches: distilled.branches, acceptanceTemplates: distilled.acceptanceTemplates, signature: distilled.signature, buildId: distilled.buildId, pinnedVersion: distilled.pinnedVersion },
+          capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))],
+        };
+        savedScenario.definition = definitionFromBuild(requirement, final);
+        const seeded = attachBuildLedger(savedScenario, final);
+        savedScenario = seeded.scenario;
+        signedLedgerConstraints = seeded.signed;
+        await library.save(savedScenario);
+      } else {
+        const existingNames = (await library.list()).map((scenario) => scenario.name);
+        savedScenario = recordFromDistilled({ id, name: scenarioNameFromRequirement(requirement, existingNames), ctx: final, distilled, capabilityIds: [...new Set(final.selections.map((s) => s.capabilityId))], workspaceId: binding?.workspaceId ?? null, projectId: binding?.projectId ?? null });
+        savedScenario.definition = definitionFromBuild(requirement, final);
+        const seeded = attachBuildLedger(savedScenario, final);
+        savedScenario = seeded.scenario;
+        signedLedgerConstraints = seeded.signed;
+        await library.save(savedScenario);
+      }
+    } else {
+      replanTargetScenarioId = null;
     }
     const memorySettings = await settings.get();
     const usage = (runPlanner as { lastUsage?: { totalTokens: number } }).lastUsage;
@@ -709,12 +736,45 @@ async function main(): Promise<void> {
           await library.execute(scenario.id, providedSlots, async () => ({ ok: result.status === "succeeded" }));
         }
         await library.updateExecutionValidation(scenario.id, result.validation, runId, definition);
+        // §10 产出自检（spot/full）：机械→judge→修复≤1轮；仍违规→黄标交付+suspected
+        let unmetClauses: string[] = [];
+        let suspectedRun = false;
+        const routingMode = (await settings.get()).routingMode;
+        if (routingMode !== "legacy" && result.status === "succeeded" && result.artifactContent) {
+          const fresh = await library.get(scenario.id);
+          const activeOnes = fresh?.ledger ? activeConstraints(fresh.ledger) : [];
+          if (activeOnes.length) {
+            const check = await runSelfCheck({
+              constraints: activeOnes,
+              output: result.artifactContent,
+              judge: workModel.model ? (system, input) => workModel.model!.complete(system, input, { signal: runAbort.signal }).then((r) => r.text) : undefined,
+              repair: workModel.model
+                ? async (violations, output) => {
+                    const revised = await workModel.model!.complete("你是修订助手。", repairPrompt(violations, output), { signal: runAbort.signal });
+                    return revised.text;
+                  }
+                : undefined,
+            });
+            if (check.repairedOutput) {
+              await writeFile(artifactPath, check.repairedOutput, "utf8");
+              result = { ...result, artifactContent: check.repairedOutput };
+            }
+            if (check.violations.length) {
+              unmetClauses = check.violations.map((violation) => violation.clause);
+              suspectedRun = true;
+              if (panelRunId) panel.markRunSuspected(panelRunId);
+            }
+            for (const violation of check.violations) {
+              await library.updateLedger(scenario.id, (ledger) => bumpConstraintHits(ledger, violation.id)).catch(() => undefined);
+            }
+          }
+        }
         const ok = result.status === "succeeded";
         const handled = ok || result.status === "untested";
         const untestedText = result.error === "model provider unavailable"
           ? "场景已加载，但模型 Provider 不可用；已保存未验证的执行记录，不会伪报完成。"
           : `场景已生成说明，但没有形成可验证的任务结果：${result.error ?? "缺少真实执行证据"}。`;
-        panel.pushChat({ role: "build-status", tone: ok ? "ok" : result.status === "untested" ? "info" : "err", runStatus: result.status === "succeeded" ? "succeeded" : result.status === "cancelled" ? "cancelled" : "failed", text: ok ? `场景执行完成 ✓ 已生成“${scenario.name} 工作结果.md”。` : result.status === "untested" ? untestedText : `场景执行失败：${result.error ?? "模型或步骤未通过"}。结果已保存，修复配置后可重试。`, terminal: true, runId: panelRunId ?? undefined, ...(ok ? { workRun: true } : {}), ts: Date.now() });
+        panel.pushChat({ role: "build-status", tone: ok ? "ok" : result.status === "untested" ? "info" : "err", runStatus: result.status === "succeeded" ? "succeeded" : result.status === "cancelled" ? "cancelled" : "failed", text: ok ? `场景执行完成 ✓ 已生成“${scenario.name} 工作结果.md”。` : result.status === "untested" ? untestedText : `场景执行失败：${result.error ?? "模型或步骤未通过"}。结果已保存，修复配置后可重试。`, terminal: true, runId: panelRunId ?? undefined, ...(ok ? { workRun: true } : {}), ...(unmetClauses.length ? { unmet: unmetClauses, suspected: suspectedRun } : {}), ts: Date.now() });
         await panel.refresh();
         // An untested run is a handled, auditable outcome. Keep it out of the
         // generic WS action-error path; the terminal chat card already says
@@ -747,6 +807,8 @@ async function main(): Promise<void> {
         runPlanner.setAbortSignal(runAbort.signal);
       }
       const parsedIntent = await parseIntentForReuse(runPlanner, requirement);
+      // 分寸账本灰度（§16）：legacy 只记不用；spot 自检；full 双路路由+体检
+      const routingMode = (await settings.get()).routingMode;
       // SceneFlow 真流式：目标叙述逐字上屏到进度卡（增强能力，任何失败静默）
       if (typeof runPlanner.narrateGoal === "function") {
         void runPlanner
@@ -783,8 +845,23 @@ async function main(): Promise<void> {
           // 降级场景的显式重跑：告知风险但放行——成功一次即由治理自动解除降级
           if (match.degraded) pushRunChat({ role: "build-status", tone: "info", text: `场景“${match.scenario.name}”近期执行成功率较低，本次为你重试执行，成功后会自动解除降级。`, ts: Date.now() });
           pushRunChat({ role: "build-status", tone: "info", text: `已命中场景“${match.scenario.name}”，正在检查能力漂移并尝试真实工具执行……`, ts: Date.now() });
+          const runDigest = inputDigest(requirement, Object.fromEntries((parsedIntent.slots ?? []).map((s) => [s.name, s.value ?? ""])));
           // 分寸账本：绑定 match 命中的场景 + 意图槽位 digest（反应窗结算读它）
-          if (panelRunId) panel.bindRunScenario(panelRunId, match.scenario.id, inputDigest(requirement, Object.fromEntries((parsedIntent.slots ?? []).map((s) => [s.name, s.value ?? ""]))));
+          if (panelRunId) panel.bindRunScenario(panelRunId, match.scenario.id, runDigest);
+          // §6 双路路由（full 档）：tier × digest 命中 × 强制体检 × degraded → 重放 or 重规划
+          const route = routingMode === "full" ? resolveRoute(ensureLedger(match.scenario), { degraded: match.degraded, digest: runDigest }) : null;
+          if (route && route.mode === "replan") {
+            // 重规划：整个换掉计划（计划是缓存），账本不动；约束/先例注入规划上下文
+            replanTargetScenarioId = match.scenario.id;
+            const ledgerOfMatch = ensureLedger(match.scenario);
+            const parts = [templateA(activeConstraints(ledgerOfMatch)), templateB(ledgerOfMatch.inputPatterns)].filter(Boolean);
+            replanConstraintText = parts.join("\n\n");
+            pushRunProgress("planning", route.healthCheck
+              ? "强制体检：这个场景已连续重放多次，重新规划一次以检查世界是否变化……"
+              : `分寸账本判定本次重新规划（${route.reason}）……`);
+          } else {
+            if (route) pushRunChat({ role: "build-status", tone: "info", text: `分寸账本判定重放（${route.reason}）`, ts: Date.now() });
+          pushRunChat({ role: "build-status", tone: "info", text: `已命中场景“${match.scenario.name}”，正在检查能力漂移并尝试真实工具执行……`, ts: Date.now() });
           let reused: Awaited<ReturnType<typeof tryReuseScenario>>;
           try {
             reused = await tryReuseScenario({ library, scenario: match.scenario, requirement, intent: parsedIntent, search: searchForBuild, invoker: executionInvoker, checkpoint: () => controller.checkpoint(), signal: runAbort.signal });
@@ -802,12 +879,13 @@ async function main(): Promise<void> {
           pushRunChat({ role: "build-status", tone: "info", text: "场景能力当前不可直接复用，将进入模型工作步骤；结果会明确标记缺少真实工具证据。", ts: Date.now() });
           clearPlannerAbort();
           return await executeSavedDefinition(match.scenario);
+          }
         }
         pushRunProgress("planning", `发现已有场景“${match.scenario.name}”，构建模式将重新检查流程并更新定义，不在构建阶段执行外部工具。`);
       } else if (match.tier === "partial" && match.scenario) {
          pushRunProgress("planning", `发现相近场景 ${match.scenario.id}（相似度 ${(match.score * 100).toFixed(0)}%），将结合当前需求重新规划。`);
       }
-      if (mode === "work") {
+      if (mode === "work" && !replanTargetScenarioId) {
         // Keep the user's original requirement attached to the terminal
         // outcome so the UI can offer a one-click, lossless hand-off into
         // construction. Requiring the user to retype a long request here is
@@ -973,7 +1051,7 @@ async function main(): Promise<void> {
         const connectorRefs = workspaceId ? (await connectors.list(workspaceId)).map((connector) => ({ id: connector.id, name: connector.name, kind: connector.kind, permissionScopes: connector.permissionScopes, status: connector.status })) : [];
         const desktopContexts = workspaceId ? (await contexts.list(workspaceId, projectId)).filter((context) => context.enabled).slice(0, 20).map((context) => ({ id: context.id, kind: context.kind, origin: context.origin, label: context.label, content: context.content })) : [];
         const selected = await workspaceProvider(project?.providerId ?? providerSettings.providerId);
-        return { projectId, projectInstructions: project?.instructions ?? "", files: fileRefs, memories: memoryRefs, connectors: connectorRefs, desktopContexts, provider: { id: selected?.id ?? project?.providerId ?? providerSettings.providerId ?? null, baseUrl: selected?.baseUrl ?? providerSettings.baseUrl, model: selected?.model ?? providerSettings.plannerModel ?? providerSettings.model, timeoutMs: selected?.timeoutMs ?? providerSettings.timeoutMs } };
+        return { projectId, projectInstructions: [project?.instructions ?? "", replanConstraintText].filter(Boolean).join("\n\n"), files: fileRefs, memories: memoryRefs, connectors: connectorRefs, desktopContexts, provider: { id: selected?.id ?? project?.providerId ?? providerSettings.providerId ?? null, baseUrl: selected?.baseUrl ?? providerSettings.baseUrl, model: selected?.model ?? providerSettings.plannerModel ?? providerSettings.model, timeoutMs: selected?.timeoutMs ?? providerSettings.timeoutMs } };
       })();
       orch.start(requirement, buildId, runtimeContext, "construction");
       // R5+ 收尾：start 之后的异常不得再报"构建启动失败"——orchestrator 已在跑、

@@ -2973,3 +2973,9 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
   font-family: inherit;
 }
 .ledger-revise-area:focus { outline: none; border-color: var(--claude-accent, #c9694b); }
+.ledger-unmet-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}

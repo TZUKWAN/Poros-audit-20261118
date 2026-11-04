@@ -19,6 +19,8 @@ export const PanelSettingsSchema = z.object({
   useHistory: z.boolean().default(true),
   autoMemory: z.boolean().default(true),
   temporarySession: z.boolean().default(false),
+  /** 分寸账本灰度（§16）：legacy 只记不用 / spot 自检启用 / full 双路路由+体检 */
+  routingMode: z.enum(["legacy", "spot", "full"]).default("legacy"),
 });
 export type PanelSettings = z.infer<typeof PanelSettingsSchema>;
 
@@ -38,6 +40,7 @@ export const PanelSettingsPatchSchema = z.object({
   useHistory: z.boolean().optional(),
   autoMemory: z.boolean().optional(),
   temporarySession: z.boolean().optional(),
+  routingMode: z.enum(["legacy", "spot", "full"]).optional(),
 });
 export type PanelSettingsPatch = z.infer<typeof PanelSettingsPatchSchema>;
 
@@ -54,6 +57,7 @@ export interface PublicPanelSettings {
   useHistory: boolean;
   autoMemory: boolean;
   temporarySession: boolean;
+  routingMode: "legacy" | "spot" | "full";
   providerId: string | null;
   streaming: boolean;
   syncEndpoint: string | null;
@@ -143,6 +147,7 @@ export class PanelSettingsStore {
       useHistory: value.useHistory,
       autoMemory: value.autoMemory,
       temporarySession: value.temporarySession,
+      routingMode: value.routingMode,
       providerId: value.providerId,
       streaming: value.streaming,
       syncEndpoint: value.syncEndpoint,

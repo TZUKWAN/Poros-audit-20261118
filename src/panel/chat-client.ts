@@ -32,6 +32,9 @@ interface BuildStatusMessage {
   workRun?: boolean;
   runId?: string;
   runStatus?: string;
+  /** 自检未满足条款（§10 黄标） */
+  unmet?: string[];
+  suspected?: boolean;
   ts?: number;
 }
 
@@ -1574,6 +1577,12 @@ function renderMessage(message: Record<string, unknown>): HTMLElement {
         revise.type = "button"; revise.dataset.reviseOutput = runIdForCard; revise.textContent = "修改产出";
         feedback.append(revise);
         card.append(feedback);
+      }
+      // 自检黄标（§10）：仍违规的条款带标注交付，不阻断
+      if (status.unmet?.length) {
+        const flags = node("div", "ledger-unmet-wrap");
+        for (const clause of status.unmet) flags.append(textBlock(`未满足：${clause}`, "ledger-unmet"));
+        card.append(flags);
       }
       body.append(card);
     }
