@@ -1055,6 +1055,9 @@ async function main(): Promise<void> {
         const selected = await workspaceProvider(project?.providerId ?? providerSettings.providerId);
         return { projectId, projectInstructions: [project?.instructions ?? "", runBinding.replanConstraintText ?? ""].filter(Boolean).join("\n\n"), files: fileRefs, memories: memoryRefs, connectors: connectorRefs, desktopContexts, provider: { id: selected?.id ?? project?.providerId ?? providerSettings.providerId ?? null, baseUrl: selected?.baseUrl ?? providerSettings.baseUrl, model: selected?.model ?? providerSettings.plannerModel ?? providerSettings.model, timeoutMs: selected?.timeoutMs ?? providerSettings.timeoutMs } };
       })();
+      // attachOrchestrator 会重置抽查态闸门状态，且 attach 发生在 match 之后——
+      // 这里在 start 前补绑重规划目标（match 分支设置的值被 attach 清掉了）
+      if (runBinding.replanScenarioId) panel.setBuildLedgerScenarioId(runBinding.replanScenarioId);
       orch.start(requirement, buildId, runtimeContext, "construction");
       // R5+ 收尾：start 之后的异常不得再报"构建启动失败"——orchestrator 已在跑、
       // 自带 .catch 会如实报告结局，假失败消息 + 真实成功终态自相矛盾。
