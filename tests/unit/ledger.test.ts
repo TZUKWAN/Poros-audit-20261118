@@ -19,7 +19,7 @@ import {
   type ScenarioLedger,
 } from "@/scenario/ledger";
 import { confidence, tierOf, tierOfLedger, countEvents, decay } from "@/scenario/confidence";
-import { emptyDigest, inputDigest, normalizeSlotValue } from "@/scenario/digest";
+import { inputDigest, normalizeSlotValue } from "@/scenario/digest";
 
 function baseRecord(stats: Partial<ScenarioRecord["stats"]> = {}): ScenarioRecord {
   return ScenarioRecordSchema.parse({
@@ -225,9 +225,10 @@ describe("§6 digest", () => {
     expect(inputDigest("", { a: "1", b: "2" })).toBe(inputDigest("", { b: "2", a: "1" }));
   });
 
-  it("空 slots 恒定（永远命中）", () => {
-    expect(inputDigest("任何需求都不影响", {})).toBe(emptyDigest());
-    expect(inputDigest("x", {})).toBe(emptyDigest());
+  it("空 slots：同需求恒定、异需求不同（LLM 解析漂移不影响 digest）", () => {
+    expect(inputDigest("同一份需求文本", {})).toBe(inputDigest("同一份需求文本", {}));
+    expect(inputDigest("需求甲", {})).not.toBe(inputDigest("需求乙", {}));
+    expect(inputDigest("需求Ａ！", {})).toBe(inputDigest("需求a", {})); // 全角/标点归一
   });
 
   it("不同 slots 值 → 不同 digest", () => {
