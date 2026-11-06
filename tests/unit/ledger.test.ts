@@ -225,14 +225,18 @@ describe("§6 digest", () => {
     expect(inputDigest("", { a: "1", b: "2" })).toBe(inputDigest("", { b: "2", a: "1" }));
   });
 
-  it("空 slots：同需求恒定、异需求不同（LLM 解析漂移不影响 digest）", () => {
+  it("槽位名/数量/值漂移不影响 digest（LLM 解析不稳定，digest 只锚定原文）", () => {
+    expect(inputDigest("需求", { feedback_content: "x" })).toBe(inputDigest("需求", { feedback: "y", content_type: "z" }));
+    expect(inputDigest("需求", { a: "1" })).toBe(inputDigest("需求", {}));
+  });
+  it("同需求恒定、异需求不同、全角标点归一", () => {
     expect(inputDigest("同一份需求文本", {})).toBe(inputDigest("同一份需求文本", {}));
     expect(inputDigest("需求甲", {})).not.toBe(inputDigest("需求乙", {}));
-    expect(inputDigest("需求Ａ！", {})).toBe(inputDigest("需求a", {})); // 全角/标点归一
+    expect(inputDigest("需求Ａ！", {})).toBe(inputDigest("需求a", {}));
   });
 
-  it("不同 slots 值 → 不同 digest", () => {
-    expect(inputDigest("", { path: "/a" })).not.toBe(inputDigest("", { path: "/b" }));
+  it("原文措辞不同 → 不同 digest（参数区分由原文承担）", () => {
+    expect(inputDigest("整理A报告", {})).not.toBe(inputDigest("整理B报告", {}));
   });
 });
 

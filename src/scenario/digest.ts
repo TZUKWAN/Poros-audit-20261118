@@ -26,13 +26,15 @@ export function normalizeRequirementText(text: string): string {
 
 /**
  * 同一场景同参数 → 恒定 digest（重放命中的依据）。
- * 归一化原文为主源 + slots 排序归一化拼接为辅。
+ * **只锚定归一化原文**——实机根因（2026-11-07 调试日志定位）：LLM 逐次解析的
+ * 槽位名（feedback_content/feedback/customer_feedback…）**和数量、值摘要都漂移**，
+ * 任何 slots 参与散列都会让同一需求每次 digest 不同，重放路由与强制体检因此
+ * 永不命中。参数区分改由「归一化原文」承担——同一场景的请求差异本就体现在
+ * 原文措辞上，措辞不同 → 保守重规划，语义安全。goal 不参与（match 层管）。
  */
-export function inputDigest(requirement: string, slots: Record<string, string>): string {
-  const reqPart = normalizeRequirementText(requirement);
-  const keys = Object.keys(slots).sort();
-  const slotPart = keys.map((k) => `${k}:${normalizeSlotValue(slots[k] ?? "")}`).join("|");
-  return createHash("sha1").update(`${reqPart}|${slotPart}`).digest("hex");
+export function inputDigest(requirement: string, _slots?: Record<string, string>): string {
+  void _slots; // 槽位刻意不参与——LLM 解析漂移（名/数量/值摘要皆不稳定）
+  return createHash("sha1").update(normalizeRequirementText(requirement)).digest("hex");
 }
 
 /** 无 slots 场景：digest = 归一化原文（同需求恒定，永远命中——drift 由 goal/match 层管） */
