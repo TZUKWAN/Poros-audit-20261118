@@ -3040,3 +3040,35 @@ fieldset.scope-field input[type="checkbox"] { width: 14px !important; height: 14
 .ledger-constraint-row:hover { background: color-mix(in srgb, var(--claude-accent, #c9694b) 7%, transparent); }
 .ledger-constraint-row .session-action { opacity: 0; transition: opacity 140ms ease; }
 .ledger-constraint-row:hover .session-action { opacity: 1; }
+
+/* ── 两角色模型 UI：生命周期三栏/信任报告/经营头条 ── */
+.ledger-retired-fold { margin-top: 4px; }
+.ledger-retired-fold > summary { color: var(--claude-muted); font-size: 12px; cursor: pointer; padding: 2px 0; }
+.ledger-retired-row { opacity: 0.6; }
+.ledger-report-row { margin-top: 6px; }
+/* 经营头条（顶栏下方一行，seller 视角） */
+.ledger-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 5px 14px;
+  margin: 0 auto;
+  max-width: 800px;
+  font-size: 12px;
+  color: var(--claude-muted);
+}
+.ledger-headline-item { display: inline-flex; align-items: center; gap: 3px; }
+.ledger-headline-item strong { color: var(--claude-ink); font-weight: 600; }
+.ledger-headline-trend-down { color: #4a9d5f; font-weight: 600; }
+.ledger-headline-trend-up { color: #c0392b; font-weight: 600; }
+.ledger-headline-report {
+  border: 1px solid var(--claude-line);
+  background: transparent;
+  color: var(--claude-muted);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ledger-headline-report:hover { border-color: var(--claude-accent, #c9694b); color: var(--claude-ink); }

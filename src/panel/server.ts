@@ -16,7 +16,7 @@ import { renderGateView } from "@/gates/views.js";
 import { classifyGateDecision, type GateProposalDraft } from "@/panel/gate-classify.js";
 import { memoryTree, type MemoryTreeNode } from "@/memory/memory.js";
 import { ScenarioRecordSchema, scenarioMatchesScope, scenarioNameFromRequirement, type ScenarioLibrary, type ScenarioRecord } from "@/scenario/library.js";
-import { proposeConstraint, recordRunOutcome, stripNegationPrefix, applyOutputCorrection, ensureLedger as ensureLedgerOf, activeConstraints, pendingConstraints, confirmConstraints, retireConstraint, type ScenarioLedger, type RevisionProposal } from "@/scenario/ledger.js";
+import { proposeConstraint, recordRunOutcome, stripNegationPrefix, applyOutputCorrection, ensureLedger as ensureLedgerOf, activeConstraints, pendingConstraints, confirmConstraints, retireConstraint, evaluateLifecycle, netGain, type ScenarioLedger, type RevisionProposal } from "@/scenario/ledger.js";
 import { confidence, tierOfLedger } from "@/scenario/confidence.js";
 import { inputDigest } from "@/scenario/digest.js";
 import { computeOutputDiff, blocksToProposals } from "@/panel/outputdiff.js";
@@ -1046,9 +1046,10 @@ export class PanelServer {
             confidence: Math.round(confidence(ledger) * 100) / 100,
             activeCount: activeConstraints(ledger).length,
             pendingCount: pendingConstraints(ledger).length,
-            constraints: ledger.constraints.slice(-30).map((c) => ({ id: c.id, clause: c.clause, kind: c.kind, hits: c.hits, confirmed: c.confirmedAt !== null, active: c.active, supersededBy: c.supersededBy })),
+            constraints: ledger.constraints.slice(-30).map((c) => ({ id: c.id, clause: c.clause, kind: c.kind, hits: c.hits, confirmed: c.confirmedAt !== null, active: c.active, supersededBy: c.supersededBy, layer: c.layer })),
             curve: ledger.interventions.slice(-30).map((i) => ({ at: i.at, total: i.total })),
             runStats: ledger.runStats,
+            attribution: ledger.attribution,
           };
         })(),
       });
@@ -2543,16 +2544,30 @@ export class PanelServer {
       return { ok: true };
     }
     if (action.type === "retire-constraint") {
-      // §14：退役 = active=false（不删，可溯）
+      // §14：退役 = active=false（不删，可溯）；同时运行生命周期自动评估（自动转正/退役）
       if (!this.deps.library) return { ok: false, error: "场景库未准备好" };
-      await this.deps.library.updateLedger(action.scenarioId, (ledger) => retireConstraint(ledger, action.constraintId)).catch((error: unknown) => ({ error }));
+      await this.deps.library.updateLedger(action.scenarioId, (ledger) => {
+        const retired = retireConstraint(ledger, action.constraintId);
+        const { ledger: evaluated, changes } = evaluateLifecycle(retired);
+        for (const change of changes) {
+          this.pushChat({ role: "build-status", tone: change.action === "retire" ? "info" : "ok", text: `分寸账本自动${change.action === "retire" ? "退役" : "转正"}条款「${change.clause.slice(0, 30)}」（${change.reason}）。`, ts: Date.now() });
+        }
+        return evaluated;
+      }).catch((error: unknown) => ({ error }));
       await this.pushSnapshot();
       return { ok: true };
     }
     if (action.type === "confirm-constraints") {
-      // §14：签约 = 批量填 confirmedAt（工作模式 pendingConfirm 的确认通道）
+      // §14：签约 = 批量填 confirmedAt（工作模式 pendingConfirm 的确认通道）；签约后也跑生命周期评估
       if (!this.deps.library) return { ok: false, error: "场景库未准备好" };
-      await this.deps.library.updateLedger(action.scenarioId, (ledger) => confirmConstraints(ledger, action.ids)).catch((error: unknown) => ({ error }));
+      await this.deps.library.updateLedger(action.scenarioId, (ledger) => {
+        const confirmed = confirmConstraints(ledger, action.ids);
+        const { ledger: evaluated, changes } = evaluateLifecycle(confirmed);
+        for (const change of changes) {
+          this.pushChat({ role: "build-status", tone: change.action === "retire" ? "info" : "ok", text: `分寸账本自动${change.action === "retire" ? "退役" : "转正"}条款「${change.clause.slice(0, 30)}」（${change.reason}）。`, ts: Date.now() });
+        }
+        return evaluated;
+      }).catch((error: unknown) => ({ error }));
       this.pushChat({ role: "build-status", tone: "ok", text: `已签约 ${action.ids.length} 条分寸，下次运行自检生效。`, ts: Date.now() });
       await this.pushSnapshot();
       return { ok: true };
@@ -3097,6 +3112,56 @@ export class PanelServer {
           if (!scenario || !this.scenarioInScope(scenario) || scenario.status === "deleted") { res.writeHead(404).end(); return; }
           res.setHeader("content-type", "application/json; charset=utf-8");
           res.end(JSON.stringify(scenario));
+        }).catch((error: unknown) => sendRouteFailure(res, error));
+        return;
+      }
+      if (requestPath === "/api/ledger-report" && req.method === "GET") {
+        // 两角色模型 §6.2：信任报告——seller 拿去对客户/上级说话的证据
+        const query = new URL(req.url ?? "", "http://127.0.0.1").searchParams;
+        const scenarioId = query.get("scenarioId") ?? "";
+        void (this.deps.library?.get(scenarioId) ?? Promise.resolve(undefined)).then((scenario) => {
+          if (!scenario || !this.scenarioInScope(scenario) || scenario.status === "deleted") { res.writeHead(404).end(); return; }
+          const ledger = ensureLedgerOf(scenario);
+          const tierLabel = { replay: "重放", spot: "抽查", full: "全开" }[tierOfLedger(ledger)];
+          const curve = ledger.interventions.slice(-30);
+          const totalInterventions = curve.reduce((sum, i) => sum + i.total, 0);
+          const sparkline = curve.map((i) => `${i.at.slice(5, 16)}  介入 ${i.total}`).join("\n");
+          const constraints = activeConstraints(ledger);
+          const constraintLines = constraints.map((c) => {
+            const entry = ledger.attribution[c.id];
+            const gain = entry ? `帮${entry.helped}害${entry.hurt}` : "无归因";
+            return `- [${c.kind === "advisory" ? "偏好" : "标准"}] ${c.clause} · 命中 ${c.hits} · ${gain}`;
+          });
+          const netGains = constraints.map((c) => netGain(ledger, c.id)).filter((v) => v !== null) as number[];
+          const avgGain = netGains.length ? (netGains.reduce((sum, v) => sum + v, 0) / netGains.length).toFixed(2) : null;
+          const report = [
+            `# SceneFlow 信任报告 · ${scenario.name}`,
+            "",
+            `> 生成时间 ${new Date().toISOString().slice(0, 16)} · 灰度档位 ${tierLabel} · 场景 v${scenario.pinnedVersion}`,
+            "",
+            "## 头部数字",
+            "",
+            `- 运行 ${ledger.runStats.runs} · 通过 ${ledger.runStats.accepted} · 打回 ${ledger.runStats.rejected} · 纠正 ${ledger.runStats.corrected}`,
+            `- 连续无干预通过 ${ledger.runStats.consecutiveClean}`,
+            `- 生效条款 ${constraints.length} · 置信度 ${Math.round(confidence(ledger) * 100) / 100}`,
+            netGains.length ? `- 条款平均净增益 ${avgGain}` : "",
+            "",
+            "## 人工介入曲线（最近 30 次）",
+            "",
+            curve.length ? "```text\n" + sparkline + "\n```" : "（暂无数据）",
+            "",
+            "## 生效条款贡献",
+            "",
+            constraintLines.length ? constraintLines.join("\n") : "（暂无生效条款）",
+            "",
+            "---",
+            "",
+            "诚实脚注：suspected 运行不计入归因；无人值守运行沉默不入账；15% 对照组运行不计入条款归因。",
+            "",
+          ].filter(Boolean).join("\n");
+          res.setHeader("content-type", "text/markdown; charset=utf-8");
+          res.setHeader("content-disposition", `attachment; filename="trust-report-${scenarioId.slice(0, 20)}.md"`);
+          res.end(report);
         }).catch((error: unknown) => sendRouteFailure(res, error));
         return;
       }

@@ -86,9 +86,10 @@ interface ScenarioSummary {
     confidence: number;
     activeCount: number;
     pendingCount: number;
-    constraints: Array<{ id: string; clause: string; kind: string; hits: number; confirmed: boolean; active: boolean; supersededBy: string | null }>;
+    constraints: Array<{ id: string; clause: string; kind: string; hits: number; confirmed: boolean; active: boolean; supersededBy: string | null; layer?: string }>;
     curve: Array<{ at: string; total: number }>;
     runStats: { runs: number; accepted: number; rejected: number; corrected: number; consecutiveClean: number };
+    attribution?: Record<string, { helped: number; hurt: number; heldoutRuns: number }>;
   };
 }
 interface SessionSummary { id: string; title: string; mode: PanelMode; projectId: string | null; messageCount: number; createdAt: string; updatedAt: string; archived: boolean; }
@@ -495,17 +496,69 @@ function applyMode(mode: PanelMode): void {
   const meta = modeText(mode);
   const shell = document.querySelector<HTMLElement>(".app-shell");
   shell?.setAttribute("data-mode", mode);
+  syncModeButtons(meta);
+  renderLedgerHeadline();
+}
+
+/** 经营头条（两角色模型 §6.1）：seller 视角一行聚合——运行数/介入数与环比/条款/净增益/报告导出 */
+function renderLedgerHeadline(): void {
+  const existing = document.getElementById("ledger-headline");
+  existing?.remove();
+  const snap = currentSnapshot;
+  if (!snap) return;
+  const activeScenario = snap.scenarios?.find((s) => s.id === snap.activeScenarioId) ?? snap.scenarios?.[0];
+  const ledger = activeScenario?.ledger;
+  if (!ledger || !ledger.curve.length) return;
+  const bar = node("div", "ledger-headline");
+  bar.id = "ledger-headline";
+  const runs = ledger.runStats.runs;
+  const recent = ledger.curve.slice(-7).reduce((sum, p) => sum + p.total, 0);
+  const prior = ledger.curve.slice(-14, -7).reduce((sum, p) => sum + p.total, 0);
+  let trend = "";
+  if (prior > 0 && recent !== prior) {
+    const pct = Math.round(((recent - prior) / prior) * 100);
+    const cls = pct < 0 ? "ledger-headline-trend-down" : "ledger-headline-trend-up";
+    const arrow = pct < 0 ? "↓" : "↑";
+    trend = `<span class="ledger-headline-item 介入 <strong>${recent}</strong> <span class="${cls}">${arrow}${Math.abs(pct)}%</span></span>`;
+  } else {
+    trend = `<span class="ledger-headline-item">介入 <strong>${recent}</strong></span>`;
+  }
+  const scenarioName = activeScenario?.name?.slice(0, 16) ?? "";
+  bar.innerHTML = [
+    `<span class="ledger-headline-item">场景 <strong>${scenarioName}</strong></span>`,
+    `<span class="ledger-headline-item">运行 <strong>${runs}</strong></span>`,
+    trend,
+    `<span class="ledger-headline-item">条款 <strong>${ledger.activeCount}</strong> 生效</span>`,
+    `<button class="ledger-headline-report" data-headline-report="${activeScenario.id}">信任报告</button>`,
+  ].join("");
+  // 报告按钮事件
+  bar.querySelector<HTMLButtonElement>("[data-headline-report]")?.addEventListener("click", (event) => {
+    const btn = event.currentTarget as HTMLButtonElement;
+    const scenarioId = btn.dataset.headlineReport ?? "";
+    btn.disabled = true; btn.textContent = "生成中…";
+    void fetch(`/api/ledger-report?scenarioId=${encodeURIComponent(scenarioId)}`)
+      .then(async (response) => { if (!response.ok) throw new Error("fail"); const blob = await response.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "trust-report.md"; a.click(); URL.revokeObjectURL(url); btn.textContent = "信任报告"; btn.disabled = false; })
+      .catch(() => { btn.textContent = "失败"; btn.disabled = false; });
+  });
+  // 插入到空态标题上方
+  const emptyTitle = document.querySelector(".empty-kicker, .chat-empty-title")?.parentElement;
+  const chatPanel = document.querySelector(".chat-panel");
+  const target = emptyTitle ?? chatPanel;
+  if (target) target.prepend(bar);
+}
+
+function syncModeButtons(meta: { kicker: string; title: string; description: string; copy: string; placeholder: string }): void {
   document.querySelectorAll<HTMLButtonElement>(".mode-btn").forEach((button) => {
-    button.classList.toggle("active", button.dataset.mode === mode);
-    button.setAttribute("aria-selected", String(button.dataset.mode === mode));
-    button.tabIndex = button.dataset.mode === mode ? 0 : -1;
+    button.classList.toggle("active", button.dataset.mode === panelMode);
+    button.setAttribute("aria-selected", String(button.dataset.mode === panelMode));
+    button.tabIndex = button.dataset.mode === panelMode ? 0 : -1;
   });
   const kicker = $("chat-kicker"); if (kicker) kicker.textContent = meta.kicker;
   const title = $("chat-title"); if (title) title.textContent = meta.title;
   const description = $("chat-description"); if (description) description.textContent = meta.description;
   const copy = $("mode-copy"); if (copy) copy.textContent = meta.copy;
   const input = $("req-input") as HTMLTextAreaElement | null; if (input) input.placeholder = meta.placeholder;
-  const inspector = $("inspector-subtitle"); if (inspector && !currentSnapshot?.preview.goal) inspector.textContent = mode === "work" ? "工作模式会先尝试复用场景" : "构建模式会生成新的场景方案";
+  const inspector = $("inspector-subtitle"); if (inspector && !currentSnapshot?.preview.goal) inspector.textContent = panelMode === "work" ? "工作模式会先尝试复用场景" : "构建模式会生成新的场景方案";
 }
 
 function syncModeLabels(): void {
@@ -770,23 +823,13 @@ function renderLedgerPanel(detail: HTMLElement, item: ScenarioSummary): void {
   }
   if (!ledger.curve.length) box.append(textBlock("还没有运行记录——跑一次后这里会出现曲线。", "ledger-empty"));
   else box.append(textBlock(`运行 ${ledger.runStats.runs} · 通过 ${ledger.runStats.accepted} · 打回 ${ledger.runStats.rejected} · 纠正 ${ledger.runStats.corrected} · 连胜 ${ledger.runStats.consecutiveClean}`, "ledger-empty"));
-  // 条款清单：已生效（hits 可见，可退役）+ 待签约（确认/退役）
-  const active = ledger.constraints.filter((c) => c.active && !c.supersededBy);
-  if (active.length) {
-    box.append(textBlock(`条款（${ledger.activeCount} 条生效）`, "section-label"));
-    for (const constraint of active) {
-      const row = node("div", "ledger-constraint-row");
-      const badge = constraint.confirmed ? (constraint.kind === "advisory" ? "偏好" : "标准") : "待确认";
-      row.append(textBlock(`[${badge}] ${constraint.clause} · 命中 ${constraint.hits}`, "ledger-constraint-text"));
-      const retire = node("button", "session-action"); retire.type = "button"; retire.dataset.retireConstraint = constraint.id; retire.dataset.retireScenario = item.id; retire.textContent = constraint.confirmed ? "退役" : "忽略";
-      row.append(retire);
-      if (!constraint.confirmed) {
-        const confirm = node("button", "session-action"); confirm.type = "button"; confirm.dataset.confirmConstraint = constraint.id; confirm.dataset.confirmScenario = item.id; confirm.textContent = "签约";
-        row.append(confirm);
-      }
-      box.append(row);
-    }
-  }
+  // 三栏生命周期条款清单（两角色模型 §5）
+  renderLifecycleConstraints(box, item, ledger);
+  // 信任报告导出
+  const reportRow = node("div", "ledger-report-row");
+  const report = node("button", "session-action"); report.type = "button"; report.dataset.ledgerReport = item.id; report.textContent = "生成信任报告";
+  reportRow.append(report);
+  box.append(reportRow);
   // 灰度开关（§16）：legacy 只记不用 / spot 自检 / full 双路路由+体检
   const settings = currentSnapshot?.settings;
   if (settings) {
@@ -801,6 +844,51 @@ function renderLedgerPanel(detail: HTMLElement, item: ScenarioSummary): void {
     box.append(modeRow);
   }
   detail.append(box);
+}
+
+/** 三栏生命周期条款清单（两角色模型 §5）：待签约 / 生效 / 已退役，附归因数字 */
+function renderLifecycleConstraints(box: HTMLElement, item: ScenarioSummary, ledger: NonNullable<ScenarioSummary["ledger"]>): void {
+  const active = ledger.constraints.filter((c) => c.active && !c.supersededBy);
+  const retired = ledger.constraints.filter((c) => !c.active || c.supersededBy);
+  if (!active.length && !retired.length) return;
+  const attributionOf = (id: string) => ledger.attribution?.[id];
+  const netGainLabel = (id: string): string => {
+    const entry = attributionOf(id);
+    if (!entry) return "";
+    const injected = entry.helped + entry.hurt;
+    if (injected < 1) return "";
+    const rate = entry.helped / injected;
+    return ` 帮${entry.helped}害${entry.hurt}`;
+  };
+  if (active.length) {
+    box.append(textBlock(`条款（${active.length} 条生效）`, "section-label"));
+    for (const constraint of active) {
+      const row = node("div", "ledger-constraint-row");
+      const badge = constraint.confirmed ? (constraint.kind === "advisory" ? "偏好" : "标准") : "待确认";
+      const teamBadge = constraint.layer === "team" ? "[团队] " : "";
+      const gain = netGainLabel(constraint.id);
+      row.append(textBlock(`[${badge}] ${teamBadge}${constraint.clause} · 命中 ${constraint.hits}${gain}`, "ledger-constraint-text"));
+      const retire = node("button", "session-action"); retire.type = "button"; retire.dataset.retireConstraint = constraint.id; retire.dataset.retireScenario = item.id; retire.textContent = constraint.confirmed ? "退役" : "忽略";
+      row.append(retire);
+      if (!constraint.confirmed) {
+        const confirm = node("button", "session-action"); confirm.type = "button"; confirm.dataset.confirmConstraint = constraint.id; confirm.dataset.confirmScenario = item.id; confirm.textContent = "签约";
+        row.append(confirm);
+      }
+      box.append(row);
+    }
+  }
+  if (retired.length) {
+    const fold = node("details", "ledger-retired-fold");
+    fold.append(textBlock(`已退役（${retired.length}）`, "summary"));
+    for (const constraint of retired) {
+      const row = node("div", "ledger-constraint-row ledger-retired-row");
+      row.append(textBlock(`${constraint.clause} · 帮${attributionOf(constraint.id)?.helped ?? 0}害${attributionOf(constraint.id)?.hurt ?? 0}`, "ledger-constraint-text"));
+      const reactivate = node("button", "session-action"); reactivate.type = "button"; reactivate.dataset.reactivateConstraint = constraint.id; reactivate.dataset.retireScenario = item.id; reactivate.textContent = "重新激活";
+      row.append(reactivate);
+      fold.append(row);
+    }
+    box.append(fold);
+  }
 }
 
 /** 介入曲线 sparkline：SVG 折线，零依赖 */
@@ -3528,6 +3616,30 @@ function mount(): void {
     if (retireBtn?.dataset.retireScenario) {
       retireBtn.disabled = true;
       sendPayload({ type: "retire-constraint", scenarioId: retireBtn.dataset.retireScenario, constraintId: retireBtn.dataset.retireConstraint ?? "" });
+      return;
+    }
+    // 两角色模型：退役条款重新激活（生命周期面板）
+    const reactivateBtn = target.closest<HTMLButtonElement>("button[data-reactivate-constraint]");
+    if (reactivateBtn?.dataset.retireScenario) {
+      reactivateBtn.disabled = true;
+      sendPayload({ type: "confirm-constraints", scenarioId: reactivateBtn.dataset.retireScenario, ids: [reactivateBtn.dataset.reactivateConstraint ?? ""] });
+      return;
+    }
+    // 两角色模型：信任报告导出
+    const reportBtn = target.closest<HTMLButtonElement>("button[data-ledger-report]");
+    if (reportBtn?.dataset.ledgerReport) {
+      reportBtn.disabled = true;
+      void fetch(`/api/ledger-report?scenarioId=${encodeURIComponent(reportBtn.dataset.ledgerReport)}`)
+        .then(async (response) => {
+          if (!response.ok) throw new Error("report failed");
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url; anchor.download = "trust-report.md"; anchor.click();
+          URL.revokeObjectURL(url);
+          reportBtn.textContent = "已下载 ✓"; reportBtn.disabled = false;
+        })
+        .catch(() => { reportBtn.textContent = "生成失败"; reportBtn.disabled = false; });
       return;
     }
     // Edit-to-Accept（§7）：就地展开 textarea，原文预填；1.5s debounce 提交最终 diff
