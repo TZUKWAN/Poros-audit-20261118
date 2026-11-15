@@ -23,6 +23,7 @@ import { resolveRoute } from "@/panel/route.js";
 import { templateA, templateB } from "@/panel/prompts.js";
 import { gateEventsFromApprovals } from "@/panel/gate-classify.js";
 import { inputDigest } from "@/scenario/digest.js";
+import { resolveConstraints, readTeamConstraints, ensureTeamLedger } from "@/scenario/team-ledger.js";
 import { PanelServer, defaultPageHtml } from "@/panel/server.js";
 import { PanelHistory, PanelSessionSchema } from "@/panel/history.js";
 import { PanelSettingsSchema, PanelSettingsStore } from "@/panel/settings.js";
@@ -84,6 +85,12 @@ const INVOKE_TIMEOUT_MS = 6_000;
  * completion handlers must never read mutable panel selection state when
  * persisting run outputs.
  */
+function hashRunId(runId: string): boolean {
+  let hash = 0;
+  for (let i = 0; i < runId.length; i++) { hash = (hash << 5) - hash + runId.charCodeAt(i); hash |= 0; }
+  return Math.abs(hash) % 100 < 15;
+}
+
 type RunBinding = {
   runId: string | null;
   workspaceId: string | null;
@@ -152,6 +159,8 @@ async function main(): Promise<void> {
   await migrateDomainLibraries(library);
   // 分寸账本迁移（§3）：存量场景折算补齐 ledger（幂等，已有账本跳过）。
   await migrateLedgers(library);
+  // 两角色模型：幂等初始化团队层账本（文件即组织，git 同步）
+  ensureTeamLedger(dataRoot);
   // Older panel builds used the raw request as the scenario name and could
   // leave several identical labels in the library. Normalize those legacy
   // request-shaped names first, then add readable suffixes so selection
@@ -743,9 +752,16 @@ async function main(): Promise<void> {
         if (routingMode !== "legacy" && result.status === "succeeded" && result.artifactContent) {
           const fresh = await library.get(scenario.id);
           const activeOnes = fresh?.ledger ? activeConstraints(fresh.ledger) : [];
-          if (activeOnes.length) {
+          // 两角色模型：合并团队层条款 + 15% 确定性 holdout（仅 advisory 被抽走）
+          const teamConstraints = readTeamConstraints(dataRoot);
+          const allConstraints = resolveConstraints(activeOnes, teamConstraints).filter((c) => c.active && !c.supersededBy);
+          const holdoutRun = panelRunId ? hashRunId(panelRunId) : false;
+          const checkedConstraints = holdoutRun ? allConstraints.filter((c) => c.kind !== "advisory") : allConstraints;
+          const injectedIds = checkedConstraints.map((c) => c.id);
+          if (panelRunId) panel.markRunInjection(panelRunId, injectedIds, holdoutRun);
+          if (checkedConstraints.length) {
             const check = await runSelfCheck({
-              constraints: activeOnes,
+              constraints: checkedConstraints,
               output: result.artifactContent,
               judge: workModel.model ? (system, input) => workModel.model!.complete(system, input, { signal: runAbort.signal }).then((r) => r.text) : undefined,
               repair: workModel.model
@@ -856,7 +872,9 @@ async function main(): Promise<void> {
             // 抽查态闸门：重规划关联既有账本（gateStats 支撑自动通过）
             panel.setBuildLedgerScenarioId(match.scenario.id);
             const ledgerOfMatch = ensureLedger(match.scenario);
-            const parts = [templateA(activeConstraints(ledgerOfMatch)), templateB(ledgerOfMatch.inputPatterns)].filter(Boolean);
+            const teamCs = readTeamConstraints(dataRoot);
+            const allActive = resolveConstraints(activeConstraints(ledgerOfMatch), teamCs).filter((c) => c.active && !c.supersededBy);
+            const parts = [templateA(allActive), templateB(ledgerOfMatch.inputPatterns)].filter(Boolean);
             runBinding.replanConstraintText = parts.join("\n\n");
             pushRunProgress("planning", route.healthCheck
               ? "强制体检：这个场景已连续重放多次，重新规划一次以检查世界是否变化……"

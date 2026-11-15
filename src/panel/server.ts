@@ -16,7 +16,8 @@ import { renderGateView } from "@/gates/views.js";
 import { classifyGateDecision, type GateProposalDraft } from "@/panel/gate-classify.js";
 import { memoryTree, type MemoryTreeNode } from "@/memory/memory.js";
 import { ScenarioRecordSchema, scenarioMatchesScope, scenarioNameFromRequirement, type ScenarioLibrary, type ScenarioRecord } from "@/scenario/library.js";
-import { proposeConstraint, recordRunOutcome, stripNegationPrefix, applyOutputCorrection, ensureLedger as ensureLedgerOf, activeConstraints, pendingConstraints, confirmConstraints, retireConstraint, evaluateLifecycle, netGain, type ScenarioLedger, type RevisionProposal } from "@/scenario/ledger.js";
+import { proposeConstraint, recordRunOutcome, stripNegationPrefix, applyOutputCorrection, ensureLedger as ensureLedgerOf, activeConstraints, pendingConstraints, confirmConstraints, retireConstraint, evaluateLifecycle, netGain, mergeConstraintGuarded, type ScenarioLedger, type RevisionProposal } from "@/scenario/ledger.js";
+import { resolveConstraints, readTeamConstraints } from "@/scenario/team-ledger.js";
 import { confidence, tierOfLedger } from "@/scenario/confidence.js";
 import { inputDigest } from "@/scenario/digest.js";
 import { computeOutputDiff, blocksToProposals } from "@/panel/outputdiff.js";
@@ -794,6 +795,9 @@ export class PanelServer {
     const library = this.deps.library;
     if (!library) return;
     const at = new Date().toISOString();
+    // 两角色模型：从注入元数据读取本 run 的归因对象和 holdout 标记
+    const injection = this.runInjectionMeta.get(params.runId);
+    this.runInjectionMeta.delete(params.runId);
     await library
       .updateLedger(scenarioId, (ledger) => {
         let next = recordRunOutcome(ledger, {
@@ -803,12 +807,19 @@ export class PanelServer {
           digest: params.digest,
           at,
           interventions: { gatesAnswered: 0, questionsAnswered: 0, correctionsGiven: params.guides?.length ?? 0 },
+          injectedConstraints: injection?.injected,
+          holdout: injection?.holdout,
         });
         for (const guide of params.guides ?? []) {
-          const proposed = proposeConstraint(next, { clause: stripNegationPrefix(guide), scope: "output", origin: { type: "guide", text: guide, at, runId: params.runId } });
-          if (proposed) next = proposed.ledger;
+          const merged = mergeConstraintGuarded(next, { clause: stripNegationPrefix(guide), scope: "output", origin: { type: "guide", text: guide, at, runId: params.runId } });
+          next = merged.ledger;
         }
-        return next as ScenarioLedger;
+        // 两角色模型：结算事务尾部跑生命周期自动评估（自动转正/退役）
+        const { ledger: evaluated, changes } = evaluateLifecycle(next);
+        for (const change of changes) {
+          this.pushChat({ role: "build-status", tone: change.action === "retire" ? "info" : "ok", text: `分寸账本自动${change.action === "retire" ? "退役" : "转正"}条款「${change.clause.slice(0, 30)}」（${change.reason}）。`, ts: Date.now() });
+        }
+        return evaluated as ScenarioLedger;
       })
       .catch(() => undefined);
     // §12 步骤08：结算落账后广播快照——sparkline/曲线/条款即时刷新
@@ -836,6 +847,12 @@ export class PanelServer {
   private readonly suspectedRuns = new Set<string>();
   markRunSuspected(runId: string): void {
     this.suspectedRuns.add(runId);
+  }
+
+  /** 两角色模型：本 run 注入了哪些条款 + 是否 holdout（结算时传给 recordRunOutcome 归因） */
+  private readonly runInjectionMeta = new Map<string, { injected: string[]; holdout: boolean }>();
+  markRunInjection(runId: string, injected: string[], holdout: boolean): void {
+    this.runInjectionMeta.set(runId, { injected, holdout });
   }
 
   /** 聊天历史（左栏对话；重连经快照恢复） */
@@ -1971,8 +1988,8 @@ export class PanelServer {
             const clause = stripNegationPrefix(action.updatedInstruction.trim().split(/\r?\n/)[0]!.slice(0, 120));
             await this.deps.library
               .updateLedger(scenarioId, (ledger) => {
-                const proposed = proposeConstraint(ledger, { clause: `步骤「${action.stepId}」应按此方式执行：${clause}`, scope: "capability", origin: { type: "gate-edit", text: action.updatedInstruction!.slice(0, 300), at: new Date().toISOString(), runId: action.runId } });
-                return proposed ? proposed.ledger : ledger;
+                const merged = mergeConstraintGuarded(ledger, { clause: `步骤「${action.stepId}」应按此方式执行：${clause}`, scope: "capability", origin: { type: "gate-edit", text: action.updatedInstruction!.slice(0, 300), at: new Date().toISOString(), runId: action.runId } });
+                return merged.ledger;
               })
               .catch(() => undefined);
           }
@@ -2529,8 +2546,8 @@ export class PanelServer {
         // 👎+原因 = 分寸提案（output scope，pendingConfirm；签约面/过期机制同构建侧）
         await this.deps.library
           .updateLedger(pending.scenarioId, (ledger) => {
-            const proposed = proposeConstraint(ledger, { clause: stripNegationPrefix(action.reason!.trim()), scope: "output", origin: { type: "feedback", text: action.reason!.trim(), at, runId: action.runId } });
-            return proposed ? proposed.ledger : ledger;
+            const merged = mergeConstraintGuarded(ledger, { clause: stripNegationPrefix(action.reason!.trim()), scope: "output", origin: { type: "feedback", text: action.reason!.trim(), at, runId: action.runId } });
+            return merged.ledger;
           })
           .catch(() => undefined);
       }

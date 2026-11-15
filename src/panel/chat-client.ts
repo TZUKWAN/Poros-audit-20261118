@@ -514,32 +514,38 @@ function renderLedgerHeadline(): void {
   const runs = ledger.runStats.runs;
   const recent = ledger.curve.slice(-7).reduce((sum, p) => sum + p.total, 0);
   const prior = ledger.curve.slice(-14, -7).reduce((sum, p) => sum + p.total, 0);
-  let trend = "";
+  const scenarioName = activeScenario?.name?.slice(0, 16) ?? "";
+  const addItem = (label: string, value: string) => {
+    const item = node("span", "ledger-headline-item");
+    item.append(textBlock(label + " ", ""), textBlock(value, "ledger-headline-value"));
+    bar.append(item);
+  };
+  addItem("场景", scenarioName);
+  addItem("运行", String(runs));
   if (prior > 0 && recent !== prior) {
     const pct = Math.round(((recent - prior) / prior) * 100);
-    const cls = pct < 0 ? "ledger-headline-trend-down" : "ledger-headline-trend-up";
-    const arrow = pct < 0 ? "↓" : "↑";
-    trend = `<span class="ledger-headline-item 介入 <strong>${recent}</strong> <span class="${cls}">${arrow}${Math.abs(pct)}%</span></span>`;
+    const trendItem = node("span", "ledger-headline-item");
+    trendItem.append(textBlock("介入 ", ""));
+    const strong = node("strong"); strong.textContent = String(recent); trendItem.append(strong);
+    const arrow = node("span", pct < 0 ? "ledger-headline-trend-down" : "ledger-headline-trend-up");
+    arrow.textContent = (pct < 0 ? "↓" : "↑") + Math.abs(pct) + "%";
+    trendItem.append(arrow);
+    bar.append(trendItem);
   } else {
-    trend = `<span class="ledger-headline-item">介入 <strong>${recent}</strong></span>`;
+    addItem("介入", String(recent));
   }
-  const scenarioName = activeScenario?.name?.slice(0, 16) ?? "";
-  bar.innerHTML = [
-    `<span class="ledger-headline-item">场景 <strong>${scenarioName}</strong></span>`,
-    `<span class="ledger-headline-item">运行 <strong>${runs}</strong></span>`,
-    trend,
-    `<span class="ledger-headline-item">条款 <strong>${ledger.activeCount}</strong> 生效</span>`,
-    `<button class="ledger-headline-report" data-headline-report="${activeScenario.id}">信任报告</button>`,
-  ].join("");
-  // 报告按钮事件
-  bar.querySelector<HTMLButtonElement>("[data-headline-report]")?.addEventListener("click", (event) => {
-    const btn = event.currentTarget as HTMLButtonElement;
-    const scenarioId = btn.dataset.headlineReport ?? "";
-    btn.disabled = true; btn.textContent = "生成中…";
-    void fetch(`/api/ledger-report?scenarioId=${encodeURIComponent(scenarioId)}`)
-      .then(async (response) => { if (!response.ok) throw new Error("fail"); const blob = await response.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "trust-report.md"; a.click(); URL.revokeObjectURL(url); btn.textContent = "信任报告"; btn.disabled = false; })
-      .catch(() => { btn.textContent = "失败"; btn.disabled = false; });
+  addItem("条款生效", String(ledger.activeCount));
+  const reportBtn = node("button", "ledger-headline-report");
+  reportBtn.dataset.headlineReport = activeScenario.id;
+  reportBtn.textContent = "信任报告";
+  reportBtn.addEventListener("click", () => {
+    const sid = activeScenario.id;
+    reportBtn.disabled = true; reportBtn.textContent = "生成中…";
+    void fetch(`/api/ledger-report?scenarioId=${encodeURIComponent(sid)}`)
+      .then(async (response) => { if (!response.ok) throw new Error("fail"); const blob = await response.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "trust-report.md"; a.click(); URL.revokeObjectURL(url); reportBtn.textContent = "信任报告"; reportBtn.disabled = false; })
+      .catch(() => { reportBtn.textContent = "失败"; reportBtn.disabled = false; });
   });
+  bar.append(reportBtn);
   // 插入到空态标题上方
   const emptyTitle = document.querySelector(".empty-kicker, .chat-empty-title")?.parentElement;
   const chatPanel = document.querySelector(".chat-panel");
