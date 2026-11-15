@@ -508,7 +508,8 @@ function renderLedgerHeadline(): void {
   if (!snap) return;
   const activeScenario = snap.scenarios?.find((s) => s.id === snap.activeScenarioId) ?? snap.scenarios?.[0];
   const ledger = activeScenario?.ledger;
-  if (!ledger || !ledger.curve.length) return;
+  // 新场景（0 运行）也是 seller 视角的合法状态——头条照样出现，只是数字为 0
+  if (!ledger) return;
   const bar = node("div", "ledger-headline");
   bar.id = "ledger-headline";
   const runs = ledger.runStats.runs;
@@ -524,13 +525,17 @@ function renderLedgerHeadline(): void {
   addItem("运行", String(runs));
   if (prior > 0 && recent !== prior) {
     const pct = Math.round(((recent - prior) / prior) * 100);
-    const trendItem = node("span", "ledger-headline-item");
-    trendItem.append(textBlock("介入 ", ""));
-    const strong = node("strong"); strong.textContent = String(recent); trendItem.append(strong);
-    const arrow = node("span", pct < 0 ? "ledger-headline-trend-down" : "ledger-headline-trend-up");
-    arrow.textContent = (pct < 0 ? "↓" : "↑") + Math.abs(pct) + "%";
-    trendItem.append(arrow);
-    bar.append(trendItem);
+    if (Number.isFinite(pct) && pct !== 0) {
+      const trendItem = node("span", "ledger-headline-item");
+      trendItem.append(textBlock("介入 ", ""));
+      const strong = node("strong"); strong.textContent = String(recent); trendItem.append(strong);
+      const arrow = node("span", pct < 0 ? "ledger-headline-trend-down" : "ledger-headline-trend-up");
+      arrow.textContent = (pct < 0 ? "↓" : "↑") + Math.abs(pct) + "%";
+      trendItem.append(arrow);
+      bar.append(trendItem);
+    } else {
+      addItem("介入", String(recent));
+    }
   } else {
     addItem("介入", String(recent));
   }
@@ -3628,7 +3633,7 @@ function mount(): void {
     const reactivateBtn = target.closest<HTMLButtonElement>("button[data-reactivate-constraint]");
     if (reactivateBtn?.dataset.retireScenario) {
       reactivateBtn.disabled = true;
-      sendPayload({ type: "confirm-constraints", scenarioId: reactivateBtn.dataset.retireScenario, ids: [reactivateBtn.dataset.reactivateConstraint ?? ""] });
+      sendPayload({ type: "reactivate-constraint", scenarioId: reactivateBtn.dataset.retireScenario, constraintId: reactivateBtn.dataset.reactivateConstraint ?? "" });
       return;
     }
     // 两角色模型：信任报告导出

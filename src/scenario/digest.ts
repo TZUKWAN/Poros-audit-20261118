@@ -34,7 +34,10 @@ export function normalizeRequirementText(text: string): string {
  */
 export function inputDigest(requirement: string, _slots?: Record<string, string>): string {
   void _slots; // 槽位刻意不参与——LLM 解析漂移（名/数量/值摘要皆不稳定）
-  return createHash("sha1").update(normalizeRequirementText(requirement)).digest("hex");
+  const normalized = normalizeRequirementText(requirement);
+  // 空白需求（纯标点/空白）与 emptyDigest 的空串区分开——哨兵防跨场景 digest 碰撞
+  const payload = requirement.trim() && !normalized ? "blank-requirement" : normalized;
+  return createHash("sha1").update(payload).digest("hex");
 }
 
 /** 无 slots 场景：digest = 归一化原文（同需求恒定，永远命中——drift 由 goal/match 层管） */

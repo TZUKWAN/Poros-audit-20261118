@@ -92,6 +92,8 @@ export const ScenarioLedgerSchema = z.object({
         hurt: z.number().int().min(0).default(0),
         /** 该条款处于对照组、未注入的运行数（反事实基线样本） */
         heldoutRuns: z.number().int().min(0).default(0),
+        /** 对照组运行中成功收尾的次数（净增益基线分母来源） */
+        holdoutAccepted: z.number().int().min(0).default(0),
       }),
     )
     .default({}),
@@ -207,11 +209,16 @@ export function isSubstantiveComment(text: string): boolean {
   return rest.length === 0 ? false : true;
 }
 
-/** 去掉"不对/不行/重新"类否定前缀，人的原话即条款（§4） */
+/**
+ * 去掉语篇纠正前缀（"不对，""不行，"），人的原话即条款（§4）。
+ * ⚠ 刻意**不剥语义否定**（"不要 X""别 X"）——那些是指令的一部分，
+ * 剥掉会导致 "不要使用爬虫" → "使用爬虫"（语义反转，实机发现 P1）。
+ */
 export function stripNegationPrefix(text: string): string {
   let out = text.trim();
+  // 语篇纠正标记：只表示"你做错了"（剥掉后语义不变），不含"不要/别"（剥掉后意思反转）
   for (;;) {
-    const next = out.replace(/^(?:不对|不行|不要|不是|不好|重新|重来|再来|再|别|请)[\s，,。.!！?？、]*/u, "").trim();
+    const next = out.replace(/^(?:不对|不行|不是|不好|错了|搞错|不是(?:这样|我要的|这个意思))[\s，,。.!！?？、]*/u, "").trim();
     if (next === out || next.length === 0) break;
     out = next;
   }
@@ -264,6 +271,17 @@ export function confirmConstraints(ledger: ScenarioLedger, ids: string[], now: s
 /** 退役（不删，可溯）：active=false */
 export function retireConstraint(ledger: ScenarioLedger, id: string): ScenarioLedger {
   return { ...ledger, constraints: ledger.constraints.map((c) => (c.id === id ? { ...c, active: false } : c)) };
+}
+
+/**
+ * 重新激活退役条款（生命周期面板「重新激活」按钮）：active 恢复 true，清掉退役留痕。
+ * 只允许救回「仍可工作」的退役——被 supersede（被新条款取代）的不救，否则新旧条款同时注入。
+ */
+export function reactivateConstraint(ledger: ScenarioLedger, id: string): ScenarioLedger {
+  return {
+    ...ledger,
+    constraints: ledger.constraints.map((c) => (c.id === id && c.supersededBy === null ? { ...c, active: true } : c)),
+  };
 }
 
 /** 冲突裁决：落败方标 supersededBy（§15） */
@@ -335,7 +353,8 @@ export function recordRunOutcome(ledger: ScenarioLedger, params: RunOutcomeParam
   const negative = params.outcome === "rejected" || params.outcome === "corrected";
 
   const runStats = { ...ledger.runStats, runs: ledger.runStats.runs + 1 };
-  // holdout 轮是实验观察（条款被刻意抽走），不计入正式统计——保持基线纯净
+  // holdout 轮是对照实验（条款被刻意抽走），不计 accepted/rejected/corrected/连胜——保持基线纯净。
+  // 但 runs 仍然递增（运行确实发生了），确保 runs 与实际执行次数一致。
   if (!params.holdout) {
     if (!suspected) {
       if (params.outcome === "rejected") runStats.rejected += 1;
@@ -382,20 +401,27 @@ export function recordRunOutcome(ledger: ScenarioLedger, params: RunOutcomeParam
   // 两角色模型：条款反事实归因（§两角色 3.2）。
   // 规则：干净收尾 → 注入条款 helped++；打回/纠正 → hurt++；holdout 轮 → 不归因只计 heldoutRuns；
   // suspected 不归因（两边不可信）；无人值守不归因（没人看的成功不构成验证）。
+  // 团队层条款（id 不在本场景 constraints 里）不落场景账本归因——它们的生命周期在
+  // team-ledger.json，写进来只会积累永不消费的孤儿键。
+  const knownIds = new Set(ledger.constraints.map((c) => c.id));
+  const injectable = params.injectedConstraints?.filter((cid) => knownIds.has(cid)) ?? [];
   const attribution = { ...ledger.attribution };
   const attributable = !suspected && params.attended && !params.holdout;
-  if (attributable && params.injectedConstraints?.length) {
-    for (const cid of params.injectedConstraints) {
-      const entry = attribution[cid] ?? { helped: 0, hurt: 0, heldoutRuns: 0 };
+  if (attributable && injectable.length) {
+    for (const cid of injectable) {
+      const entry = attribution[cid] ?? { helped: 0, hurt: 0, heldoutRuns: 0, holdoutAccepted: 0 };
       if (negative) entry.hurt += 1;
       else entry.helped += 1;
       attribution[cid] = entry;
     }
   }
-  if (params.holdout && params.injectedConstraints?.length) {
-    for (const cid of params.injectedConstraints) {
-      const entry = attribution[cid] ?? { helped: 0, hurt: 0, heldoutRuns: 0 };
+  if (params.holdout && injectable.length) {
+    // holdout 轮基线要「有人看的干净收尾」，与 helped 的口径对齐（attended + acceptedSemantics）
+    const holdoutSuccess = params.attended && acceptedSemantics && !suspected;
+    for (const cid of injectable) {
+      const entry = attribution[cid] ?? { helped: 0, hurt: 0, heldoutRuns: 0, holdoutAccepted: 0 };
       entry.heldoutRuns += 1;
+      if (holdoutSuccess) entry.holdoutAccepted += 1;
       attribution[cid] = entry;
     }
   }
@@ -459,14 +485,13 @@ export function evaluateLifecycle(ledger: ScenarioLedger): { ledger: ScenarioLed
   return { ledger: { ...ledger, constraints }, changes };
 }
 
-/** 单条款净增益：注入轮成功率 − holdout 轮基线（场景整体干净率）；样本不足返回 null */
+/** 单条款净增益：注入轮成功率 − 同条款 holdout 轮基线；任一路样本不足返回 null */
 export function netGain(ledger: ScenarioLedger, id: string): number | null {
   const entry = ledger.attribution[id];
   if (!entry) return null;
   const injected = entry.helped + entry.hurt;
   if (injected < 1 || entry.heldoutRuns === 0) return null;
-  const holdoutSuccessRate = ledger.runStats.runs > 0 ? ledger.runStats.accepted / ledger.runStats.runs : 0;
-  return entry.helped / injected - holdoutSuccessRate;
+  return entry.helped / injected - entry.holdoutAccepted / entry.heldoutRuns;
 }
 
 // ---------------------------------------------------------------------------
@@ -546,7 +571,7 @@ export type RevisionProposal = ProposeInput & { /** added 块的稳定子串（�
  *  - 同 runId 多次编辑 → 只合并提案（条款去重），corrected 只计 1 次（首次纠正时的分支已锁死）；
  *  - added 类条款与既有 advisory 同义 → 机械升级 must_contain（§4 两次命中规则）。
  */
-export function applyOutputCorrection(ledger: ScenarioLedger, params: { runId: string; digest?: string; at?: string; proposals: RevisionProposal[] }): ScenarioLedger {
+export function applyOutputCorrection(ledger: ScenarioLedger, params: { runId: string; digest?: string; at?: string; proposals: RevisionProposal[]; injectedConstraints?: string[] }): ScenarioLedger {
   const at = params.at ?? new Date().toISOString();
   let next = ledger;
   const ivRow = next.interventions.find((i) => i.runId === params.runId);
@@ -558,6 +583,7 @@ export function applyOutputCorrection(ledger: ScenarioLedger, params: { runId: s
       digest: params.digest,
       at,
       interventions: { gatesAnswered: 0, questionsAnswered: 0, correctionsGiven: 1 },
+      injectedConstraints: params.injectedConstraints,
     });
   } else if (ivRow.correctionsGiven === 0) {
     // 沉默 accepted 已入账 → 修正为 corrected（撤销错误的自动接受）
@@ -568,7 +594,14 @@ export function applyOutputCorrection(ledger: ScenarioLedger, params: { runId: s
     const interventions = next.interventions.map((i) =>
       i.runId === params.runId ? { ...i, correctionsGiven: i.correctionsGiven + 1, total: i.total + 1 } : i,
     );
-    next = { ...next, runStats, interventions };
+    // 归因同步翻转：结算时按 accepted 给注入条款记了 helped，用户亲手改产出说明那不算帮到 → helped-- hurt++
+    const attribution = { ...next.attribution };
+    for (const cid of params.injectedConstraints ?? []) {
+      const entry = attribution[cid];
+      if (!entry || entry.helped <= 0) continue;
+      attribution[cid] = { ...entry, helped: entry.helped - 1, hurt: entry.hurt + 1 };
+    }
+    next = { ...next, runStats, interventions, attribution };
   }
   for (const proposal of params.proposals) {
     // §4 机械升级：added 块命中既有 advisory → 升级 must_contain（pattern=稳定子串），不再新增

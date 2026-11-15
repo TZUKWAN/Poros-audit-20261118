@@ -42,7 +42,7 @@ export function readTeamConstraints(dataRoot: string): Constraint[] {
   }
 }
 
-/** 写团队层条款（原子性：tmp+rename 不做——量小，直接覆写；调用方需 catch） */
+/** 写团队层条款（原子性：tmp+rename，防半写文件被并发读成损坏 → 静默清空条款） */
 export function writeTeamConstraints(dataRoot: string, constraints: Constraint[]): void {
   const filePath = teamLedgerPath(dataRoot);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -51,7 +51,9 @@ export function writeTeamConstraints(dataRoot: string, constraints: Constraint[]
     constraints: constraints.map((c) => ({ ...c, layer: "team" })),
     updatedAt: new Date().toISOString(),
   };
-  fs.writeFileSync(filePath, JSON.stringify(body, null, 2), "utf8");
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(body, null, 2), "utf8");
+  fs.renameSync(tmp, filePath);
 }
 
 /**

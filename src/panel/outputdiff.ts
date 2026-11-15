@@ -37,7 +37,7 @@ function formatEquivalent(a: string, b: string): boolean {
   return norm(a) === norm(b) && norm(a).length > 0;
 }
 
-/** 行级 LCS 的 DP 表（产出为文本规模，200k 上限内可控） */
+/** 行级 LCS 的 DP 表（产出为文本规模，200k 上限内可控；超限护栏见 computeOutputDiff） */
 function lcsTable(a: string[], b: string[]): number[][] {
   const table: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
   for (let i = a.length - 1; i >= 0; i -= 1) {
@@ -48,6 +48,9 @@ function lcsTable(a: string[], b: string[]): number[][] {
   return table;
 }
 
+/** LCS DP 表内存护栏：单元格数超过 400 万（约 32MB）时退化为整段替换，不算精细归因 */
+const MAX_LCS_CELLS = 4_000_000;
+
 /**
  * 结构化 diff：先由 LCS 生成 eq/del/ins 算子序列，再把连续 del/ins 游程归并为改动块。
  * 相邻删+增 → reworded（格式等价时降级 format）；仅删 → removed；仅增 → added。
@@ -56,6 +59,10 @@ export function computeOutputDiff(original: string, revised: string): EditBlock[
   if (original === revised) return [];
   const a = splitLines(original);
   const b = splitLines(revised);
+  // 超限护栏：跳过 LCS，整段视为一个 reworded 块（锚=开头）——宁可粗不爆内存
+  if ((a.length + 1) * (b.length + 1) > MAX_LCS_CELLS) {
+    return [{ kind: "reworded", anchor: "（开头）", before: truncate(original, MAX_FRAGMENT), after: truncate(revised, MAX_FRAGMENT) }];
+  }
   const table = lcsTable(a, b);
   type Op = { t: "eq" | "del" | "ins"; line: string };
   const ops: Op[] = [];

@@ -16,7 +16,7 @@ import { renderGateView } from "@/gates/views.js";
 import { classifyGateDecision, type GateProposalDraft } from "@/panel/gate-classify.js";
 import { memoryTree, type MemoryTreeNode } from "@/memory/memory.js";
 import { ScenarioRecordSchema, scenarioMatchesScope, scenarioNameFromRequirement, type ScenarioLibrary, type ScenarioRecord } from "@/scenario/library.js";
-import { proposeConstraint, recordRunOutcome, stripNegationPrefix, applyOutputCorrection, ensureLedger as ensureLedgerOf, activeConstraints, pendingConstraints, confirmConstraints, retireConstraint, evaluateLifecycle, netGain, mergeConstraintGuarded, type ScenarioLedger, type RevisionProposal } from "@/scenario/ledger.js";
+import { proposeConstraint, recordRunOutcome, stripNegationPrefix, applyOutputCorrection, ensureLedger as ensureLedgerOf, activeConstraints, pendingConstraints, confirmConstraints, retireConstraint, reactivateConstraint, evaluateLifecycle, netGain, mergeConstraintGuarded, type ScenarioLedger, type RevisionProposal } from "@/scenario/ledger.js";
 import { resolveConstraints, readTeamConstraints } from "@/scenario/team-ledger.js";
 import { confidence, tierOfLedger } from "@/scenario/confidence.js";
 import { inputDigest } from "@/scenario/digest.js";
@@ -283,6 +283,7 @@ export const PanelActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("revise-output"), runId: z.string().min(1), content: z.string().min(1).max(200_000) }),
   z.object({ type: z.literal("retire-constraint"), scenarioId: z.string().min(1), constraintId: z.string().min(1) }),
   z.object({ type: z.literal("confirm-constraints"), scenarioId: z.string().min(1), ids: z.array(z.string().min(1).max(60)).min(1).max(50) }),
+  z.object({ type: z.literal("reactivate-constraint"), scenarioId: z.string().min(1), constraintId: z.string().min(1) }),
   z.object({ type: z.literal("control"), action: z.enum(["pause", "resume", "terminate"]) }),
   z.object({ type: z.literal("answer-run"), runId: z.string().min(1), values: z.record(z.string(), z.string().max(20_000)) }),
   z.object({ type: z.literal("guide-run"), instruction: z.string().min(2).max(8_000) }),
@@ -1748,8 +1749,9 @@ export class PanelServer {
           }));
           const scenarioId = this.runLedgerMeta.get(artifact.runId)?.scenarioId ?? null;
           if (scenarioId && proposals.length) {
+            const injection = this.runInjectionMeta.get(artifact.runId);
             await this.deps.library
-              .updateLedger(scenarioId, (ledger) => applyOutputCorrection(ledger, { runId: artifact.runId!, proposals, at: new Date().toISOString() }))
+              .updateLedger(scenarioId, (ledger) => applyOutputCorrection(ledger, { runId: artifact.runId!, proposals, at: new Date().toISOString(), injectedConstraints: injection?.injected }))
               .catch(() => undefined);
           }
         }
@@ -2589,6 +2591,14 @@ export class PanelServer {
       await this.pushSnapshot();
       return { ok: true };
     }
+    if (action.type === "reactivate-constraint") {
+      // 生命周期面板「重新激活」：救回仍可工作的退役条款（被 supersede 的不救，见 reactivateConstraint）
+      if (!this.deps.library) return { ok: false, error: "场景库未准备好" };
+      await this.deps.library.updateLedger(action.scenarioId, (ledger) => reactivateConstraint(ledger, action.constraintId)).catch((error: unknown) => ({ error }));
+      this.pushChat({ role: "build-status", tone: "ok", text: "条款已重新激活，下次运行恢复注入。", ts: Date.now() });
+      await this.pushSnapshot();
+      return { ok: true };
+    }
     if (action.type === "revise-output") {
       // §7 Edit-to-Accept：最强信号——用户亲手改产出。原子三件事：
       // ① diff → pendingConfirm 提案 ② corrected++/断连胜 ③ interventions 记 1 次纠正
@@ -2623,8 +2633,9 @@ export class PanelServer {
       }
       if (scenarioId && this.deps.library) {
         const digest = cancelled?.digest ?? this.runLedgerMeta.get(action.runId)?.digest;
+        const injection = this.runInjectionMeta.get(action.runId);
         await this.deps.library
-          .updateLedger(scenarioId, (ledger) => applyOutputCorrection(ledger, { runId: action.runId, digest, proposals }))
+          .updateLedger(scenarioId, (ledger) => applyOutputCorrection(ledger, { runId: action.runId, digest, proposals, injectedConstraints: injection?.injected }))
           .catch(() => undefined);
       }
       // 产出落地为改后版本（正文写回文件 + 版本留痕，原文可溯）

@@ -757,8 +757,13 @@ async function main(): Promise<void> {
           const allConstraints = resolveConstraints(activeOnes, teamConstraints).filter((c) => c.active && !c.supersededBy);
           const holdoutRun = panelRunId ? hashRunId(panelRunId) : false;
           const checkedConstraints = holdoutRun ? allConstraints.filter((c) => c.kind !== "advisory") : allConstraints;
-          const injectedIds = checkedConstraints.map((c) => c.id);
-          if (panelRunId) panel.markRunInjection(panelRunId, injectedIds, holdoutRun);
+          // 归因对象（两角色 3.2）：常规轮=受检条款（helped/hurt）；holdout 轮=被抽走的 advisory
+          // （heldoutRuns/holdoutAccepted 挂在它们头上——反事实基线记的是"没有它时表现如何"）。
+          // failed/untested 轮不标记：约束既未进提示词也未受检，无归因对象。
+          const attributionIds = holdoutRun
+            ? allConstraints.filter((c) => c.kind === "advisory").map((c) => c.id)
+            : checkedConstraints.map((c) => c.id);
+          if (panelRunId && attributionIds.length) panel.markRunInjection(panelRunId, attributionIds, holdoutRun);
           if (checkedConstraints.length) {
             const check = await runSelfCheck({
               constraints: checkedConstraints,

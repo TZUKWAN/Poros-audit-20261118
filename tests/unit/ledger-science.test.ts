@@ -7,7 +7,10 @@ import {
   looksLikeLossyUpdate,
   mergeConstraintGuarded,
   netGain,
+  reactivateConstraint,
   recordRunOutcome,
+  retireConstraint,
+  supersedeConstraint,
   confirmConstraints,
   proposeConstraint,
   type Constraint,
@@ -42,7 +45,7 @@ describe("两角色模型 §3.2 归因", () => {
       outcome: "accepted",
       injectedConstraints: ["c1"],
     });
-    expect(ledger.attribution["c1"]).toEqual({ helped: 1, hurt: 0, heldoutRuns: 0 });
+    expect(ledger.attribution["c1"]).toEqual({ helped: 1, hurt: 0, heldoutRuns: 0, holdoutAccepted: 0 });
   });
 
   it("打回 → 注入条款 hurt++ 且断连胜", () => {
@@ -67,7 +70,7 @@ describe("两角色模型 §3.2 归因", () => {
       injectedConstraints: ["c1"],
       holdout: true,
     });
-    expect(ledger.attribution["c1"]).toEqual({ helped: 0, hurt: 0, heldoutRuns: 1 });
+    expect(ledger.attribution["c1"]).toEqual({ helped: 0, hurt: 0, heldoutRuns: 1, holdoutAccepted: 1 });
     expect(ledger.runStats.accepted).toBe(0); // holdout 轮也不计 accepted
   });
 
@@ -110,7 +113,7 @@ describe("两角色模型 §3.2 归因", () => {
 describe("两角色模型 §3.4 生命周期自动化", () => {
   it("helped≥2 且 hurt=0 → 自动转正（advisory confirmed）", () => {
     let ledger = withConfirmedAdvisory(emptyLedger(), "c1", "测试条款");
-    ledger.attribution["c1"] = { helped: AUTO_PROMOTE_HELPED, hurt: 0, heldoutRuns: 0 };
+    ledger.attribution["c1"] = { helped: AUTO_PROMOTE_HELPED, hurt: 0, heldoutRuns: 0, holdoutAccepted: 0 };
     // 先模拟退役态再触发转正路径没意义——直接造一个待验证场景：条款 active，评估不改
     const { ledger: next, changes } = evaluateLifecycle(ledger);
     expect(changes).toEqual([]); // active 的不做 promote 动作
@@ -119,7 +122,7 @@ describe("两角色模型 §3.4 生命周期自动化", () => {
 
   it("hurt≥2 → 自动退役（advisory confirmed）", () => {
     let ledger = withConfirmedAdvisory(emptyLedger(), "c1", "测试条款");
-    ledger.attribution["c1"] = { helped: 5, hurt: AUTO_RETIRE_HURT, heldoutRuns: 0 };
+    ledger.attribution["c1"] = { helped: 5, hurt: AUTO_RETIRE_HURT, heldoutRuns: 0, holdoutAccepted: 0 };
     const { ledger: next, changes } = evaluateLifecycle(ledger);
     expect(changes).toHaveLength(1);
     expect(changes[0]!.action).toBe("retire");
@@ -130,7 +133,7 @@ describe("两角色模型 §3.4 生命周期自动化", () => {
   it("must_contain 不自动退役（标准类豁免）", () => {
     let ledger = withConfirmedAdvisory(emptyLedger(), "c1", "标准条款");
     ledger.constraints[0]!.kind = "must_contain";
-    ledger.attribution["c1"] = { helped: 0, hurt: AUTO_RETIRE_HURT + 3, heldoutRuns: 0 };
+    ledger.attribution["c1"] = { helped: 0, hurt: AUTO_RETIRE_HURT + 3, heldoutRuns: 0, holdoutAccepted: 0 };
     const { ledger: next, changes } = evaluateLifecycle(ledger);
     expect(changes).toEqual([]);
     expect(next.constraints[0]!.active).toBe(true);
@@ -140,7 +143,7 @@ describe("两角色模型 §3.4 生命周期自动化", () => {
     let ledger = emptyLedger();
     const proposed = proposeConstraint(ledger, { clause: "待签约条款测试", scope: "output", origin: ORIGIN });
     ledger = proposed!.ledger;
-    ledger.attribution[ledger.constraints[0]!.id] = { helped: 10, hurt: 0, heldoutRuns: 0 };
+    ledger.attribution[ledger.constraints[0]!.id] = { helped: 10, hurt: 0, heldoutRuns: 0, holdoutAccepted: 0 };
     const { ledger: next, changes } = evaluateLifecycle(ledger);
     expect(changes[0]!.action).toBe("promote");
     expect(next.constraints[0]!.confirmedAt).not.toBeNull();
@@ -157,16 +160,33 @@ describe("两角色模型 §3.4 生命周期自动化", () => {
 });
 
 describe("两角色模型 §3.3 净增益", () => {
-  it("有注入+有 holdout 样本 → 净增益 = 注入成功率 − 场景干净率", () => {
+  it("有注入+有 holdout 样本 → 净增益 = 注入成功率 − 同条款 holdout 成功率", () => {
     let ledger = withConfirmedAdvisory(emptyLedger(), "c1", "测试条款");
-    ledger.runStats = { runs: 10, accepted: 8, rejected: 0, corrected: 0, consecutiveClean: 5 }; // 场景干净率 0.8
     ledger = recordRunOutcome(ledger, { runId: "r1", attended: true, outcome: "accepted", injectedConstraints: ["c1"] });
     ledger = recordRunOutcome(ledger, { runId: "r2", attended: true, outcome: "accepted", injectedConstraints: ["c1"], holdout: true });
-    // 注入成功率 = 1/1 = 1.0；基线 = 9/12 = 0.75（r1 accepted 后 accepted=9/runs=12）；净增益 = 0.25
-    expect(netGain(ledger, "c1")).toBeCloseTo(0.25, 5);
+    ledger = recordRunOutcome(ledger, { runId: "r3", attended: true, outcome: "rejected", injectedConstraints: ["c1"], holdout: true });
+    // 注入成功率 = 1/1 = 1.0；holdout 基线 = 1/2 = 0.5；净增益 = 0.5
+    expect(netGain(ledger, "c1")).toBeCloseTo(0.5, 5);
   });
 
-  it("样本不足（injected<2 或无 holdout）→ null", () => {
+  it("holdout 轮也递增 runs（实验发生了就算运行），但不计 accepted/连胜", () => {
+    let ledger = withConfirmedAdvisory(emptyLedger(), "c1", "测试条款");
+    ledger = recordRunOutcome(ledger, { runId: "r1", attended: true, outcome: "accepted", injectedConstraints: ["c1"] });
+    const before = ledger.runStats;
+    ledger = recordRunOutcome(ledger, { runId: "r2", attended: true, outcome: "accepted", injectedConstraints: ["c1"], holdout: true });
+    expect(ledger.runStats.runs).toBe(before.runs + 1);
+    expect(ledger.runStats.accepted).toBe(before.accepted);
+    expect(ledger.runStats.consecutiveClean).toBe(before.consecutiveClean);
+  });
+
+  it("holdout 归因挂在被抽走的条款上；场景账本外的 id（团队层）不落孤儿键", () => {
+    let ledger = withConfirmedAdvisory(emptyLedger(), "c1", "测试条款");
+    ledger = recordRunOutcome(ledger, { runId: "r1", attended: true, outcome: "accepted", injectedConstraints: ["c1", "team-ghost"], holdout: true });
+    expect(ledger.attribution["c1"]!.heldoutRuns).toBe(1);
+    expect(ledger.attribution["team-ghost"]).toBeUndefined();
+  });
+
+  it("样本不足（无 holdout）→ null", () => {
     let ledger = withConfirmedAdvisory(emptyLedger(), "c1", "测试条款");
     ledger = recordRunOutcome(ledger, { runId: "r1", attended: true, outcome: "accepted", injectedConstraints: ["c1"] });
     expect(netGain(ledger, "c1")).toBeNull();
@@ -174,6 +194,25 @@ describe("两角色模型 §3.3 净增益", () => {
 
   it("无归因 → null", () => {
     expect(netGain(emptyLedger(), "ghost")).toBeNull();
+  });
+});
+
+describe("两角色模型 生命周期人工干预", () => {
+  it("reactivateConstraint：退役条款救回（active 恢复）", () => {
+    let ledger = withConfirmedAdvisory(emptyLedger(), "c1", "测试条款");
+    ledger = retireConstraint(ledger, "c1");
+    expect(ledger.constraints[0]!.active).toBe(false);
+    ledger = reactivateConstraint(ledger, "c1");
+    expect(ledger.constraints[0]!.active).toBe(true);
+    expect(ledger.constraints[0]!.supersededBy).toBeNull();
+  });
+
+  it("reactivateConstraint：被 supersede 的条款不救（防新旧同时注入）", () => {
+    let ledger = withConfirmedAdvisory(emptyLedger(), "c1", "旧条款");
+    ledger = supersedeConstraint(ledger, "c1", "c2");
+    ledger = reactivateConstraint(ledger, "c1");
+    expect(ledger.constraints[0]!.active).toBe(false);
+    expect(ledger.constraints[0]!.supersededBy).toBe("c2");
   });
 });
 
