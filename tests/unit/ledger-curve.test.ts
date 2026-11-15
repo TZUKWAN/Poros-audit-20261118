@@ -41,6 +41,7 @@ describe("P7 统一降级：账本置信度为负也判降级（旧成功率规�
       record.ledger = {
         version: 1,
         constraints: [],
+        attribution: {},
         runStats: { runs: 2, accepted: 1, rejected: 1, corrected: 0, consecutiveClean: 0 },
         gateStats: {},
         inputPatterns: [{ digest: "d", at: new Date().toISOString(), outcome: "rejected" }],
@@ -75,7 +76,7 @@ describe("PR-curve：签约/退役 action + 快照账本摘要 + 抽查态闸门
     dir = await mkdtemp(path.join(tmpdir(), "ledger-curve-srv-"));
     library = new ScenarioLibrary({ store: jsonStore({ filePath: path.join(dir, "scenarios.json"), schema: ScenarioRecordSchema }) });
     const record = baseRecord("sc-1");
-    record.ledger = { version: 1, constraints: [], runStats: { runs: 3, accepted: 3, rejected: 0, corrected: 0, consecutiveClean: 3 }, gateStats: {}, inputPatterns: [{ digest: "d1", at: new Date().toISOString(), outcome: "accepted" }], interventions: [{ runId: "r1", at: new Date().toISOString(), gatesAnswered: 1, questionsAnswered: 0, correctionsGiven: 0, total: 1 }] };
+    record.ledger = { version: 1, constraints: [], attribution: {}, runStats: { runs: 3, accepted: 3, rejected: 0, corrected: 0, consecutiveClean: 3 }, gateStats: {}, inputPatterns: [{ digest: "d1", at: new Date().toISOString(), outcome: "accepted" }], interventions: [{ runId: "r1", at: new Date().toISOString(), gatesAnswered: 1, questionsAnswered: 0, correctionsGiven: 0, total: 1 }] };
     await library.save(record);
     // 一条待签约提案
     await library.updateLedger("sc-1", (ledger) => proposeConstraint(ledger, { clause: "行动项必须带负责人和截止日", scope: "output", origin: { type: "feedback", text: "行动项必须带负责人和截止日", at: new Date().toISOString(), runId: "r2" } })?.ledger ?? ledger);

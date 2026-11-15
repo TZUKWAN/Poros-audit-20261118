@@ -21,6 +21,7 @@ const c = (id: string, kind: Constraint["kind"], clause: string, pattern: string
   kind,
   pattern,
   origin: { type: "reject", text: clause, at: "2026-11-05T00:00:00.000Z", runId: "r0" },
+  layer: "scenario",
   confirmedAt: "2026-11-05T01:00:00.000Z",
   hits: 0,
   active: true,

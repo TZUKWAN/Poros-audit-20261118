@@ -32,6 +32,8 @@ export const ConstraintSchema = z.object({
   active: z.boolean().default(true),
   /** 冲突裁决后指向胜者（"expired" = 30 天未确认过期） */
   supersededBy: z.string().nullable().default(null),
+  /** 两角色模型：条款层级——scenario 场景私有 / team 团队资产（git 同步） */
+  layer: z.enum(["scenario", "team"]).default("scenario"),
 });
 
 export const GateStatSchema = z.object({
@@ -79,6 +81,20 @@ export const ScenarioLedgerSchema = z.object({
       }),
     )
     .max(200),
+  /** 两角色模型：条款反事实归因（key = constraint id；holdout 轮不归因，见 recordRunOutcome） */
+  attribution: z
+    .record(
+      z.string(),
+      z.object({
+        /** 注入且回合干净收尾的次数 */
+        helped: z.number().int().min(0).default(0),
+        /** 注入且被打回/纠正的次数 */
+        hurt: z.number().int().min(0).default(0),
+        /** 该条款处于对照组、未注入的运行数（反事实基线样本） */
+        heldoutRuns: z.number().int().min(0).default(0),
+      }),
+    )
+    .default({}),
 });
 
 export type ConstraintOrigin = z.infer<typeof ConstraintOriginSchema>;
@@ -114,6 +130,7 @@ export function emptyLedger(): ScenarioLedger {
     gateStats: {},
     inputPatterns: [],
     interventions: [],
+    attribution: {},
   };
 }
 
@@ -127,6 +144,7 @@ export function migratedLedger(record: Pick<ScenarioRecord, "stats">): ScenarioL
   return {
     version: 1,
     constraints: [],
+    attribution: {},
     runStats: {
       runs: uses,
       accepted: successes,
@@ -294,6 +312,10 @@ export type RunOutcomeParams = {
   interventions?: { gatesAnswered: number; questionsAnswered: number; correctionsGiven: number };
   /** pendingConfirm 过期清理的基准时刻 */
   now?: string;
+  /** 两角色模型：本 run 实际注入的 active 条款 id（归因对象） */
+  injectedConstraints?: string[];
+  /** 两角色模型：本 run 是否为 15% 确定性对照组（advisory 被抽走、不归因） */
+  holdout?: boolean;
 };
 
 /**
@@ -313,20 +335,23 @@ export function recordRunOutcome(ledger: ScenarioLedger, params: RunOutcomeParam
   const negative = params.outcome === "rejected" || params.outcome === "corrected";
 
   const runStats = { ...ledger.runStats, runs: ledger.runStats.runs + 1 };
-  if (!suspected) {
-    if (params.outcome === "rejected") runStats.rejected += 1;
-    else if (params.outcome === "corrected") runStats.corrected += 1;
-    else if (acceptedSemantics && params.attended) runStats.accepted += 1;
+  // holdout 轮是实验观察（条款被刻意抽走），不计入正式统计——保持基线纯净
+  if (!params.holdout) {
+    if (!suspected) {
+      if (params.outcome === "rejected") runStats.rejected += 1;
+      else if (params.outcome === "corrected") runStats.corrected += 1;
+      else if (acceptedSemantics && params.attended) runStats.accepted += 1;
+    }
+    if (negative || suspected) runStats.consecutiveClean = 0;
+    else if (acceptedSemantics && params.attended) runStats.consecutiveClean += 1;
   }
-  if (negative || suspected) runStats.consecutiveClean = 0;
-  else if (acceptedSemantics && params.attended) runStats.consecutiveClean += 1;
 
   const gateStats = applyGateEvents(ledger, params.gateEvents ?? {}, at).gateStats;
 
   // inputPatterns 事件源（confidence 衰减计数 + 路由 digest 命中都读它）：
-  // 有人值守 → 三种结果都记；无人值守 → 只记失败自证；suspected 不记。
+  // 有人值守 → 三种结果都记；无人值守 → 只记失败自证；suspected/holdout 不记。
   const inputPatterns = [...ledger.inputPatterns];
-  const recordEvent = !suspected && (params.attended || params.outcome === "rejected");
+  const recordEvent = !suspected && !params.holdout && (params.attended || params.outcome === "rejected");
   if (recordEvent) {
     inputPatterns.push({ digest: params.digest ?? "none", at, outcome: silent ? "accepted" : suspected ? "corrected" : (params.outcome as RunOutcome) });
     if (inputPatterns.length > 50) inputPatterns.splice(0, inputPatterns.length - 50);
@@ -354,7 +379,28 @@ export function recordRunOutcome(ledger: ScenarioLedger, params: RunOutcomeParam
       : c,
   );
 
-  return { ...ledger, version: 1, runStats, gateStats, inputPatterns, interventions, constraints };
+  // 两角色模型：条款反事实归因（§两角色 3.2）。
+  // 规则：干净收尾 → 注入条款 helped++；打回/纠正 → hurt++；holdout 轮 → 不归因只计 heldoutRuns；
+  // suspected 不归因（两边不可信）；无人值守不归因（没人看的成功不构成验证）。
+  const attribution = { ...ledger.attribution };
+  const attributable = !suspected && params.attended && !params.holdout;
+  if (attributable && params.injectedConstraints?.length) {
+    for (const cid of params.injectedConstraints) {
+      const entry = attribution[cid] ?? { helped: 0, hurt: 0, heldoutRuns: 0 };
+      if (negative) entry.hurt += 1;
+      else entry.helped += 1;
+      attribution[cid] = entry;
+    }
+  }
+  if (params.holdout && params.injectedConstraints?.length) {
+    for (const cid of params.injectedConstraints) {
+      const entry = attribution[cid] ?? { helped: 0, hurt: 0, heldoutRuns: 0 };
+      entry.heldoutRuns += 1;
+      attribution[cid] = entry;
+    }
+  }
+
+  return { ...ledger, version: 1, runStats, gateStats, inputPatterns, interventions, constraints, attribution };
 }
 
 /** 自检可用条款：confirmedAt≠null 且 active 且未被 supersede（§10） */
@@ -365,6 +411,129 @@ export function activeConstraints(ledger: ScenarioLedger): Constraint[] {
 /** pendingConfirm 队列（闸门5 签约面数据源） */
 export function pendingConstraints(ledger: ScenarioLedger): Constraint[] {
   return ledger.constraints.filter((c) => c.confirmedAt === null && c.active && c.supersededBy === null);
+}
+
+// ---------------------------------------------------------------------------
+// 两角色模型（docs/两角色模型优化方案.md §3）：生命周期自动化 + 归因读取
+// ---------------------------------------------------------------------------
+
+/** 自动转正阈值：helped 达到该数且 hurt == 0（run 比回合重，取 2） */
+export const AUTO_PROMOTE_HELPED = 2;
+/** 自动退役阈值：hurt 达到该数（文件保留，召回跳过） */
+export const AUTO_RETIRE_HURT = 2;
+
+export type LifecycleChange = {
+  id: string;
+  action: "promote" | "retire";
+  clause: string;
+  reason: string;
+};
+
+/**
+ * 生命周期自动评估（结算事务尾部调用；journal 由调用方落）。
+ * 转正路径作用于 pendingConfirm（confirmedAt=null 的 advisory，helped≥2 → 自动签约）——
+ * 闸5 人工签约仍是主路径，这里回填「用户忘了签但反复被验证」的条款。
+ * 退役路径作用于 confirmed advisory（hurt≥2）；must_contain/must_not_contain 是标准，不自动退役。
+ */
+export function evaluateLifecycle(ledger: ScenarioLedger): { ledger: ScenarioLedger; changes: LifecycleChange[] } {
+  const changes: LifecycleChange[] = [];
+  const constraints = ledger.constraints.map((c) => {
+    if (c.kind !== "advisory" || !c.active || c.supersededBy !== null) return c;
+    const entry = ledger.attribution[c.id];
+    if (!entry) return c;
+    if (c.confirmedAt !== null) {
+      // 已生效条款：只自动退役
+      if (entry.hurt >= AUTO_RETIRE_HURT) {
+        changes.push({ id: c.id, action: "retire", clause: c.clause, reason: `hurt=${entry.hurt} ≥ ${AUTO_RETIRE_HURT}` });
+        return { ...c, active: false, supersededBy: "auto-retired" };
+      }
+      return c;
+    }
+    // pendingConfirm：反复被验证 → 自动转正
+    if (entry.helped >= AUTO_PROMOTE_HELPED && entry.hurt === 0) {
+      changes.push({ id: c.id, action: "promote", clause: c.clause, reason: `helped=${entry.helped}，hurt=0（自动签约）` });
+      return { ...c, confirmedAt: new Date().toISOString() };
+    }
+    return c;
+  });
+  return { ledger: { ...ledger, constraints }, changes };
+}
+
+/** 单条款净增益：注入轮成功率 − holdout 轮基线（场景整体干净率）；样本不足返回 null */
+export function netGain(ledger: ScenarioLedger, id: string): number | null {
+  const entry = ledger.attribution[id];
+  if (!entry) return null;
+  const injected = entry.helped + entry.hurt;
+  if (injected < 1 || entry.heldoutRuns === 0) return null;
+  const holdoutSuccessRate = ledger.runStats.runs > 0 ? ledger.runStats.accepted / ledger.runStats.runs : 0;
+  return entry.helped / injected - holdoutSuccessRate;
+}
+
+// ---------------------------------------------------------------------------
+// 防退化守卫（两角色模型 §3.5，灵感：MeowCode guard.ts 的 lossy update 检测）
+// ---------------------------------------------------------------------------
+
+/** 提取命令长参数（--flag），用于「缩短丢参」判断 */
+function extractCommandFlags(text: string): string[] {
+  const flags = new Set<string>();
+  for (const match of text.matchAll(/--[A-Za-z][\w-]*/g)) {
+    flags.add(match[0].toLowerCase());
+  }
+  return [...flags].sort();
+}
+
+/** 关键 token：命令 flag + 日期格式 + 字段名样式（UPPER_SNAKE / kebab / YYYY-MM-DD） */
+function extractCriticalTokens(text: string): Set<string> {
+  const tokens: Set<string> = new Set(extractCommandFlags(text));
+  for (const m of text.matchAll(/\b[A-Z][A-Z_]{2,}\b/g)) tokens.add(m[0]);
+  for (const m of text.matchAll(/\bYYYY[-_]MM[-_]DD\b|\b\d{4}-\d{2}-\d{2}\b/gi)) tokens.add(m[0].toUpperCase());
+  for (const m of text.matchAll(/\b[a-z]{2,}(-[a-z]{2,}){2,}\b/g)) tokens.add(m[0]);
+  return tokens;
+}
+
+/**
+ * 防退化检测：同类条款更新时，新子句更短且丢了关键 token
+ * （原 `pnpm publish --tag latest` 被"精炼"成 `pnpm publish` —— 表面更精炼，实际废了）。
+ * 约束条款丢限定词永远是退化，不看长度比例（与技能场景的 60% 阈值不同）。
+ * 返回 true = 拒绝并入，保留旧条款。
+ */
+export function looksLikeLossyUpdate(previous: string, next: string): boolean {
+  const before = previous.trim();
+  const after = next.trim();
+  if (!before || !after) return false;
+  if (after.length >= before.length) return false;
+  const beforeTokens = extractCriticalTokens(before);
+  if (!beforeTokens.size) return false;
+  const afterTokens = extractCriticalTokens(after);
+  return [...beforeTokens].some((token) => !afterTokens.has(token));
+}
+
+/**
+ * 带防退化守卫的条款合并：找最相似的现有 active 条款（bigram Jaccard ≥0.6），
+ * 若新文本相对它构成退化（更短且丢关键 token）→ 拒绝并入，保留旧条款。
+ */
+export function mergeConstraintGuarded(ledger: ScenarioLedger, input: ProposeInput): { ledger: ScenarioLedger; accepted: boolean } {
+  const norm = (v: string) => v.toLowerCase().replace(/\s+/g, "");
+  const incoming = norm(input.clause);
+  let mostSimilar: Constraint | undefined;
+  let bestScore = 0;
+  for (const c of ledger.constraints) {
+    if (!c.active || c.supersededBy !== null) continue;
+    const a = norm(c.clause);
+    const b = incoming;
+    if (!a || !b) continue;
+    const grams = (t: string): Set<string> => { const out = new Set<string>(); for (let i = 0; i < t.length - 1; i += 1) out.add(t.slice(i, i + 2)); return out; };
+    const ga = grams(a); const gb = grams(b);
+    let inter = 0; for (const g of ga) if (gb.has(g)) inter += 1;
+    const score = ga.size + gb.size > 0 ? inter / (ga.size + gb.size - inter) : 0;
+    if (score >= 0.6 && score > bestScore) { bestScore = score; mostSimilar = c; }
+  }
+  if (mostSimilar && looksLikeLossyUpdate(mostSimilar.clause, input.clause)) {
+    return { ledger, accepted: false };
+  }
+  const proposed = proposeConstraint(ledger, input);
+  if (!proposed) return { ledger, accepted: false };
+  return { ledger: proposed.ledger, accepted: true };
 }
 
 export type RevisionProposal = ProposeInput & { /** added 块的稳定子串（两次命中升级 must_contain 的 pattern） */ upgradePattern?: string };
