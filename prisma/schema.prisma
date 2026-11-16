@@ -38,6 +38,9 @@ enum TaskStatus {
   SUCCEEDED
   FAILED
   BLOCKED
+  // 质量验收状态（审查项⑥）：Judgment FAIL/UNCHECKED 必须体现在最终状态
+  SUCCEEDED_WITH_VIOLATIONS
+  UNVERIFIED
 }
 
 enum ApprovalKind {

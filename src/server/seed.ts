@@ -28,6 +28,9 @@ export async function seedForTests(): Promise<void> {
 	for (const u of ['admin@a.test', 'builder@a.test', 'employee@a.test', 'reviewer@a.test']) {
 		await db.projectMember.upsert({ where: { projectId_userId: { projectId: project.id, userId: u } }, create: { projectId: project.id, userId: u }, update: {} });
 	}
+	// 受限项目：仅管理员在册（AUTH-02/审查项④：任务事件等项目数据的跨成员负向测试用）
+	const exec = await db.project.upsert({ where: { id: 'proj-exec' }, create: { id: 'proj-exec', organizationId: orgA.id, name: '高管专属（隔离用）' }, update: {} });
+	await db.projectMember.upsert({ where: { projectId_userId: { projectId: exec.id, userId: 'admin@a.test' } }, create: { projectId: exec.id, userId: 'admin@a.test' }, update: {} });
 }
 
 async function main() {

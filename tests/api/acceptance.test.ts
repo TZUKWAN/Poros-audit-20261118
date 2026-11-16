@@ -36,7 +36,7 @@ function authed(token: string) {
 }
 
 beforeAll(async () => {
-	process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
+	process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-0123456789abcdef';
 	process.env.MODEL_GATEWAY = 'mock';
 	// 建测试库（忽略已存在）+ 重置 schema（每次跑都是确定性干净库）
 	try { await sql(serverUrl, 'CREATE DATABASE sceneflow_test'); } catch { /* 已存在 */ }
@@ -90,6 +90,29 @@ describe('AUTH-02 角色与项目权限', () => {
 	});
 });
 
+describe('AUTH-03 职责分离（审查项④：BUILDER 职级高但无审批权）', () => {
+	it('BUILDER 读审批列表 → 403', async () => {
+		const res = await app.inject({ method: 'GET', url: '/api/approvals', headers: authed(tokens.builder) });
+		expect(res.statusCode).toBe(403);
+	});
+	it('BUILDER 审批决策 → 403', async () => {
+		const res = await app.inject({ method: 'POST', url: '/api/approvals/whatever/decision', headers: authed(tokens.builder), payload: { decision: 'APPROVED' } });
+		expect(res.statusCode).toBe(403);
+	});
+	it('BUILDER 停用 Judgment 规则 → 403', async () => {
+		const res = await app.inject({ method: 'POST', url: '/api/judgments/whatever/disable', headers: authed(tokens.builder) });
+		expect(res.statusCode).toBe(403);
+	});
+	it('REVIEWER 可以读审批列表（职责内）', async () => {
+		const res = await app.inject({ method: 'GET', url: '/api/approvals', headers: authed(tokens.reviewer) });
+		expect(res.statusCode).toBe(200);
+	});
+	it('BUILDER 仍可构建（职级语义未被误伤）', async () => {
+		const res = await app.inject({ method: 'POST', url: '/api/agents/drafts', headers: authed(tokens.builder), payload: { name: '职责分离验证Agent' } });
+		expect(res.statusCode).toBe(200);
+	});
+});
+
 describe('AGT-01/02/03 构建-授权-发布-回滚闭环', () => {
 	let agentId = '';
 	it('AGT-01 构建者创建草稿并展示配置差异', async () => {
@@ -122,7 +145,15 @@ describe('AGT-01/02/03 构建-授权-发布-回滚闭环', () => {
 describe('WORK-01 统一工作台执行（mock 网关如实标注）', () => {
 	it('员工对已发布 Agent 下达任务 → 运行成功且事件可见', async () => {
 		const agents = await app.inject({ method: 'GET', url: '/api/agents', headers: authed(tokens.employee) });
-		const agent = agents.json().agents[0]!;
+		let agent = agents.json().agents.find((x: { status: string }) => x.status === 'PUBLISHED');
+		if (!agent) {
+			// 无已发布 Agent（用例顺序变化兜底）：构建者补发布一个
+			const drafts = agents.json().agents;
+			expect(drafts.length).toBeGreaterThan(0);
+			const pub = await app.inject({ method: 'POST', url: `/api/agents/${drafts[0]!.id}/publish`, headers: authed(tokens.builder) });
+			expect(pub.statusCode).toBe(200);
+			agent = { id: drafts[0]!.id };
+		}
 		const res = await app.inject({ method: 'POST', url: '/api/tasks', headers: authed(tokens.employee), payload: { agentId: agent.id, prompt: '撰写竞品报告', projectId: 'proj-market' } });
 		expect(res.statusCode).toBe(200);
 		expect(res.json().run.status).toBe('SUCCEEDED');
@@ -132,6 +163,22 @@ describe('WORK-01 统一工作台执行（mock 网关如实标注）', () => {
 		expect(sse.body).toContain('judgment');
 		// 网关标注
 		expect(sse.body).toContain('mock');
+	});
+	it('AUTH-02b 项目任务事件越权（审查项④）：非项目成员读他人项目任务事件 → 403', async () => {
+		// admin 在仅自己为成员的 proj-exec 下任务（seed 已建 proj-exec）
+		const agents = await app.inject({ method: 'GET', url: '/api/agents', headers: authed(tokens.admin) });
+		const agent = agents.json().agents[0]!;
+		if (agent.status !== 'PUBLISHED') {
+			await app.inject({ method: 'POST', url: `/api/agents/${agent.id}/publish`, headers: authed(tokens.admin) });
+		}
+		const t = await app.inject({ method: 'POST', url: '/api/tasks', headers: authed(tokens.admin), payload: { agentId: agent.id, prompt: '高管项目任务', projectId: 'proj-exec' } });
+		expect(t.statusCode).toBe(200);
+		// employee 不是 proj-exec 成员 → 403
+		const denied = await app.inject({ method: 'GET', url: `/api/tasks/${t.json().taskId}/events`, headers: authed(tokens.employee) });
+		expect(denied.statusCode).toBe(403);
+		// admin 本人 → 200
+		const ok = await app.inject({ method: 'GET', url: `/api/tasks/${t.json().taskId}/events`, headers: authed(tokens.admin) });
+		expect(ok.statusCode).toBe(200);
 	});
 });
 
@@ -172,17 +219,35 @@ describe('JUD-01/02/03 Judgment 全语义', () => {
 		const run = await getDb().run.findFirst({ where: { taskId: t.json().taskId }, include: { applications: true } });
 		expect(run!.applications.length).toBeGreaterThanOrEqual(3);
 		const evals = run!.applications.map((a) => a.evaluation);
-		expect(evals).toContain('PASS');      // must_contain:引用来源 —— mock 输出含"来源"等？ 验证见下
+		expect(evals).toContain('PASS');      // must_contain:引用来源
 		expect(evals).toContain('FAIL');      // 必然不存在的串
 		expect(evals).toContain('UNCHECKED'); // 语义规则无 Judge
+		// JUD-04（审查项⑥）：FAIL 必须体现在运行/任务状态——不得一律 SUCCEEDED
+		const t2 = await app.inject({ method: 'GET', url: `/api/tasks/${t.json().taskId}/events`, headers: authed(tokens.employee) });
+		expect(t2.body).toContain('SUCCEEDED_WITH_VIOLATIONS');
+	});
+	it('JUD-04b 仅剩 UNCHECKED（停用 FAIL 规则后）→ UNVERIFIED（未验证 ≠ 通过）', async () => {
+		const { getDb } = await import('../../src/server/db.js');
+		// 审阅者停用必然失败的规则（requireRoleExact：REVIEWER 权内）
+		const failRule = await getDb().judgmentRule.findFirst({ where: { rule: { contains: '必然不存在' } } });
+		const dis = await app.inject({ method: 'POST', url: `/api/judgments/${failRule!.id}/disable`, headers: authed(tokens.reviewer) });
+		expect(dis.json().status).toBe('DISABLED');
+		const agents = await app.inject({ method: 'GET', url: '/api/agents', headers: authed(tokens.employee) });
+		const t = await app.inject({ method: 'POST', url: '/api/tasks', headers: authed(tokens.employee), payload: { agentId: agents.json().agents[0]!.id, prompt: '第四份报告' } });
+		const { getDb: g2 } = await import('../../src/server/db.js');
+		const run = await g2().run.findFirst({ where: { taskId: t.json().taskId }, include: { applications: true } });
+		const evals = run!.applications.map((a) => a.evaluation);
+		expect(evals).not.toContain('FAIL');
+		expect(evals).toContain('UNCHECKED');
+		expect(run!.status).toBe('UNVERIFIED');
 	});
 	it('JUD-03 沉默不等于通过：应用只来自真实注入，语义规则不是 PASS', async () => {
 		const { getDb } = await import('../../src/server/db.js');
 		const unchecked = await getDb().judgmentApplication.findMany({ where: { evaluation: 'UNCHECKED' } });
 		expect(unchecked.length).toBeGreaterThan(0);
-		// 未注入的规则没有任何"应用记录"（无沉默晋级）
-		const approved = await getDb().judgmentRule.findMany({ where: { organizationId: 'org-a', status: 'DISABLED' } });
-		expect(approved.length).toBe(0);
+		// 未注入的规则没有任何"应用记录"（无沉默晋级）；DISABLED 仅来自显式人工停用（JUD-04b）
+		const disabled = await getDb().judgmentRule.findMany({ where: { organizationId: 'org-a', status: 'DISABLED' } });
+		for (const r of disabled) expect(r.approvedBy).toBeTruthy(); // 停用必须留人痕
 	});
 	it('错误响应永远 ok:false（持久化失败不假成功）', async () => {
 		const res = await app.inject({ method: 'POST', url: '/api/agents/drafts', headers: authed(tokens.builder), payload: { name: '' } });
@@ -191,18 +256,28 @@ describe('JUD-01/02/03 Judgment 全语义', () => {
 	});
 });
 
-describe('FILE-01 文件权限', () => {
+describe('FILE-01 文件权限（审查项④：票据下载）', () => {
 	let fileId = '';
-	it('项目成员上传/下载成功（真实 S3 往返）', async () => {
+	it('项目成员上传 + 票据下载成功（真实 S3 往返）', async () => {
 		const res = await app.inject({ method: 'POST', url: '/api/files', headers: authed(tokens.employee), payload: { name: '竞品报告.md', contentBase64: Buffer.from('# 报告\n来源：公开资料').toString('base64'), projectId: 'proj-market', sourceUrl: 'https://example.com/ref' } });
 		expect(res.statusCode).toBe(200);
 		fileId = res.json().file.id;
-		const dl = await app.inject({ method: 'GET', url: `/api/files/${fileId}/download`, headers: authed(tokens.employee) });
+		const ticket = await app.inject({ method: 'POST', url: `/api/files/${fileId}/download-ticket`, headers: authed(tokens.employee) });
+		expect(ticket.statusCode).toBe(200);
+		const dl = await app.inject({ method: 'GET', url: `/api/files/${fileId}/download?dl=${ticket.json().ticket}` });
 		expect(dl.statusCode).toBe(200);
 		expect(dl.body).toContain('# 报告');
 	});
-	it('组织 B 成员下载组织 A 文件 → 404（不泄露存在性）', async () => {
-		const res = await app.inject({ method: 'GET', url: `/api/files/${fileId}/download`, headers: authed(tokens.outsider) });
+	it('旧式 ?token=<会话JWT> 下载 → 401（会话 Token 不进 URL）', async () => {
+		const res = await app.inject({ method: 'GET', url: `/api/files/${fileId}/download?token=${tokens.employee}` });
+		expect(res.statusCode).toBe(401);
+	});
+	it('无票据 → 401', async () => {
+		const res = await app.inject({ method: 'GET', url: `/api/files/${fileId}/download` });
+		expect(res.statusCode).toBe(401);
+	});
+	it('组织 B 成员取票 → 404（不泄露存在性）', async () => {
+		const res = await app.inject({ method: 'POST', url: `/api/files/${fileId}/download-ticket`, headers: authed(tokens.outsider) });
 		expect(res.statusCode).toBe(404);
 	});
 });

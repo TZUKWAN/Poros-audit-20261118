@@ -3,7 +3,7 @@
  * 记录应用与证据（PRD §7.3 最低可用流程的运行侧）。
  * 运行事件实时落库（RunEvent），SSE 由路由层按 runId 推送——失败可见、证据可审。
  */
-import type { PrismaClient, Task } from '@prisma/client';
+import type { PrismaClient, Task, TaskStatus } from '@prisma/client';
 import { effectiveRules, evaluateMechanical, evaluateSemantic, type EffectiveRule } from './judgment.js';
 import { createGateway, type ModelGateway } from './model-gateway.js';
 
@@ -17,7 +17,7 @@ export async function emitEvent(db: PrismaClient, runId: string, seq: number, ki
 	await db.runEvent.create({ data: { runId, seq, kind, payload: payload as object } });
 }
 
-export async function runTask(deps: RunnerDeps, taskId: string): Promise<{ runId: string; status: 'SUCCEEDED' | 'FAILED' | 'BLOCKED' }> {
+export async function runTask(deps: RunnerDeps, taskId: string): Promise<{ runId: string; status: TaskStatus }> {
 	const { db } = deps;
 	const gateway = deps.gateway ?? createGateway();
 	const judgeAvailable = deps.judgeAvailable ?? false;
@@ -61,8 +61,10 @@ export async function runTask(deps: RunnerDeps, taskId: string): Promise<{ runId
 		await db.run.update({ where: { id: run.id }, data: { output: result.output, injectedRules: rules.map((r) => ({ ruleId: r.id, version: r.version })) } });
 
 		// 3. 逐条评估并留痕（绝不把总体成败归因到未验证的规则）
+		const verdicts: Array<{ ruleId: string; version: number; status: 'PASS' | 'FAIL' | 'UNCHECKED'; reason: string }> = [];
 		for (const r of rules) {
 			const verdict = r.kind === 'MECHANICAL' ? evaluateMechanical(r.rule, result.output) : evaluateSemantic(judgeAvailable);
+			verdicts.push({ ruleId: r.id, version: r.version, status: verdict.status, reason: verdict.reason });
 			const application = await db.judgmentApplication.create({
 				data: {
 					ruleId: r.id, ruleVersion: r.version, runId: run.id, agentVersionId: task.agentVersionId,
@@ -72,10 +74,17 @@ export async function runTask(deps: RunnerDeps, taskId: string): Promise<{ runId
 			await log('judgment', { phase: 'evaluate', applicationId: application.id, ruleId: r.id, version: r.version, evaluation: verdict.status, reason: verdict.reason });
 		}
 
-		await db.run.update({ where: { id: run.id }, data: { status: 'SUCCEEDED', finishedAt: new Date() } });
-		await db.task.update({ where: { id: taskId }, data: { status: 'SUCCEEDED' } });
-		await log('status', { status: 'SUCCEEDED' });
-		return { runId: run.id, status: 'SUCCEEDED' };
+		// 4. 质量验收状态归并（审查项⑥）：FAIL/UNCHECKED 必须体现在最终状态——
+		//    有 FAIL → SUCCEEDED_WITH_VIOLATIONS（产出存在但违反已批准规则，不得当成功）；
+		//    无 FAIL 但有 UNCHECKED → UNVERIFIED（未验证 ≠ 通过，如实呈现验证缺口）；
+		//    全 PASS 才是 SUCCEEDED。异常路径仍为 FAILED/BLOCKED。
+		const hasFail = verdicts.some((v) => v.status === 'FAIL');
+		const hasUnchecked = verdicts.some((v) => v.status === 'UNCHECKED');
+		const qualityStatus: 'SUCCEEDED' | 'SUCCEEDED_WITH_VIOLATIONS' | 'UNVERIFIED' = hasFail ? 'SUCCEEDED_WITH_VIOLATIONS' : hasUnchecked ? 'UNVERIFIED' : 'SUCCEEDED';
+		await db.run.update({ where: { id: run.id }, data: { status: qualityStatus, finishedAt: new Date() } });
+		await db.task.update({ where: { id: taskId }, data: { status: qualityStatus } });
+		await log('status', { status: qualityStatus, summary: { fail: verdicts.filter((v) => v.status === 'FAIL').length, unchecked: verdicts.filter((v) => v.status === 'UNCHECKED').length, pass: verdicts.filter((v) => v.status === 'PASS').length } });
+		return { runId: run.id, status: qualityStatus };
 	} catch (error) {
 		const message = String((error as Error)?.message || error);
 		await db.run.update({ where: { id: run.id }, data: { status: 'FAILED', error: message, finishedAt: new Date() } });

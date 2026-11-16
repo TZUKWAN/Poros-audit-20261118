@@ -5,7 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getDb } from '../db.js';
-import { requirePrincipal, requireRole, assertProjectAccess, signSession, verifyPassword } from '../auth.js';
+import { requirePrincipal, requireRole, requireRoleExact, assertProjectAccess, signSession, verifyPassword, signDownloadTicket, verifyDownloadTicket } from '../auth.js';
 import { runTask } from '../runner.js';
 import { putObject, getObject, storageKeyFor } from '../storage.js';
 import { env } from '../env.js';
@@ -123,6 +123,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		const { id } = idParam.parse(req.params);
 		const task = await db.task.findFirst({ where: { id, organizationId: p.organizationId }, include: { runs: { orderBy: { startedAt: 'desc' }, take: 1 } } });
 		if (!task) return reply.code(404).send({ ok: false, error: '任务不存在' });
+		// 项目任务需要项目成员资格（审查项④：事件属于任务数据，与任务读取同一权限边界）
+		if (task.projectId) {
+			const allowed = await assertProjectAccess(p.organizationId, task.projectId, p.userId, p.role);
+			if (!allowed) return reply.code(403).send({ ok: false, error: '项目任务事件未授权' });
+		}
 		// SSE 流式回放 + 实时追加（简化实现：先全量回放；runner 同步执行场景下事件已完整落库）
 		reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
 		const run = task.runs[0];
@@ -134,17 +139,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		reply.raw.end();
 	});
 
-	// ---- 审批 ----
+	// ---- 审批（职责分离：requireRoleExact，BUILDER 职级再高也无审批权——审查项④）----
 	app.get('/api/approvals', async (req, reply) => {
 		const p = requirePrincipal(req, reply); if (!p) return;
-		if (!requireRole(['REVIEWER', 'ADMIN'], p, reply)) return;
+		if (!requireRoleExact(['REVIEWER', 'ADMIN'], p, reply)) return;
 		const list = await db.approvalRequest.findMany({ where: { organizationId: p.organizationId }, orderBy: { createdAt: 'desc' }, take: 100 });
 		return { ok: true, approvals: list };
 	});
 
 	app.post('/api/approvals/:id/decision', async (req, reply) => {
 		const p = requirePrincipal(req, reply); if (!p) return;
-		if (!requireRole(['REVIEWER', 'ADMIN'], p, reply)) return;
+		if (!requireRoleExact(['REVIEWER', 'ADMIN'], p, reply)) return;
 		const { id } = idParam.parse(req.params);
 		const body = z.object({ decision: z.enum(['APPROVED', 'REJECTED']) }).parse(req.body);
 		const approval = await db.approvalRequest.findFirst({ where: { id, organizationId: p.organizationId, decision: 'PENDING' } });
@@ -178,7 +183,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
 	app.post('/api/judgments/:id/disable', async (req, reply) => {
 		const p = requirePrincipal(req, reply); if (!p) return;
-		if (!requireRole(['REVIEWER', 'ADMIN'], p, reply)) return;
+		if (!requireRoleExact(['REVIEWER', 'ADMIN'], p, reply)) return;
 		const { id } = idParam.parse(req.params);
 		const rule = await db.judgmentRule.findFirst({ where: { id, organizationId: p.organizationId } });
 		if (!rule) return reply.code(404).send({ ok: false, error: '规则不存在' });
@@ -207,7 +212,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		return { ok: true, file };
 	});
 
-	app.get('/api/files/:id/download', async (req, reply) => {
+	// 下载票据：60 秒一次性，绑定文件+用户（审查项④：长效会话 Token 不进 URL）。
+	// 流程：带 Authorization 头 POST download-ticket → <a href="?dl=<ticket>"> 短命链接。
+	app.post('/api/files/:id/download-ticket', async (req, reply) => {
 		const p = requirePrincipal(req, reply); if (!p) return;
 		const { id } = idParam.parse(req.params);
 		const file = await db.fileObject.findFirst({ where: { id, organizationId: p.organizationId } });
@@ -215,6 +222,18 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		if (file.projectId) {
 			const allowed = await assertProjectAccess(p.organizationId, file.projectId, p.userId, p.role);
 			if (!allowed) return reply.code(403).send({ ok: false, error: '项目文件未授权' });
+		}
+		return { ok: true, ticket: signDownloadTicket(file.id, p.userId), expiresInSeconds: 60 };
+	});
+
+	app.get('/api/files/:id/download', async (req, reply) => {
+		const { id } = idParam.parse(req.params);
+		// 下载端点无 Authorization 头场景：只接受 60s 一次性票据（?dl=），不再接受会话 Token
+		const q = (req.query as Record<string, unknown>)?.dl;
+		const file = await db.fileObject.findFirst({ where: { id, organizationId: { not: '' } } });
+		if (!file) return reply.code(404).send({ ok: false, error: '文件不存在' });
+		if (typeof q !== 'string' || !q || !verifyDownloadTicket(q, file.id)) {
+			return reply.code(401).send({ ok: false, error: '下载票据缺失或无效（POST /download-ticket 换取，60 秒有效）' });
 		}
 		const buf = await getObject(file.storageKey);
 		reply.header('content-disposition', `attachment; filename="${encodeURIComponent(file.name)}"`);
