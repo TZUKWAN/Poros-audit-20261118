@@ -43,7 +43,7 @@ function draftFromDescription(name: string, description: string): AgentDraft {
 	};
 }
 
-class MockGateway implements ModelGateway {
+export class MockGateway implements ModelGateway {
 	name = 'mock';
 	async draftAgent(description: string): Promise<AgentDraft> {
 		const d = draftFromDescription('', description);

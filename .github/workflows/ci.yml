@@ -61,6 +61,8 @@ jobs:
         run: node tests/isolation/iso-01-sentinel.mjs
       - name: ISO-02 Compose 卷/权限/网络静态审计
         run: node tests/isolation/iso-02-compose-audit.mjs
+      - name: ISO-03 双实例互不影响（独立 compose project 真实断言）
+        run: node tests/isolation/iso-03-dual-instance.mjs
       - name: 起专属容器（db/s3/dsh）
         run: docker compose -f deploy/docker-compose.yml up -d db s3 dsh
       - name: ISO-05 容器越宿主权限负向

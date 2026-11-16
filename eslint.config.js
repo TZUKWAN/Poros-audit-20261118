@@ -2,7 +2,7 @@ import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
-  { ignores: ["dist/**", "node_modules/**", "ref/**", "coverage/**", "pi-package/dist/**"] },
+  { ignores: ["dist/**", "node_modules/**", "ref/**", "coverage/**", "pi-package/dist/**", "src/server/public/**"] },
   ...tseslint.configs.recommended,
   {
     rules: {

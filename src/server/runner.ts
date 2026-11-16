@@ -7,14 +7,16 @@
  * 质量验收状态（审查项⑥）：FAIL → SUCCEEDED_WITH_VIOLATIONS；仅 UNCHECKED → UNVERIFIED。
  */
 import type { PrismaClient, Task, TaskStatus } from '@prisma/client';
-import { effectiveRules, evaluateMechanical, evaluateSemantic, type EffectiveRule } from './judgment.js';
+import { effectiveRules, evaluateMechanical, type EffectiveRule } from './judgment.js';
 import { createGateway, type ModelGateway } from './model-gateway.js';
+import { createSemanticJudge, type SemanticJudge, type SemanticVerdict } from './semantic-judge.js';
 import { runDshSession, auditToolCalls, type DshGrant, type DshEvent } from './dsh-runtime.js';
 
 export interface RunnerDeps {
 	db: PrismaClient;
 	gateway?: ModelGateway;
-	judgeAvailable?: boolean; // 语义 Judge 是否接入（默认 false → 语义规则 UNCHECKED）
+/** 语义 Judge 显式覆盖（测试注入用）；缺省时由网关自动判定（deepseek=可用，mock=无 → UNCHECKED） */
+	semanticJudgeFactory?: () => SemanticJudge | null;
 	runtime?: 'gateway' | 'dsh';
 	/** DSH 通道：该 Agent 的能力授权（AgentGrant），决定 profile 装载 + 工具白名单 */
 	dshGrants?: DshGrant[];
@@ -29,7 +31,7 @@ export async function emitEvent(db: PrismaClient, runId: string, seq: number, ki
 export async function runTask(deps: RunnerDeps, taskId: string): Promise<{ runId: string; status: TaskStatus }> {
 	const { db } = deps;
 	const gateway = deps.gateway ?? createGateway();
-	const judgeAvailable = deps.judgeAvailable ?? false;
+	const semanticJudge = deps.semanticJudgeFactory ? deps.semanticJudgeFactory() : createSemanticJudge(gateway);
 	const runtime = deps.runtime ?? 'gateway';
 
 	const task: Task | null = await db.task.findUnique({ where: { id: taskId } });
@@ -116,9 +118,19 @@ export async function runTask(deps: RunnerDeps, taskId: string): Promise<{ runId
 		await db.run.update({ where: { id: run.id }, data: { output, modelGateway: runtimeLabel, injectedRules: rules.map((r) => ({ ruleId: r.id, version: r.version })) } });
 
 		// 3. 逐条评估并留痕（绝不把总体成败归因到未验证的规则）
+		// 语义规则：可审计 Judge 批量一次调用（成本留痕）；无 judge → UNCHECKED（fail-open，绝不判 PASS）
+		const semanticRules = rules.filter((r) => r.kind === 'SEMANTIC');
+		let semanticVerdicts = new Map<string, SemanticVerdict>();
+		let judgeModelCalls = 0;
+		if (semanticRules.length && semanticJudge) {
+			const judged = await semanticJudge.judge(semanticRules, output);
+			semanticVerdicts = judged.verdicts;
+			judgeModelCalls = judged.modelCalls;
+			await log('judge', { phase: 'semantic', modelCalls: judgeModelCalls, rules: semanticRules.map((r) => r.id), note: '语义 Judge 为模型裁决（可审计留痕），非用户确认' });
+		}
 		const verdicts: Array<{ ruleId: string; version: number; status: 'PASS' | 'FAIL' | 'UNCHECKED'; reason: string }> = [];
 		for (const r of rules) {
-			const verdict = r.kind === 'MECHANICAL' ? evaluateMechanical(r.rule, output) : evaluateSemantic(judgeAvailable);
+			const verdict: SemanticVerdict = r.kind === 'MECHANICAL' ? evaluateMechanical(r.rule, output) : (semanticVerdicts.get(r.id) ?? { status: 'UNCHECKED', reason: '语义 Judge 未配置：按规范记 UNCHECKED，不按 PASS 处理' });
 			verdicts.push({ ruleId: r.id, version: r.version, status: verdict.status, reason: verdict.reason });
 			const application = await db.judgmentApplication.create({
 				data: {
@@ -136,7 +148,7 @@ export async function runTask(deps: RunnerDeps, taskId: string): Promise<{ runId
 		const qualityStatus: TaskStatus = hasFail ? 'SUCCEEDED_WITH_VIOLATIONS' : hasUnchecked ? 'UNVERIFIED' : 'SUCCEEDED';
 		await db.run.update({ where: { id: run.id }, data: { status: qualityStatus, finishedAt: new Date() } });
 		await db.task.update({ where: { id: taskId }, data: { status: qualityStatus } });
-		await log('status', { status: qualityStatus, runtime: runtimeLabel, summary: { fail: verdicts.filter((v) => v.status === 'FAIL').length, unchecked: verdicts.filter((v) => v.status === 'UNCHECKED').length, pass: verdicts.filter((v) => v.status === 'PASS').length, unauthorizedTools: unauthorizedToolCalls } });
+		await log('status', { status: qualityStatus, runtime: runtimeLabel, summary: { fail: verdicts.filter((v) => v.status === 'FAIL').length, unchecked: verdicts.filter((v) => v.status === 'UNCHECKED').length, pass: verdicts.filter((v) => v.status === 'PASS').length, unauthorizedTools: unauthorizedToolCalls, judgeModelCalls } });
 		return { runId: run.id, status: qualityStatus };
 	} catch (error) {
 		const message = String((error as Error)?.message || error);

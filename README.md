@@ -2,12 +2,19 @@
 
 面向企业组织的 **Agent 开发、配置、协作与治理平台**。唯一底层 Agent Harness 为 **DeepSeek Harness（DSH）**，运行在与宿主完全隔离的专属容器中。
 
-## 状态诚实声明（审查项⑦）
+## 状态诚实声明
 
-- **工作台 UI 现状 = 临时原型**（`src/server/public/index.html` 手写页面），仅用于联调。
-  产品工作台未完成：按 PRD §3.2 将以成熟组件栈实现（React + shadcn/ui + Radix + TanStack Query），
-  不自造按钮/表格/对话渲染器。该项在审查清单中标记为未完成。
-- **ISO-03 双实例互不影响**：已有真实断言记录（docs/ISOLATION.md），可重复脚本化列入 TODO。
+- **工作台 UI = React + Radix UI + Tailwind 成熟组件栈**（`web/`，`npm run ui:dev` 开发 /
+  `npm run build` 随构建产出）：登录、工作台（任务下达 + SSE 运行事件实时流，dsh.*/judge/质量
+  状态徽章）、Agent 目录 + Builder（NL 创建对话框、草稿配置、能力授权、草稿测试、发布/回滚）、
+  集成状态页（未配置如实标注）。旧手写页面保留为 `legacy.html`。当前为最小可用版（三个主页面 +
+  可访问性由 Radix 提供），更深的表格/文件浏览器页面按 PRD §2.2 迭代。
+- **ISO-01/02/03/05 全部脚本化**（tests/isolation/，CI isolation job 可复现；ISO-03 为双实例
+  互不影响真实断言）。
+- **语义 Judge**：随模型网关接入（deepseek + 真实密钥）；mock 网关 = 无 Judge，语义规则如实
+  UNCHECKED（fail-open，绝不 mock 判 PASS 伪绿）。成本留痕（judge 事件 modelCalls）。
+- **Kdocs/IMA/TinyFish**：需要组织级真实凭证；无凭证时 mock 契约 + UI「未配置/未验证真实服务」
+  标注（物理边界，不虚报）。
 - 其余能力矩阵与真实证据见 `docs/E2E_EVIDENCE.md`、`docs/ISOLATION.md`、`docs/BASELINE.md`。
 
 ## 这一版是什么

@@ -52,4 +52,4 @@ docker compose -f deploy/docker-compose.yml exec dsh dsh --version
 ## 已知边界
 
 - `npm run e2e` 需要本机 Docker 与 dsh 容器（tests/e2e/run-e2e.mjs）
-- ISO-03（双实例互不影响）目前为手动验证记录（docs/ISOLATION.md），脚本化列入 TODO
+- ISO-03 已脚本化（tests/isolation/iso-03-dual-instance.mjs）
