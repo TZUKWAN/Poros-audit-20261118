@@ -58,10 +58,3 @@ export function evaluateMechanical(rule: string, output: string): { status: 'PAS
 			return { status: 'UNCHECKED', reason: `未知机械规则指令: ${head}` };
 	}
 }
-
-/** 语义规则：需要可审计 Judge。未配置 Judge → UNCHECKED（PRD §7.2 强制）。 */
-export function evaluateSemantic(judgeAvailable: boolean): { status: 'PASS' | 'FAIL' | 'UNCHECKED'; reason: string } {
-	if (!judgeAvailable) return { status: 'UNCHECKED', reason: '语义 Judge 未配置：按规范记 UNCHECKED，不按 PASS 处理' };
-	// 有 Judge 时由调用方接入具体评审；当前默认未配置。
-	return { status: 'UNCHECKED', reason: '语义 Judge 尚未接入实现' };
-}
