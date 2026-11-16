@@ -4,9 +4,6 @@
  * 每个用例标注对应验收 ID；断言失败即该验收项 FAIL——不做"代理式通过"。
  */
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 
@@ -24,7 +21,7 @@ async function sql(url: string, query: string): Promise<void> {
 }
 
 let app: FastifyInstance;
-const tokens: Record<string, string> = {};
+const tokens = {} as { admin: string; builder: string; employee: string; reviewer: string; outsider: string };
 
 async function login(email: string, password: string, organizationId: string): Promise<string> {
 	const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password, organizationId } });
@@ -125,7 +122,7 @@ describe('AGT-01/02/03 构建-授权-发布-回滚闭环', () => {
 describe('WORK-01 统一工作台执行（mock 网关如实标注）', () => {
 	it('员工对已发布 Agent 下达任务 → 运行成功且事件可见', async () => {
 		const agents = await app.inject({ method: 'GET', url: '/api/agents', headers: authed(tokens.employee) });
-		const agent = agents.json().agents[0];
+		const agent = agents.json().agents[0]!;
 		const res = await app.inject({ method: 'POST', url: '/api/tasks', headers: authed(tokens.employee), payload: { agentId: agent.id, prompt: '撰写竞品报告', projectId: 'proj-market' } });
 		expect(res.statusCode).toBe(200);
 		expect(res.json().run.status).toBe('SUCCEEDED');
@@ -142,7 +139,7 @@ describe('JUD-01/02/03 Judgment 全语义', () => {
 	let ruleId = '';
 	it('JUD-01 候选未审批不注入生产运行', async () => {
 		const agents = await app.inject({ method: 'GET', url: '/api/agents', headers: authed(tokens.employee) });
-		const agent = agents.json().agents[0];
+		const agent = agents.json().agents[0]!;
 		// 先清掉既有已批准规则对注入的干扰
 		const cand = await app.inject({ method: 'POST', url: '/api/judgments/candidates', headers: authed(tokens.employee), payload: { rule: 'must_contain:引用来源', kind: 'MECHANICAL', scopeType: 'ORGANIZATION', scopeId: 'org-a', sourceFeedback: '用户纠正：报告缺少数据来源' } });
 		expect(cand.statusCode).toBe(200);
@@ -171,7 +168,7 @@ describe('JUD-01/02/03 Judgment 全语义', () => {
 		}
 		// 运行 → 注入 3 条
 		const agents = await app.inject({ method: 'GET', url: '/api/agents', headers: authed(tokens.employee) });
-		const t = await app.inject({ method: 'POST', url: '/api/tasks', headers: authed(tokens.employee), payload: { agentId: agents.json().agents[0].id, prompt: '第三份报告' } });
+		const t = await app.inject({ method: 'POST', url: '/api/tasks', headers: authed(tokens.employee), payload: { agentId: agents.json().agents[0]!.id, prompt: '第三份报告' } });
 		const run = await getDb().run.findFirst({ where: { taskId: t.json().taskId }, include: { applications: true } });
 		expect(run!.applications.length).toBeGreaterThanOrEqual(3);
 		const evals = run!.applications.map((a) => a.evaluation);

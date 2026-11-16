@@ -2,21 +2,15 @@
  * 业务路由（PRD §5.2 最小接口 + §7.3 Judgment 流程 + 文件服务）。
  * 每个处理器的第一件事：从 principal 取 organizationId（绝不信任请求体里的组织/项目字段）。
  */
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getDb } from '../db.js';
-import { hashPassword, requirePrincipal, requireRole, assertProjectAccess, signSession, verifyPassword, type Principal } from '../auth.js';
+import { requirePrincipal, requireRole, assertProjectAccess, signSession, verifyPassword } from '../auth.js';
 import { runTask } from '../runner.js';
 import { putObject, getObject, storageKeyFor } from '../storage.js';
 import { env } from '../env.js';
 
 const idParam = z.object({ id: z.string().min(1) });
-
-function orgScoped(p: Principal, bodyOrg: unknown): string {
-	// 组织边界硬编码来自会话；请求体携带 organizationId 一律忽略（防横向越权）。
-	void bodyOrg;
-	return p.organizationId;
-}
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
 	const db = getDb();
@@ -25,12 +19,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 	app.post('/api/auth/login', async (req, reply) => {
 		const body = z.object({ email: z.string().email(), password: z.string().min(1), organizationId: z.string().min(1) }).parse(req.body);
 		const member = await db.membership.findUnique({ where: { organizationId_userId: { organizationId: body.organizationId, userId: body.email } } });
-		// 用户表：以 Membership.userId=email + UserAccount 存密码（最小实现，邮箱即用户标识）。
-		const account = await db.userAccount?.findUnique?.({ where: { email: body.email } }) ?? null;
-		void account;
 		if (!member) return reply.code(401).send({ ok: false, error: '认证失败' });
 		const cred = await db.$queryRawUnsafe<Array<{ password_hash: string }>>('SELECT password_hash FROM user_credentials WHERE email = $1', body.email).catch(() => []);
-		if (!cred.length || !verifyPassword(body.password, cred[0].password_hash)) return reply.code(401).send({ ok: false, error: '认证失败' });
+		if (!cred.length || !cred[0] || !verifyPassword(body.password, cred[0].password_hash)) return reply.code(401).send({ ok: false, error: '认证失败' });
 		return { ok: true, token: signSession({ userId: body.email, organizationId: body.organizationId, role: member.role, email: body.email }) };
 	});
 
@@ -38,8 +29,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 	app.post('/api/agents/drafts', async (req, reply) => {
 		const p = requirePrincipal(req, reply); if (!p) return;
 		if (!requireRole(['BUILDER'], p, reply)) return;
-		const body = z.object({ name: z.string().min(1).max(120), description: z.string().default(''), department: z.string().default(''), config: z.record(z.unknown()).default({}) }).parse(req.body);
-		const agent = await db.agentDefinition.create({ data: { organizationId: p.organizationId, name: body.name, description: body.description, department: body.department, draftConfig: body.config, createdBy: p.userId } });
+		const body = z.object({ name: z.string().min(1).max(120), description: z.string().default(''), department: z.string().default(''), config: z.record(z.string(), z.unknown()).default({}) }).parse(req.body);
+		const agent = await db.agentDefinition.create({ data: { organizationId: p.organizationId, name: body.name, description: body.description, department: body.department, draftConfig: body.config as never, createdBy: p.userId } });
 		return { ok: true, agent, diff: { before: null, after: body.config } };
 	});
 
@@ -47,11 +38,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		const p = requirePrincipal(req, reply); if (!p) return;
 		if (!requireRole(['BUILDER'], p, reply)) return;
 		const { id } = idParam.parse(req.params);
-		const body = z.object({ name: z.string().min(1).max(120).optional(), description: z.string().optional(), department: z.string().optional(), config: z.record(z.unknown()).optional() }).parse(req.body);
+		const body = z.object({ name: z.string().min(1).max(120).optional(), description: z.string().optional(), department: z.string().optional(), config: z.record(z.string(), z.unknown()).optional() }).parse(req.body);
 		const existing = await db.agentDefinition.findFirst({ where: { id, organizationId: p.organizationId } });
 		if (!existing) return reply.code(404).send({ ok: false, error: 'Agent 不存在或不属于本组织' });
 		const before = existing.draftConfig;
-		const agent = await db.agentDefinition.update({ where: { id }, data: { ...(body.name ? { name: body.name } : {}), ...(body.description !== undefined ? { description: body.description } : {}), ...(body.department !== undefined ? { department: body.department } : {}), ...(body.config ? { draftConfig: { ...(before as object), ...(body.config as object) } } : {}) } });
+		const agent = await db.agentDefinition.update({ where: { id }, data: { ...(body.name ? { name: body.name } : {}), ...(body.description !== undefined ? { description: body.description } : {}), ...(body.department !== undefined ? { department: body.department } : {}), ...(body.config ? { draftConfig: { ...(before as object), ...(body.config as object) } as never as never } : {}) } });
 		return { ok: true, agent, diff: { before, after: agent.draftConfig } };
 	});
 
@@ -84,7 +75,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		const agent = await db.agentDefinition.findFirst({ where: { id, organizationId: p.organizationId } });
 		if (!agent) return reply.code(404).send({ ok: false, error: 'Agent 不存在或不属于本组织' });
 		const version = agent.currentVersion + 1;
-		const snapshot = await db.agentVersion.create({ data: { agentId: id, version, config: agent.draftConfig, publishedBy: p.userId } });
+		const snapshot = await db.agentVersion.create({ data: { agentId: id, version, config: agent.draftConfig as never, publishedBy: p.userId } });
 		await db.agentDefinition.update({ where: { id }, data: { currentVersion: version, status: 'PUBLISHED' } });
 		await db.approvalRequest.create({ data: { organizationId: p.organizationId, kind: 'AGENT_PUBLISH', subjectId: id, requestedBy: p.userId, decision: 'APPROVED', decidedBy: p.userId, decidedAt: new Date() } });
 		return { ok: true, version: snapshot.version, immutable: true };
@@ -99,7 +90,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		if (!agent) return reply.code(404).send({ ok: false, error: 'Agent 不存在或不属于本组织' });
 		const target = await db.agentVersion.findUnique({ where: { agentId_version: { agentId: id, version: body.version } } });
 		if (!target) return reply.code(404).send({ ok: false, error: '目标版本不存在（版本不可变，回滚=改引用指针）' });
-		await db.agentDefinition.update({ where: { id }, data: { draftConfig: target.config, currentVersion: target.version, status: 'PUBLISHED' } });
+		await db.agentDefinition.update({ where: { id }, data: { draftConfig: target.config as never, currentVersion: target.version, status: 'PUBLISHED' } });
 		return { ok: true, currentVersion: target.version };
 	});
 

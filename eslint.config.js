@@ -13,5 +13,12 @@ export default tseslint.config(
       eqeqeq: ["error", "always"],
     },
   },
+  {
+    // 服务端/隔离测试是后端与 CLI 进程：console 即日志载体（fastify 内建 pino）。
+    files: ["src/server/**/*.ts", "tests/isolation/**/*.mjs", "tests/api/**/*.ts"],
+    rules: {
+      "no-console": "off",
+    },
+  },
   prettier,
 );

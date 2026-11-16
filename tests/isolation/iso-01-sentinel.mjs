@@ -12,7 +12,6 @@
  *      USERPROFILE / DSH_HOME 回退。
  * 不使用宿主真实 ~/.dsh；哨兵树全部位于测试临时目录。
  */
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
