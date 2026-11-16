@@ -1,0 +1,53 @@
+# SceneFlow Enterprise 部署边界（PRD §4.1）
+# 宿主 DSH 完全不参与：本 Compose 项目无宿主路径挂载、无 Docker socket、无特权、无 host 网络。
+name: sceneflow-enterprise
+
+services:
+  dsh:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dsh
+      args:
+        DSH_VERSION: "0.2.2-rc.1"
+    image: sceneflow/dsh:0.2.2-rc.1
+    container_name: sceneflow-dsh
+    user: "10001:10001"
+    environment:
+      HOME: /home/sceneflow
+      XDG_CONFIG_HOME: /home/sceneflow/.config
+      XDG_DATA_HOME: /home/sceneflow/.local/share
+      XDG_CACHE_HOME: /home/sceneflow/.cache
+      DSH_HOME: /home/sceneflow/.dsh
+      # 模型密钥只允许经 SceneFlow Secrets 注入到运行服务，再按需传参；不写入镜像与本文件。
+    volumes:
+      - dsh-home:/home/sceneflow/.dsh
+      - dsh-config:/home/sceneflow/.config
+      - dsh-data:/home/sceneflow/.local
+      - dsh-cache:/home/sceneflow/.cache
+    networks:
+      - sceneflow-net
+    # 不发布任何端口：DSH 仅 sceneflow-net 内可达；对外只开放未来 web 服务的入口。
+    ports: []
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "dsh", "--version"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+networks:
+  sceneflow-net:
+    driver: bridge
+
+volumes:
+  dsh-home:
+  dsh-config:
+  dsh-data:
+  dsh-cache:
