@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SceneFlow Enterprise</title>
+<title>Poros Enterprise</title>
 <style>
 :root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--fg:#e6e9ef;--mut:#8b93a3;--acc:#4f8cff;--ok:#3fb27f;--bad:#d05555;--warn:#d09a3f}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 system-ui,"Microsoft YaHei",sans-serif}
@@ -24,7 +24,7 @@ pre{background:#10131a;border:1px solid var(--line);border-radius:6px;padding:10
 </style>
 </head>
 <body>
-<header><b>SceneFlow</b><span class="tag">Enterprise · 专属 DSH 隔离运行时</span>
+<header><b>Poros</b><span class="tag">Enterprise · 专属 DSH 隔离运行时</span>
 <nav id="nav" style="display:none">
 <button data-p="workspace">工作台</button><button data-p="agents">Agent 目录/构建</button><button data-p="judgments">Judgment</button><button data-p="files">文件</button><button data-p="integrations">集成状态</button>
 </nav>
@@ -40,7 +40,7 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 function tag(s,cls){return `<span class="tag ${cls||''}">${esc(s)}</span>`}
 
 function renderLogin(){$('#nav').style.display='none';$('#logout').style.display='none';$('#who').textContent='';
-$('#view').innerHTML=`<div class="card" style="max-width:420px;margin:8vh auto"><h3>登录 SceneFlow 企业工作台</h3>
+$('#view').innerHTML=`<div class="card" style="max-width:420px;margin:8vh auto"><h3>登录 Poros 企业工作台</h3>
 <label>邮箱</label><input id="em" value="employee@a.test"><label>密码</label><input id="pw" type="password" value="employee-pass-123">
 <label>组织 ID</label><input id="og" value="org-a"><button onclick="doLogin()">登录</button>
 <p style="color:var(--mut);font-size:12px">开发种子账号见 src/server/seed.ts；生产禁用种子。</p></div>`}

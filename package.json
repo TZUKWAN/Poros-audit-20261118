@@ -1,7 +1,7 @@
 {
-  "name": "sceneflow-enterprise",
+  "name": "poros",
   "version": "1.0.0",
-  "description": "SceneFlow Enterprise — agent development, configuration, collaboration and governance platform on a dedicated isolated DSH runtime.",
+  "description": "Poros Enterprise — agent development, configuration, collaboration and governance platform on a dedicated isolated DSH runtime.",
   "main": "index.js",
   "scripts": {
     "test": "vitest run tests/api && npm run test:isolation",

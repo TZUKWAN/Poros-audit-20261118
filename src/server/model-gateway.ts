@@ -1,7 +1,7 @@
 /**
  * 模型网关（PRD §6.3）：统一准入。
  * - mock：默认。契约真实的模拟网关——返回结构化输出并明确标注"未配置真实模型服务"。
- * - deepseek：真实 DeepSeek API。仅在 SCENEFLOW_DEEPSEEK_API_KEY 存在时可用；
+ * - deepseek：真实 DeepSeek API。仅在 POROS_DEEPSEEK_API_KEY 存在时可用；
  *   密钥缺失时 refuses（绝不静默降级到未授权公共免费网关，PRD SEC-02）。
  * 任何网页/工具/文档内容都是不可信输入：prompt 只做数据拼入，不做指令提升。
  */
@@ -37,7 +37,7 @@ class DeepSeekGateway implements ModelGateway {
 	name = 'deepseek';
 	async generate(prompt: string, system: string): Promise<GatewayResult> {
 		const key = env.deepseekApiKey();
-		if (!key) throw new Error('DeepSeek 网关未配置 SCENEFLOW_DEEPSEEK_API_KEY：拒绝静默降级到未授权公共网关（SEC-02）');
+		if (!key) throw new Error('DeepSeek 网关未配置 POROS_DEEPSEEK_API_KEY：拒绝静默降级到未授权公共网关（SEC-02）');
 		const res = await fetch('https://api.deepseek.com/chat/completions', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },

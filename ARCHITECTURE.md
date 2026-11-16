@@ -1,4 +1,4 @@
-# ARCHITECTURE — SceneFlow Enterprise V2
+# ARCHITECTURE — Poros Enterprise V2
 
 ## 逻辑边界
 
@@ -19,7 +19,7 @@ Web 工作台(最小静态壳) ──► Fastify API ──► 组织身份/RBAC
 - `src/server/`：API 全量（认证/RBAC/Builder/任务/审批/Judgment/文件/集成状态）+ Web 外壳 + 种子。
 - `src/server/judgment.ts`：作用域规则筛选 + 机械/语义评估（语义无 Judge 恒 UNCHECKED）。
 - `src/server/runner.ts`：注入留痕 → 网关生成 → 逐条评估 → 事件流。
-- `src/server/dsh-paths.ts`：隔离 by construction（SCENEFLOW_HOME 唯一来源，缺失即拒）。
+- `src/server/dsh-paths.ts`：隔离 by construction（POROS_HOME 唯一来源，缺失即拒）。
 - `tests/api/acceptance.test.ts`：验收矩阵（真实 DB+S3）。
 - `tests/isolation/`：ISO-01/02/05（哨兵/静态审计/容器逃逸负向）；ISO-03/04 实测记录于 docs/ISOLATION.md。
 - `deploy/`：Dockerfile.dsh + compose（db/s3/dsh，隔离边界见 DEPLOYMENT.md）。

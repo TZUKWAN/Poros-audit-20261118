@@ -1,16 +1,16 @@
-# REUSE_AUDIT — SceneFlow Enterprise V2
+# REUSE_AUDIT — Poros Enterprise V2
 
 > 规则（PRD §8）：没有复用调查，禁止新写功能。每行给出候选现成方案、版本、许可、复用方式、弃选理由与最小自研范围。
-> 基线 main SHA：18ec87ba62f58ee31be8ea864398896bedd3bd96 · 分支：refactor/sceneflow-enterprise-dsh
+> 基线 main SHA：18ec87ba62f58ee31be8ea864398896bedd3bd96 · 分支：refactor/poros-dsh
 
 ## 最高层复用决策
 
 | 功能 | 候选现成实现 | 版本/许可/链接 | 复用方式 | 放弃其他方案原因 | 新增代码范围 | 证据 |
 |---|---|---|---|---|---|---|
-| Agent Harness（唯一） | **DSH 官方发行**（@deepseek-ai/dsh） | 0.2.2-rc.1+ / MIT / github.com/deepseek-ai/deepseek-harness | 官方 npm 发行包装入 SceneFlow 专属容器；只用官方插件/会话/工具扩展点 | Pi 运行链废弃（PRD §1.1）；不引入第二套 Harness；不修改宿主 DSH（P0） | DSH 适配器（会话生命周期、工具调用桥、结果回流） | npm registry 实测存在 0.2.2-rc.3；上游 MIT |
+| Agent Harness（唯一） | **DSH 官方发行**（@deepseek-ai/dsh） | 0.2.2-rc.1+ / MIT / github.com/deepseek-ai/deepseek-harness | 官方 npm 发行包装入 Poros 专属容器；只用官方插件/会话/工具扩展点 | Pi 运行链废弃（PRD §1.1）；不引入第二套 Harness；不修改宿主 DSH（P0） | DSH 适配器（会话生命周期、工具调用桥、结果回流） | npm registry 实测存在 0.2.2-rc.3；上游 MIT |
 | 企业外壳 UI | React + shadcn/ui + Radix + Tailwind + TanStack Query + RHF+Zod | shadcn/ui（MIT）/ Radix（MIT）/ Tailwind（MIT）/ TanStack Query（MIT）/ RHF（MIT）/ Zod（MIT） | 成熟组件库直装 | PRD §3.2 明令"不准自造按钮/表格/对话渲染器/表单/文件浏览器" | 布局壳 + 业务页面接线 | PRD §3.2 指定 |
 | 多 Bot 工作台参考 | DS-Bot | Apache-2.0 / github.com/Fei2411/DS-Bot（8k★） | 核查其 Bot/群聊/能力配置实现，可移植模块薄适配；**禁止整仓复制**（本机数据模型/权限/打包与企业服务端不同） | 自研多 Agent 工作台 = 重造轮子 | 组织维度适配层 | 许可证与仓库实测 |
-| 身份/权限 | 自研 RBAC 映射在可信后端 + 成熟会话库 | Node 侧：iron-session/JWT（MIT）任选其一锁版本；PRD 允许"可复用 RBAC 库" | 组织-成员-角色-项目四级作用域在 SceneFlow 后端强制；前端隐藏不算授权 | 不自研认证协议；不引入重量级 IdP 依赖 | 策略执行点（中间件 + 每个资源读写检查） | PRD §3.2/§3.4 |
+| 身份/权限 | 自研 RBAC 映射在可信后端 + 成熟会话库 | Node 侧：iron-session/JWT（MIT）任选其一锁版本；PRD 允许"可复用 RBAC 库" | 组织-成员-角色-项目四级作用域在 Poros 后端强制；前端隐藏不算授权 | 不自研认证协议；不引入重量级 IdP 依赖 | 策略执行点（中间件 + 每个资源读写检查） | PRD §3.2/§3.4 |
 | 数据库 | PostgreSQL + Prisma | PostgreSQL 17 / Prisma（Apache-2.0） | ORM 迁移与 Row-Level Security 纵深防御 | 不自研存储引擎（PRD §3.2） | Schema（组织/成员/项目/Agent/版本/授权/任务/运行/判断/文件元数据） | PRD §3.2 |
 | 对象存储 | S3 兼容（MinIO 本地开发 / 云 S3 生产） | MinIO（AGPL v3，仅作服务部署非链接）/ AWS SDK v3（Apache-2.0） | SDK 直用，put/get/presign | 不自研文件服务 | 文件元数据 + 权限检查 | PRD §6.1 |
 | Chat UI | 不自研完整聊天组件：复用 DSH Web UI 能力 + 上述 React 生态 | DSH web（MIT） | 优先 DSH 官方 Web 嵌入/扩展；不足处以 shadcn 组件补 | PRD 明令不自研聊天渲染器 | 消息/运行事件桥 | PRD §8.1 |

@@ -1,4 +1,4 @@
-# CLEANUP_REPORT — SceneFlow Enterprise V2
+# CLEANUP_REPORT — Poros Enterprise V2
 
 > 规则执行：先证明无引用/数据不损/替代实现与测试通过，再删除（执行提示词 §5）。删除后已重跑全量（见文末）。
 
@@ -39,4 +39,4 @@
 
 ## 旧数据边界
 
-仓库代码删除 ≠ 用户磁盘数据。SceneFlow 全程未读写任何本机 DSH 数据；若旧 pi-scenario 曾产生用户数据，需由用户自行备份（SceneFlow 不提供、也不访问旧数据目录）。
+仓库代码删除 ≠ 用户磁盘数据。Poros 全程未读写任何本机 DSH 数据；若旧 pi-scenario 曾产生用户数据，需由用户自行备份（Poros 不提供、也不访问旧数据目录）。

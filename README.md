@@ -1,4 +1,4 @@
-# SceneFlow Enterprise V2
+# Poros Enterprise V2
 
 面向企业组织的 **Agent 开发、配置、协作与治理平台**。唯一底层 Agent Harness 为 **DeepSeek Harness（DSH）**，运行在与宿主完全隔离的专属容器中。
 
@@ -8,7 +8,7 @@
 - 多 Agent 管理：自然语言草稿 → 配置差异 → 能力授权（来源留痕）→ 不可变版本发布 → 回滚
 - 统一工作台：任务执行、SSE 流式运行事件、文件产物（S3 兼容存储 + 组织/项目授权）
 - **Agent Judgment Layer**：纠正候选 → 人工审批 → 作用域注入 → pass/fail/unchecked 分离评估 → 停用/回滚——无自动晋级、无沉默通过、无伪因果归因
-- **P0 隔离**：DSH 只存在于 SceneFlow 专属容器；ISO-01/02/03/04/05 全部实测通过（证据在 `docs/ISOLATION.md`）
+- **P0 隔离**：DSH 只存在于 Poros 专属容器；ISO-01/02/03/04/05 全部实测通过（证据在 `docs/ISOLATION.md`）
 
 ## 快速开始（开发机）
 

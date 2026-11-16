@@ -22,7 +22,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 		return reply.code(status).send({ ok: false, error: status >= 500 ? '内部错误' : error.message });
 	});
 	app.addHook('onRequest', authMiddleware);
-	app.get('/api/health', async () => ({ ok: true, service: 'sceneflow-enterprise' }));
+	app.get('/api/health', async () => ({ ok: true, service: 'poros' }));
 	await app.register(registerRoutes);
 	const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 	await app.register(fastifyStatic, { root: publicDir, prefix: '/' });

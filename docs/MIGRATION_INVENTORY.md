@@ -1,4 +1,4 @@
-# MIGRATION_INVENTORY — SceneFlow Enterprise V2
+# MIGRATION_INVENTORY — Poros Enterprise V2
 
 > 逐目录 KEEP / MIGRATE / DELETE / UNCERTAIN。基线 main SHA：18ec87ba62f58ee31be8ea864398896bedd3bd96。
 > 规则：旧代码不得因"看着没用"盲删——先证明无引用、数据不损失、替代实现与测试通过（执行提示词 §5）。
@@ -22,8 +22,8 @@
 | `integrations/`（browser/terminal/vscode-context） | UNCERTAIN | 若仅 Pi TUI 上下文则 DELETE；作为 DSH 工具能力评估后定 |
 | `scripts-kernel/launch/panel-build.mjs` | DELETE（替代后） | 新构建链（企业外壳 + 容器）取代；删除前验证新链可构建可启动 |
 | `tests/`（78 个） | MIGRATE | 虚拟用户驱动/夹具可服务 E2E；五闸门/联邦相关用例随代码删除 |
-| `docs/` `README.md` `ARCHITECTURE.md` `CHANGELOG.md` | MIGRATE | 重写为 SceneFlow Enterprise 文档族（DEPLOYMENT/SECURITY/MIGRATION/THIRD_PARTY/CLEANUP_REPORT） |
-| `package.json`（pi-scenario） | MIGRATE | 改名 @sceneflow/enterprise 体系；删除全部 @earendil-works/pi-*、pi-mcp-adapter、pi-subagents、context-mode、pi-reactor 依赖 |
+| `docs/` `README.md` `ARCHITECTURE.md` `CHANGELOG.md` | MIGRATE | 重写为 Poros Enterprise 文档族（DEPLOYMENT/SECURITY/MIGRATION/THIRD_PARTY/CLEANUP_REPORT） |
+| `package.json`（pi-scenario） | MIGRATE | 改名 @poros/enterprise 体系；删除全部 @earendil-works/pi-*、pi-mcp-adapter、pi-subagents、context-mode、pi-reactor 依赖 |
 
 ## 数据边界
 

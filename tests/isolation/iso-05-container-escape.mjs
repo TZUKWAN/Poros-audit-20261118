@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * ISO-05 容器越宿主权限负向（PRD §4.4-5 / §10 ISO 族）。
- * 断言运行中的 SceneFlow DSH 容器：
+ * 断言运行中的 Poros DSH 容器：
  *   1. 文件系统里不存在宿主用户目录（/Users、/c、/host、/mnt/host 等）；
- *   2. 环境变量不泄漏宿主路径（C:\Users、/home/<非 sceneflow>）；
- *   3. 唯一数据源是 SceneFlow 具名卷（/home/sceneflow 下）。
+ *   2. 环境变量不泄漏宿主路径（C:\Users、/home/<非 poros>）；
+ *   3. 唯一数据源是 Poros 具名卷（/home/poros 下）。
  * 该用例不读取、不枚举宿主真实 .dsh（那是绝对禁区），只检查容器内部视角。
  */
 import { execFileSync } from 'node:child_process';
@@ -33,8 +33,8 @@ try {
 		if (m.Type === 'bind') bad(`出现 bind 挂载: ${m.Source} -> ${m.Destination}`);
 	}
 	ok(`全部 ${mounts.length} 个挂载均为具名卷`);
-	const homeOut = run(['exec', cid, 'sh', '-c', 'ls -la /home/sceneflow']).trim();
-	if (homeOut.includes('sceneflow')) ok('容器专属 HOME 归属 sceneflow 用户');
+	const homeOut = run(['exec', cid, 'sh', '-c', 'ls -la /home/poros']).trim();
+	if (homeOut.includes('poros')) ok('容器专属 HOME 归属 poros 用户');
 	else bad('容器专属 HOME 属主异常');
 } finally {
 	try { run(['stop', cid]); } catch { }

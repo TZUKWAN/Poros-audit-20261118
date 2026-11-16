@@ -1,11 +1,11 @@
-# SceneFlow 专属 DSH 运行时镜像（P0 隔离：唯一 Harness，独立 HOME/数据卷，非 root）
+# Poros 专属 DSH 运行时镜像（P0 隔离：唯一 Harness，独立 HOME/数据卷，非 root）
 # 基线锁定见 docs/REUSE_AUDIT.md；版本与镜像 digest 记录在 docs/ISOLATION.md（构建后回填）。
 FROM node:24-bookworm-slim
 
 ARG DSH_VERSION=0.2.2-rc.1
-LABEL org.sceneflow.component="dsh-runtime" \
-      org.sceneflow.isolation="dedicated-home non-root no-host-mounts" \
-      org.sceneflow.dsh-version="${DSH_VERSION}"
+LABEL org.poros.component="dsh-runtime" \
+      org.poros.isolation="dedicated-home non-root no-host-mounts" \
+      org.poros.dsh-version="${DSH_VERSION}"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git curl \
@@ -13,21 +13,21 @@ RUN apt-get update \
  && npm install -g @deepseek-ai/dsh@${DSH_VERSION} --no-audit --no-fund \
  && npm cache clean --force
 
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin sceneflow \
- && mkdir -p /home/sceneflow/.dsh /home/sceneflow/.config /home/sceneflow/.local /home/sceneflow/.cache \
- && chown -R sceneflow:sceneflow /home/sceneflow
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin poros \
+ && mkdir -p /home/poros/.dsh /home/poros/.config /home/poros/.local /home/poros/.cache \
+ && chown -R poros:poros /home/poros
 
-USER sceneflow
-ENV HOME=/home/sceneflow \
-    XDG_CONFIG_HOME=/home/sceneflow/.config \
-    XDG_DATA_HOME=/home/sceneflow/.local/share \
-    XDG_CACHE_HOME=/home/sceneflow/.cache \
-    DSH_HOME=/home/sceneflow/.dsh
+USER poros
+ENV HOME=/home/poros \
+    XDG_CONFIG_HOME=/home/poros/.config \
+    XDG_DATA_HOME=/home/poros/.local/share \
+    XDG_CACHE_HOME=/home/poros/.cache \
+    DSH_HOME=/home/poros/.dsh
 
-WORKDIR /home/sceneflow
+WORKDIR /home/poros
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD dsh --version || exit 1
 
-# 默认无参数打印帮助；真实运行由 SceneFlow 运行服务以显式参数拉起（见 src/server/dsh-launcher.ts）。
+# 默认无参数打印帮助；真实运行由 Poros 运行服务以显式参数拉起（见 src/server/dsh-launcher.ts）。
 CMD ["dsh", "--help"]

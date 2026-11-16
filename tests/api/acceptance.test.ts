@@ -1,6 +1,6 @@
 /**
  * 验收测试（PRD §10 矩阵的 P0 行）。
- * 真实依赖：Postgres（独立测试库 sceneflow_test）+ SeaweedFS S3（环回）。
+ * 真实依赖：Postgres（独立测试库 poros_test）+ SeaweedFS S3（环回）。
  * 每个用例标注对应验收 ID；断言失败即该验收项 FAIL——不做"代理式通过"。
  */
 import { execFileSync } from 'node:child_process';
@@ -8,8 +8,8 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 
 // ---- 独立测试库（不动开发库）----
-const baseUrl = process.env.DATABASE_URL || 'postgresql://sceneflow:sceneflow-local-dev-2026@127.0.0.1:55432/sceneflow?schema=public';
-const serverUrl = baseUrl.replace(/\/sceneflow\?/, '/postgres?');
+const baseUrl = process.env.DATABASE_URL || 'postgresql://poros:change-me-strong-password@127.0.0.1:55432/poros?schema=public';
+const serverUrl = baseUrl.replace(/\/poros\?/, '/postgres?');
 
 async function sql(url: string, query: string): Promise<void> {
 	// 用 prisma 的引擎太重；直接用 node-postgres？不引新依赖——用 psql 不存在时退回原始 socket。
@@ -39,8 +39,8 @@ beforeAll(async () => {
 	process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-0123456789abcdef';
 	process.env.MODEL_GATEWAY = 'mock';
 	// 建测试库（忽略已存在）+ 重置 schema（每次跑都是确定性干净库）
-	try { await sql(serverUrl, 'CREATE DATABASE sceneflow_test'); } catch { /* 已存在 */ }
-	process.env.DATABASE_URL = baseUrl.replace(/\/sceneflow\?/, '/sceneflow_test?');
+	try { await sql(serverUrl, 'CREATE DATABASE poros_test'); } catch { /* 已存在 */ }
+	process.env.DATABASE_URL = baseUrl.replace(/\/poros\?/, '/poros_test?');
 	const { PrismaClient } = await import('@prisma/client');
 	{
 		const resetter = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_URL } } });
@@ -298,7 +298,7 @@ describe('SEC-02 模型通道准入', () => {
 		const g = createGateway();
 		expect(g.name).toBe('mock');
 		process.env.MODEL_GATEWAY = 'deepseek';
-		delete process.env.SCENEFLOW_DEEPSEEK_API_KEY;
+		delete process.env.POROS_DEEPSEEK_API_KEY;
 		const dg = createGateway();
 		await expect(dg.generate('hi', '')).rejects.toThrow(/SEC-02/);
 		process.env.MODEL_GATEWAY = 'mock';

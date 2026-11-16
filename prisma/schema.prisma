@@ -1,4 +1,4 @@
-// SceneFlow Enterprise — 核心数据模型（PRD §3.3 概念模型的 Prisma 落地）
+// Poros Enterprise — 核心数据模型（PRD §3.3 概念模型的 Prisma 落地）
 // 作用域规则：组织级对象必带 organizationId；项目级对象必带 projectId；
 // 用户私有对象带 ownerId。所有跨作用域读取由服务端授权检查（src/server/authz.ts）。
 

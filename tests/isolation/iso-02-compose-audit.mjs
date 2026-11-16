@@ -68,7 +68,7 @@ for (const name of serviceNames) {
 
 // 宿主 DSH 路径黑名单（双保险：compose 全文中出现即违规）
 const raw = execFileSync('docker', ['compose', '-f', composeFile, 'config'], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
-for (const forbidden of [/C:\\\\Users\\\\/i, /\/home\/(?!sceneflow)[^/]+\/\.dsh/i, /\/root\/\.dsh/, /DSH_HOME=\/(Users|home\/(?!sceneflow)[^/])/]) {
+for (const forbidden of [/C:\\\\Users\\\\/i, /\/home\/(?!poros)[^/]+\/\.dsh/i, /\/root\/\.dsh/, /DSH_HOME=\/(Users|home\/(?!poros)[^/])/]) {
 	if (forbidden.test(raw)) bad(`compose 配置命中宿主路径黑名单: ${forbidden}`); else ok(`黑名单未命中: ${forbidden}`);
 }
 

@@ -1,4 +1,4 @@
-# SECURITY — SceneFlow Enterprise
+# SECURITY — Poros Enterprise
 
 ## 权限模型（PRD §3.4）
 
@@ -14,7 +14,7 @@
 ## 模型通道准入（SEC-02）
 
 - `MODEL_GATEWAY=mock`（默认）：契约测试输出，UI 与运行事件如实标注"未配置真实模型服务"。
-- `MODEL_GATEWAY=deepseek`：必须有 `SCENEFLOW_DEEPSEEK_API_KEY`，缺失即拒绝执行；**禁止静默降级到未授权公共免费网关**。
+- `MODEL_GATEWAY=deepseek`：必须有 `POROS_DEEPSEEK_API_KEY`，缺失即拒绝执行；**禁止静默降级到未授权公共免费网关**。
 - `dsh-our-free-model` 仅可用于公开无敏感数据的开发测试，不进生产。
 
 ## Judgment 证据真实性（PRD §7.2/§1.2）

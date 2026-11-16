@@ -5,8 +5,8 @@
  * 做法（无 syscall 探针条件下的诚实替代，见 docs/ISOLATION.md）：
  *   1. 在临时目录搭一个"仿真宿主 HOME"：.dsh/settings.yaml（含金丝雀令牌）、
  *      profiles、假秘密、假插件。
- *   2. 把 HOME/USERPROFILE 指过去，**不设** SCENEFLOW_HOME → 断言路径模块抛错
- *      （证明无默认目录回退）；再设 SCENEFLOW_HOME 指向另一目录 → 断言全部
+ *   2. 把 HOME/USERPROFILE 指过去，**不设** POROS_HOME → 断言路径模块抛错
+ *      （证明无默认目录回退）；再设 POROS_HOME 指向另一目录 → 断言全部
  *      路径解析都在专属目录内，且哨兵哈希清单前后逐字节一致。
  *   3. 静态守卫：src/server/dsh-paths.ts 源码不得出现 os.homedir / HOME /
  *      USERPROFILE / DSH_HOME 回退。
@@ -59,23 +59,23 @@ const distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'iso01-dist-'));
 	const esbuild = await import(pathToFileURL(path.join(repoRoot, 'node_modules', 'esbuild', 'lib', 'main.js')).href);
 	esbuild.buildSync({ entryPoints: [path.join(repoRoot, 'src', 'server', 'dsh-paths.ts')], format: 'esm', platform: 'node', outfile: path.join(distDir, 'dsh-paths.mjs') });
 }
-const { resolveSceneFlowHome, resolveSceneFlowPaths, SceneFlowHomeError } = await import(pathToFileURL(path.join(distDir, 'dsh-paths.mjs')).href);
+const { resolvePorosHome, resolvePorosPaths, PorosHomeError } = await import(pathToFileURL(path.join(distDir, 'dsh-paths.mjs')).href);
 
-// -- 3. 不设 SCENEFLOW_HOME → 必须抛错（无默认回退）--
+// -- 3. 不设 POROS_HOME → 必须抛错（无默认回退）--
 const baseEnv = { ...process.env, HOME: fakeHostHome, USERPROFILE: fakeHostHome, HOMEDRIVE: 'X:', HOMEPATH: '\\iso01-nothing', DSH_HOME: path.join(fakeHostHome, '.dsh') };
-delete baseEnv.SCENEFLOW_HOME;
+delete baseEnv.POROS_HOME;
 try {
-	resolveSceneFlowHome(baseEnv);
-	bad('缺失 SCENEFLOW_HOME 时没有抛错（存在默认目录回退风险）');
+	resolvePorosHome(baseEnv);
+	bad('缺失 POROS_HOME 时没有抛错（存在默认目录回退风险）');
 } catch (e) {
-	if (e instanceof SceneFlowHomeError || e.name === 'SceneFlowHomeError') ok('缺失 SCENEFLOW_HOME → 抛 SceneFlowHomeError（无回退）');
+	if (e instanceof PorosHomeError || e.name === 'PorosHomeError') ok('缺失 POROS_HOME → 抛 PorosHomeError（无回退）');
 	else bad('抛了错但类型不对: ' + e.name);
 }
 
 // -- 4. 设置专属 HOME → 全部路径在内部，哨兵不变 --
-const sfHome = fs.mkdtempSync(path.join(os.tmpdir(), 'iso01-sceneflow-home-'));
-const env = { ...baseEnv, SCENEFLOW_HOME: sfHome };
-const paths = resolveSceneFlowPaths(env);
+const sfHome = fs.mkdtempSync(path.join(os.tmpdir(), 'iso01-poros-home-'));
+const env = { ...baseEnv, POROS_HOME: sfHome };
+const paths = resolvePorosPaths(env);
 let allInside = true;
 for (const [k, v] of Object.entries(paths)) {
 	if (!v.startsWith(path.resolve(sfHome))) { allInside = false; bad(`${k} 越出专属目录: ${v}`); }
