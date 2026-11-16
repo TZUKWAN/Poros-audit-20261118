@@ -23,6 +23,15 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 12
+      s3:
+        image: chrislusf/seaweedfs:3.85
+        ports:
+          - 59000:8333
+        options: >-
+          --health-cmd "wget -qO- http://127.0.0.1:8333/ >/dev/null 2>&1 || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
     env:
       JWT_SECRET: ci-jwt-secret-0123456789abcdef
       DATABASE_URL: postgresql://poros:ci-password-0123456789@127.0.0.1:55432/poros?schema=public
