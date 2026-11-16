@@ -10,7 +10,6 @@ services:
       args:
         DSH_VERSION: "0.2.2-rc.1"
     image: sceneflow/dsh:0.2.2-rc.1
-    container_name: sceneflow-dsh
     user: "10001:10001"
     environment:
       HOME: /home/sceneflow

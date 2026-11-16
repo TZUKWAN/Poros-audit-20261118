@@ -13,7 +13,9 @@ RUN apt-get update \
  && npm install -g @deepseek-ai/dsh@${DSH_VERSION} --no-audit --no-fund \
  && npm cache clean --force
 
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin sceneflow
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin sceneflow \
+ && mkdir -p /home/sceneflow/.dsh /home/sceneflow/.config /home/sceneflow/.local /home/sceneflow/.cache \
+ && chown -R sceneflow:sceneflow /home/sceneflow
 
 USER sceneflow
 ENV HOME=/home/sceneflow \
