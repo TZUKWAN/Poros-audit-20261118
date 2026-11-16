@@ -4,3 +4,5 @@ coverage/
 *.log
 .tmp-*
 pi-package/dist/
+.edge-tmp/
+.minimap-*.png
