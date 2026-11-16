@@ -82,7 +82,10 @@ jobs:
           cache: npm
       - run: npm ci
       - name: 起专属容器（dsh 常驻运行时）
-        run: docker compose -f deploy/docker-compose.yml up -d db s3 dsh
+        run: |
+          docker compose -f deploy/docker-compose.yml up -d db s3 dsh
+          for i in $(seq 1 40); do docker compose -f deploy/docker-compose.yml exec -T db pg_isready -U poros >/dev/null 2>&1 && break; sleep 1; done
+          docker compose -f deploy/docker-compose.yml exec -T db pg_isready -U poros
       - run: npx prisma migrate deploy
       - name: 端到端最小闭环（真实 DSH 执行 + 测试桩模型，如实标注）
         run: node tests/e2e/run-e2e.mjs
