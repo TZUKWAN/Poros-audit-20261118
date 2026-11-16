@@ -1,7 +1,7 @@
 {
-  "name": "pi-scenario",
+  "name": "sceneflow-enterprise",
   "version": "1.0.0",
-  "description": "",
+  "description": "SceneFlow Enterprise — agent development, configuration, collaboration and governance platform on a dedicated isolated DSH runtime.",
   "main": "index.js",
   "scripts": {
     "test": "vitest run",
@@ -13,11 +13,18 @@
     "bundle": "node scripts-kernel-build.mjs && node scripts-launch-build.mjs",
     "pretest": "npm run panel-client && npm run bundle",
     "panel": "npm run panel-client && esbuild src/panel/launch.ts --bundle --platform=node --format=esm --outfile=dist/panel-launcher.js --external:@earendil-works/* --external:ws --external:pi-* --external:context-mode --external:typebox && node dist/panel-launcher.js",
-    "panel-client": "node scripts-panel-build.mjs"
+    "panel-client": "node scripts-panel-build.mjs",
+    "db:up": "docker compose -f deploy/docker-compose.yml up -d db minio",
+    "db:migrate": "prisma migrate dev --name init",
+    "db:seed": "tsx src/server/seed.ts",
+    "start": "tsx src/server/index.ts",
+    "test:api": "vitest run tests/api",
+    "test:isolation": "node tests/isolation/iso-01-sentinel.mjs && node tests/isolation/iso-02-compose-audit.mjs",
+    "e2e": "node tests/e2e/run-e2e.mjs"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "UNLICENSED（迁移中：原仓库无 LICENSE 文件，PRD §1.1 已记录，待权利人来信确定后再分发）",
   "type": "module",
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.87.1",
@@ -30,7 +37,15 @@
     "pi-reactor": "^0.2.3",
     "pi-subagents": "0.78.0",
     "ws": "^8.22.0",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "@prisma/client": "6.19.0",
+    "fastify": "5.6.0",
+    "@fastify/sse": "0.2.0",
+    "jsonwebtoken": "9.0.2",
+    "bcryptjs": "3.0.2",
+    "@aws-sdk/client-s3": "3.856.0",
+    "pino": "9.5.0",
+    "@fastify/static": "8.2.0"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
@@ -43,7 +58,9 @@
     "prettier": "3.9.10",
     "typescript": "5.9",
     "typescript-eslint": "8.71.2",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "prisma": "6.19.0",
+    "tsx": "4.21.0"
   },
   "overrides": {
     "undici": "8.12.2"

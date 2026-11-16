@@ -41,6 +41,44 @@ services:
       start_period: 15s
       retries: 3
 
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: sceneflow
+      POSTGRES_PASSWORD: ${SCENEFLOW_DB_PASSWORD:?请在 .env 设置}
+      POSTGRES_DB: sceneflow
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - sceneflow-net
+    # 仅环回发布供开发机迁移/测试；生产走 sceneflow-net 内部、不发布。
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sceneflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  s3:
+    image: chrislusf/seaweedfs:3.85
+    command: server -dir=/data -s3 -s3.port=8333
+    volumes:
+      - s3-data:/data
+    networks:
+      - sceneflow-net
+    ports:
+      - "127.0.0.1:59000:8333"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8333/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
 networks:
   sceneflow-net:
     driver: bridge
@@ -50,3 +88,5 @@ volumes:
   dsh-config:
   dsh-data:
   dsh-cache:
+  db-data:
+  s3-data:
