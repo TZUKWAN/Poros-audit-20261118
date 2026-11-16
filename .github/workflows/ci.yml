@@ -23,15 +23,6 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 12
-      s3:
-        image: chrislusf/seaweedfs:3.85
-        ports:
-          - 59000:8333
-        options: >-
-          --health-cmd "wget -qO- http://127.0.0.1:8333/ >/dev/null 2>&1 || exit 1"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 12
     env:
       JWT_SECRET: ci-jwt-secret-0123456789abcdef
       DATABASE_URL: postgresql://poros:ci-password-0123456789@127.0.0.1:55432/poros?schema=public
@@ -42,6 +33,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # SeaweedFS 需要自定义 CMD（GitHub service 容器不支持自定义命令），用步骤级 docker run + 就绪等待
+      - name: 起 S3（SeaweedFS，FILE-01 真实 S3 往返依赖）
+        run: |
+          docker run -d --name poros-s3 -p 127.0.0.1:59000:8333 chrislusf/seaweedfs:3.85 server -dir=/data -s3 -s3.port=8333
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:59000/ >/dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:59000/ >/dev/null
       - run: npx prisma migrate deploy
       - run: npm run build
       - run: npm run lint
