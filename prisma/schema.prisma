@@ -130,6 +130,8 @@ model AgentDefinition {
   department     String       @default("")
   // 草稿配置（JSON）：modelPolicy / toolAllowlist / skillBindings / mcpBindings / knowledgeBindings / output / approvalBoundary
   draftConfig    Json
+  // 审查项②：自然语言构建来源留痕（生成该草稿的原始描述；null = 显式表单创建）
+  nlSource       String?
   status         AgentStatus  @default(DRAFT)
   currentVersion Int          @default(0)
   versions       AgentVersion[]

@@ -32,6 +32,8 @@ export const env = {
 	dshComposeFile: () => process.env.POROS_DSH_COMPOSE || 'deploy/docker-compose.yml',
 	/** 开发/CI 模型桩（真实 DSH 执行 + 测试桩模型）：'1' 启用；生产禁止（生产用真实网关密钥） */
 	dshModelStub: (): boolean => process.env.POROS_DSH_MODEL_STUB === '1',
+	/** 执行通道（审查项①）：dsh = 专属容器内真实 DSH Runtime；gateway = 模型网关契约通道 */
+	porosRuntime: (): 'gateway' | 'dsh' => (process.env.POROS_RUNTIME === 'dsh' ? 'dsh' : 'gateway'),
 	/** 模型网关：mock（默认，UI 如实标注"未配置真实服务"）| deepseek（需真实密钥） */
 	modelGateway: (): 'mock' | 'deepseek' => (process.env.MODEL_GATEWAY === 'deepseek' ? 'deepseek' : 'mock'),
 	deepseekApiKey: () => process.env.POROS_DEEPSEEK_API_KEY || '',

@@ -142,6 +142,33 @@ describe('AGT-01/02/03 构建-授权-发布-回滚闭环', () => {
 	});
 });
 
+describe('AGT-02b 自然语言构建与草稿测试（审查项②）', () => {
+	let nlAgentId = '';
+	it('仅 description → LLM 生成结构化草稿，nlSource 留痕，能力默认空（授权表管理）', async () => {
+		const res = await app.inject({ method: 'POST', url: '/api/agents/drafts', headers: authed(tokens.builder), payload: { description: '创建一个能检索授权知识库并输出竞品分析报告的研究 Agent' } });
+		expect(res.statusCode).toBe(200);
+		expect(res.json().nlGenerated).toBe(true);
+		expect(res.json().agent.nlSource).toContain('竞品');
+		expect(res.json().agent.draftConfig.persona).toBeTruthy();
+		nlAgentId = res.json().agent.id;
+	});
+	it('EMPLOYEE 不能 NL 构建 → 403', async () => {
+		const res = await app.inject({ method: 'POST', url: '/api/agents/drafts', headers: authed(tokens.employee), payload: { description: '员工试图自建 Agent' } });
+		expect(res.statusCode).toBe(403);
+	});
+	it('草稿测试运行：真实执行（契约通道），事件含 judgment 注入痕迹，不产生版本', async () => {
+		const tr = await app.inject({ method: 'POST', url: `/api/agents/${nlAgentId}/test-runs`, headers: authed(tokens.builder), payload: { prompt: '写一段竞品分析提纲' } });
+		expect(tr.statusCode).toBe(200);
+		expect(tr.json().runtime).toBe('gateway');
+		expect(['SUCCEEDED', 'UNVERIFIED', 'SUCCEEDED_WITH_VIOLATIONS', 'FAILED']).toContain(tr.json().run.status);
+		const ev = await app.inject({ method: 'GET', url: `/api/tasks/${tr.json().taskId}/events`, headers: authed(tokens.builder) });
+		expect(ev.body).toContain('judgment');
+		const { getDb } = await import('../../src/server/db.js');
+		const versions = await getDb().agentVersion.findMany({ where: { agentId: nlAgentId } });
+		expect(versions.length).toBe(0); // 草稿测试不产生版本
+	});
+});
+
 describe('WORK-01 统一工作台执行（mock 网关如实标注）', () => {
 	it('员工对已发布 Agent 下达任务 → 运行成功且事件可见', async () => {
 		const agents = await app.inject({ method: 'GET', url: '/api/agents', headers: authed(tokens.employee) });

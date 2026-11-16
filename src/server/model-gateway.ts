@@ -13,13 +13,42 @@ export interface GatewayResult {
 	disclaimer: string;
 }
 
+export interface AgentDraft {
+	name: string;
+	description: string;
+	department: string;
+	config: { persona: string; modelPolicy: string; outputKind: string; tools: string[] };
+}
+
 export interface ModelGateway {
 	name: string;
 	generate(prompt: string, system: string): Promise<GatewayResult>;
+	/** 审查项②：自然语言 → 结构化 AgentDefinition 草稿（LLM 生成，zod 在路由层校验） */
+	draftAgent(description: string): Promise<AgentDraft>;
+}
+
+function draftFromDescription(name: string, description: string): AgentDraft {
+	const clean = description.replace(/\s+/g, ' ').trim();
+	const headline = clean.slice(0, 60);
+	return {
+		name: name || headline.slice(0, 12) || '未命名 Agent',
+		description: clean.slice(0, 400),
+		department: '',
+		config: {
+			persona: `你是组织内受治理的 Agent。职责：${headline}。严格在授权能力范围内工作，输出必须可核验。`,
+			modelPolicy: 'default',
+			outputKind: /报告|总结|文档/.test(clean) ? 'markdown-document' : 'chat-answer',
+			tools: []
+		}
+	};
 }
 
 class MockGateway implements ModelGateway {
 	name = 'mock';
+	async draftAgent(description: string): Promise<AgentDraft> {
+		const d = draftFromDescription('', description);
+		return { ...d, config: { ...d.config, modelPolicy: 'mock（未配置真实模型服务）' } };
+	}
 	async generate(prompt: string, system: string): Promise<GatewayResult> {
 		const output = [
 			'【mock 网关输出·未配置真实模型服务】',
@@ -35,6 +64,26 @@ class MockGateway implements ModelGateway {
 
 class DeepSeekGateway implements ModelGateway {
 	name = 'deepseek';
+	async draftAgent(description: string): Promise<AgentDraft> {
+		const key = env.deepseekApiKey();
+		if (!key) throw new Error('DeepSeek 网关未配置 POROS_DEEPSEEK_API_KEY：拒绝静默降级（SEC-02）');
+		const sys = '你是 Poros Agent Builder。把用户的自然语言描述转成结构化 Agent 草稿 JSON，字段：name(≤12字)、department、config.persona(职责+边界)、config.outputKind(markdown-document|chat-answer)、config.tools(空数组，能力由授权表管理)。只输出 JSON。';
+		const res = await fetch('https://api.deepseek.com/chat/completions', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+			body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'system', content: sys }, { role: 'user', content: description }], response_format: { type: 'json_object' } })
+		});
+		if (!res.ok) throw new Error(`DeepSeek 网关错误: HTTP ${res.status}`);
+		const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+		const raw = JSON.parse(data.choices?.[0]?.message?.content ?? '{}') as Partial<AgentDraft>;
+		const fallback = draftFromDescription('', description);
+		return {
+			name: String(raw.name ?? fallback.name).slice(0, 40),
+			description: String(raw.description ?? fallback.description),
+			department: String(raw.department ?? ''),
+			config: { ...fallback.config, ...(raw.config ?? {}), tools: Array.isArray(raw.config?.tools) ? raw.config!.tools : [] }
+		};
+	}
 	async generate(prompt: string, system: string): Promise<GatewayResult> {
 		const key = env.deepseekApiKey();
 		if (!key) throw new Error('DeepSeek 网关未配置 POROS_DEEPSEEK_API_KEY：拒绝静默降级到未授权公共网关（SEC-02）');

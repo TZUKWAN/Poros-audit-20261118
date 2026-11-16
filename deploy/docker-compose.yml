@@ -10,13 +10,18 @@ services:
       args:
         DSH_VERSION: "0.2.2-rc.1"
     image: poros/dsh:0.2.2-rc.1
+    # 常驻运行时容器：Poros API 经 docker exec 在其中拉起真实 dsh headless 会话（审查项①）。
+    command: ["sleep", "infinity"]
     user: "10001:10001"
     environment:
       HOME: /home/poros
       XDG_CONFIG_HOME: /home/poros/.config
-      XDG_DATA_HOME: /home/poros/.local/share
+      XDG_DATA_HOME: /home/poros/.local
       XDG_CACHE_HOME: /home/poros/.cache
       DSH_HOME: /home/poros/.dsh
+      # DSH 原生绑定加载器默认把 .node 物化到 os.tmpdir()（本服务 /tmp 为 noexec tmpfs 硬化）
+      # 再 require——noexec 上 mmap 失败。关闭该非必需缓存，直接从镜像路径加载（硬化不放松）。
+      NARB_DISABLE_NATIVE_CACHE: "1"
       # 模型密钥只允许经 Poros Secrets 注入到运行服务，再按需传参；不写入镜像与本文件。
     volumes:
       - dsh-home:/home/poros/.dsh

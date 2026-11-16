@@ -16,8 +16,14 @@
 | ISO-02 卷/权限/网络静态审计 | ✅ PASS | `node tests/isolation/iso-02-compose-audit.mjs` | 解析 `docker compose config`：无特权/host 网络/docker.sock/root/发布端口/ bind 挂载；宿主路径黑名单未命中 |
 | ISO-03 双实例互不影响 | ✅ PASS（真实断言） | A 写入 .dsh/instance-marker，B 读到 EMPTY，A 读到 A-MARKER | `docker compose -p sf-a / sf-b run -d dsh sleep infinity`，具名卷各自独立；修复过程中发现并解决：硬编码 container_name 冲突、卷根目录 root 属主（Dockerfile 预建目录+chown） |
 | ISO-04 进程与端口审计 | ✅ PASS（范围内） | Poros 全程仅经 docker 命令运行（从未执行宿主 dsh）；compose 零发布端口 | 宿主存在其他无关容器（lightrag/ycki/searxng）非本任务所起，不触碰不审计其内容；dshelp 类进程零新增 |
-| ISO-05 权限负向（容器越宿主） | ⏳ 待运行链接通后执行 | — | 容器内尝试访问宿主路径/未授权工具 → 必须拒绝+审计 |
-| SEC-01 提示词注入/越权工具 | ⏳ Phase 2-3 执行 | — | 随工具网关与权限中间件交付 |
+| ISO-05 权限负向（容器越宿主） | ✅ PASS（脚本化） | `node tests/isolation/iso-05-container-escape.mjs` | 专属 compose 项目内拉起容器尝试访问宿主路径/越权工具 → 拒绝+审计，测试自清理 |
+| SEC-01 提示词注入/越权工具 | ✅ PASS（API 层） | tests/api/acceptance.test.ts SEC-01 用例 | 不可信内容不改变权限；DSH 事件流工具白名单审计见 src/server/dsh-runtime.ts auditToolCalls |
+
+## 运行时硬化教训（2026-11-16 实机）
+
+- compose `tmpfs: /tmp` 默认 **noexec** 会击穿 DSH 原生绑定加载器（其默认把 .node 物化到
+  os.tmpdir() 再 require）。已设 `NARB_DISABLE_NATIVE_CACHE=1`（compose + exec 双侧）直接从
+  镜像路径加载——tmpfs 硬化不放松。详见 docs/E2E_EVIDENCE.md。
 
 ## 真实运行证据（构建后回填）
 

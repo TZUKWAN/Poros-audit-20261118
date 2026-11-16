@@ -2,6 +2,14 @@
 
 面向企业组织的 **Agent 开发、配置、协作与治理平台**。唯一底层 Agent Harness 为 **DeepSeek Harness（DSH）**，运行在与宿主完全隔离的专属容器中。
 
+## 状态诚实声明（审查项⑦）
+
+- **工作台 UI 现状 = 临时原型**（`src/server/public/index.html` 手写页面），仅用于联调。
+  产品工作台未完成：按 PRD §3.2 将以成熟组件栈实现（React + shadcn/ui + Radix + TanStack Query），
+  不自造按钮/表格/对话渲染器。该项在审查清单中标记为未完成。
+- **ISO-03 双实例互不影响**：已有真实断言记录（docs/ISOLATION.md），可重复脚本化列入 TODO。
+- 其余能力矩阵与真实证据见 `docs/E2E_EVIDENCE.md`、`docs/ISOLATION.md`、`docs/BASELINE.md`。
+
 ## 这一版是什么
 
 - 组织/成员/角色（管理员·构建者·员工·审阅者）/项目的真实 RBAC，权限判定全部在服务端

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { getDb } from '../db.js';
 import { requirePrincipal, requireRole, requireRoleExact, assertProjectAccess, signSession, verifyPassword, signDownloadTicket, verifyDownloadTicket } from '../auth.js';
 import { runTask } from '../runner.js';
+import { createGateway } from '../model-gateway.js';
 import { putObject, getObject, storageKeyFor } from '../storage.js';
 import { env } from '../env.js';
 
@@ -29,9 +30,35 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 	app.post('/api/agents/drafts', async (req, reply) => {
 		const p = requirePrincipal(req, reply); if (!p) return;
 		if (!requireRole(['BUILDER'], p, reply)) return;
-		const body = z.object({ name: z.string().min(1).max(120), description: z.string().default(''), department: z.string().default(''), config: z.record(z.string(), z.unknown()).default({}) }).parse(req.body);
-		const agent = await db.agentDefinition.create({ data: { organizationId: p.organizationId, name: body.name, description: body.description, department: body.department, draftConfig: body.config as never, createdBy: p.userId } });
-		return { ok: true, agent, diff: { before: null, after: body.config } };
+		const body = z.object({ description: z.string().min(4).max(2000).optional(), name: z.string().min(1).max(120).optional(), department: z.string().default(''), config: z.record(z.string(), z.unknown()).optional() }).parse(req.body);
+		let name: string;
+		let description: string;
+		let config: Record<string, unknown>;
+		if (body.name) {
+			// 显式表单创建（兼容路径）
+			name = body.name;
+			description = body.description ?? '';
+			config = { ...(body.config ?? {}) };
+		} else {
+			// 审查项②：自然语言构建——LLM 生成结构化草稿，zod 校验，能力一律先空（授权表管理）
+			if (!body.description) return reply.code(400).send({ ok: false, error: '需要 description（自然语言描述）或 name（显式创建）' });
+			const gw = createGateway();
+			const draft = await gw.draftAgent(body.description);
+			name = draft.name;
+			description = draft.description;
+			config = { ...draft.config } as Record<string, unknown>;
+		}
+		// NL 生成路径：同名自动去重（确定性生成器可能重复产出同名草稿）；显式路径撞名 → 409
+		if (!body.name) {
+			const base = name;
+			for (let suffix = 2; await db.agentDefinition.findFirst({ where: { organizationId: p.organizationId, name } }); suffix++) {
+				name = `${base}-${suffix}`;
+			}
+		} else if (await db.agentDefinition.findFirst({ where: { organizationId: p.organizationId, name } })) {
+			return reply.code(409).send({ ok: false, error: '同名 Agent 已存在' });
+		}
+		const agent = await db.agentDefinition.create({ data: { organizationId: p.organizationId, name, description, department: body.department, draftConfig: config as never, createdBy: p.userId, nlSource: body.name ? null : (body.description ?? '') } });
+		return { ok: true, agent, diff: { before: null, after: config }, nlGenerated: !body.name };
 	});
 
 	app.patch('/api/agents/:id/draft', async (req, reply) => {
@@ -61,11 +88,14 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		const p = requirePrincipal(req, reply); if (!p) return;
 		if (!requireRole(['BUILDER'], p, reply)) return;
 		const { id } = idParam.parse(req.params);
-		const body = z.object({ prompt: z.string().min(1) }).parse(req.body);
+		const body = z.object({ prompt: z.string().min(1).max(20_000) }).parse(req.body);
 		const agent = await db.agentDefinition.findFirst({ where: { id, organizationId: p.organizationId } });
 		if (!agent) return reply.code(404).send({ ok: false, error: 'Agent 不存在或不属于本组织' });
-		// 测试运行使用草稿配置，不发布版本；创建临时任务运行（标记 BLOCKED 保护：测试运行不入正式任务流）
-		return { ok: true, note: '测试运行沙箱未配置模型网关时返回契约占位', agentId: id, promptLength: body.prompt.length };
+		// 审查项②：真实草稿测试——以草稿人设+草稿授权执行，不产生版本、不入正式任务流（标题标记）
+		const grants = await db.agentGrant.findMany({ where: { agentId: id } });
+		const task = await db.task.create({ data: { organizationId: p.organizationId, projectId: null, agentVersionId: null, title: `【草稿测试】${agent.name}`, prompt: body.prompt, createdBy: p.userId } });
+		const result = await runTask({ db, runtime: env.porosRuntime(), dshGrants: grants.map((g) => ({ kind: g.kind, name: g.name })), draftMode: { agentId: agent.id, agentName: agent.name, department: agent.department || '' } }, task.id);
+		return { ok: true, taskId: task.id, run: result, runtime: env.porosRuntime() };
 	});
 
 	app.post('/api/agents/:id/publish', async (req, reply) => {
@@ -114,8 +144,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 			if (!allowed) return reply.code(403).send({ ok: false, error: '项目不存在或未授权' });
 		}
 		const task = await db.task.create({ data: { organizationId: p.organizationId, projectId: body.projectId || null, agentVersionId: version.id, title: body.prompt.slice(0, 80), prompt: body.prompt, createdBy: p.userId } });
-		const result = await runTask({ db }, task.id);
-		return { ok: true, taskId: task.id, run: result };
+		// 审查项①③：执行通道由环境决定（dsh=真实 DSH Runtime）；AgentGrant 装载能力并做事件白名单审计
+		const grants = await db.agentGrant.findMany({ where: { agentId: agent.id } });
+		const result = await runTask({ db, runtime: env.porosRuntime(), dshGrants: grants.map((g) => ({ kind: g.kind, name: g.name })) }, task.id);
+		return { ok: true, taskId: task.id, run: result, runtime: env.porosRuntime() };
 	});
 
 	app.get('/api/tasks/:id/events', async (req, reply) => {
