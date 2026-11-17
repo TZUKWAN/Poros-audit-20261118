@@ -1,4 +1,5 @@
 import { it, expect } from "vitest";
+import { request } from "node:http";
 import { createRunModelProxy } from "../../src/server/model-proxy.js";
 import { deploymentScope } from "../../src/server/dsh-runtime.js";
 import { addUsageCount } from "../../src/server/model-gateway.js";
@@ -70,6 +71,26 @@ it("model proxy requires a run token, pins upstream/model, and never returns the
       model: "deepseek-chat",
       max_tokens: 4096,
     });
+    const unicode = "中文🙂分块请求";
+    const payload = Buffer.from(JSON.stringify({ messages: [{ role: "user", content: unicode }] }));
+    const split = payload.indexOf(Buffer.from(unicode)) + 1;
+    await new Promise<void>((resolve, reject) => {
+      const req = request(
+        base + "/v1/chat/completions",
+        { method: "POST", headers: { authorization: `Bearer ${proxy.token}` } },
+        (res) => {
+          res.resume();
+          res.once("end", () =>
+            res.statusCode === 200 ? resolve() : reject(new Error(`HTTP ${res.statusCode}`)),
+          );
+        },
+      );
+      req.on("error", reject);
+      req.setTimeout(5000, () => req.destroy(new Error("chunked HTTP deadline")));
+      req.write(payload.subarray(0, split));
+      setTimeout(() => req.end(payload.subarray(split)), 20);
+    });
+    expect(JSON.parse(String(received!.body)).messages[0].content).toBe(unicode);
     expect(
       (
         await fetch(base + "/v1/chat/completions", {
@@ -79,7 +100,7 @@ it("model proxy requires a run token, pins upstream/model, and never returns the
         })
       ).status,
     ).toBe(502);
-    expect(proxy.upstreamCalls()).toBe(1);
+    expect(proxy.upstreamCalls()).toBe(2);
   } finally {
     await proxy.close();
     if (original === undefined) delete process.env.POROS_DEEPSEEK_API_KEY;

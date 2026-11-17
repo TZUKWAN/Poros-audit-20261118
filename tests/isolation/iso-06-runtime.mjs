@@ -25,7 +25,8 @@ const run = (options) =>
   });
 const hostile =
   "quotes '\"; $(touch /home/poros/INJECTED) `id`\nPOROS_TASK_EOF\ntouch /home/poros/INJECTED\n# 中文\u2028🙂\n" +
-  "x".repeat(18000);
+  "x".repeat(18000) +
+  "中🙂".repeat(8000);
 const data = await run({ task: hostile, grants: [] });
 assert.equal(data.completed, true, data.error);
 assert.ok(

@@ -24,6 +24,7 @@ export async function createRunModelProxy(forward: typeof fetch = fetch) {
       return;
     }
     try {
+      req.setEncoding("utf8");
       let raw = "";
       for await (const c of req) {
         raw += c;

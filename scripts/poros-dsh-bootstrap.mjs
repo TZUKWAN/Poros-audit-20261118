@@ -3,10 +3,11 @@ import { mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createTestModel } from "./poros-test-model.mjs";
+process.stdin.setEncoding("utf8");
 let raw = "";
 for await (const chunk of process.stdin) {
   raw += chunk;
-  if (raw.length > 256000) throw new Error("Input quota exceeded");
+  if (Buffer.byteLength(raw) > 256000) throw new Error("Input quota exceeded");
 }
 const input = JSON.parse(raw);
 await mkdir("/home/poros/work", { recursive: true, mode: 0o700 });

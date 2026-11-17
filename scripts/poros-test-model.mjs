@@ -10,6 +10,7 @@ export async function createTestModel(
 ) {
   const server = http.createServer(async (req, res) => {
     let body = "";
+    req.setEncoding("utf8");
     for await (const chunk of req) body += chunk;
     const input = JSON.parse(body),
       hasResult = input.messages?.some((m) => m.role === "tool");
