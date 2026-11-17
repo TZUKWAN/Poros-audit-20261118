@@ -32,6 +32,7 @@ export interface DshRunOptions {
   testCalls?: Array<{ name: string; arguments: Record<string, unknown> }>;
 }
 export interface DshRunResult {
+  modelCalls: number | null;
   sessionId: string | null;
   final: string;
   completed: boolean;
@@ -207,6 +208,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
   let writes = Promise.resolve(),
     streamError: unknown;
   const result: DshRunResult = {
+    modelCalls: null,
     sessionId: null,
     final: "",
     completed: false,
@@ -346,9 +348,23 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
     await writes;
     if (streamError) throw streamError;
     result.diagnostics = executed.stderr;
+    result.modelCalls = proxy
+      ? proxy.upstreamCalls()
+      : events.filter((e) => e.type === "status" && e.phase === "step_end").length;
     if (executed.code !== 0) result.error = `DSH process exit ${executed.code}`;
     if (!result.completed && !result.error) result.error = "DSH terminated without done event";
     return result;
+  } catch (error) {
+    if (error instanceof Error)
+      Object.assign(error, {
+        usage: {
+          modelCalls: proxy?.upstreamCalls() ?? null,
+          inputTokens: null,
+          outputTokens: null,
+          monetaryCost: null,
+        },
+      });
+    throw error;
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", abort);

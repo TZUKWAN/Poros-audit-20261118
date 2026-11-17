@@ -12,7 +12,7 @@
  *  - 单条规则缺裁决 → UNCHECKED（不补猜）
  *  - PASS/FAIL 均带截断理由，逐条落 RunEvent（审计可回放）
  */
-import type { ModelGateway } from "./model-gateway.js";
+import type { ModelGateway, GatewayResult } from "./model-gateway.js";
 import type { EffectiveRule } from "./judgment.js";
 
 export type SemanticVerdict = { status: "PASS" | "FAIL" | "UNCHECKED"; reason: string };
@@ -23,7 +23,11 @@ export interface SemanticJudge {
     rules: EffectiveRule[],
     output: string,
     signal?: AbortSignal,
-  ): Promise<{ verdicts: Map<string, SemanticVerdict>; modelCalls: number }>;
+  ): Promise<{
+    verdicts: Map<string, SemanticVerdict>;
+    modelCalls: number;
+    usage?: GatewayResult["usage"];
+  }>;
 }
 
 function parseVerdicts(raw: string, ruleIds: string[]): Map<string, SemanticVerdict> {
@@ -103,6 +107,7 @@ export function createSemanticJudge(gateway: ModelGateway): SemanticJudge | null
             "产出超过 Judge 可核验长度，拒绝基于截断内容判 PASS",
           ),
           modelCalls: 0,
+          usage: { modelCalls: 0, inputTokens: 0, outputTokens: 0, monetaryCost: null },
         };
       const ruleLines = rules.map((r) => `- id=${r.id} 规则: ${r.rule}`).join("\n");
       const system = [
@@ -120,6 +125,7 @@ export function createSemanticJudge(gateway: ModelGateway): SemanticJudge | null
             rules.map((r) => r.id),
           ),
           modelCalls: 1,
+          usage: result.usage,
         };
       } catch (error) {
         const why = `judge 调用失败: ${String((error as Error)?.message ?? error).slice(0, 120)}`;
@@ -131,6 +137,7 @@ export function createSemanticJudge(gateway: ModelGateway): SemanticJudge | null
             why,
           ),
           modelCalls: 1,
+          usage: { modelCalls: 1, inputTokens: null, outputTokens: null, monetaryCost: null },
         };
       }
     },

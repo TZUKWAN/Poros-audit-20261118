@@ -29,6 +29,10 @@ const hostile =
 const data = await run({ task: hostile, grants: [] });
 assert.equal(data.completed, true, data.error);
 assert.ok(
+  Number.isInteger(data.modelCalls) && data.modelCalls > 0,
+  "actual DSH test-model steps must be accounted for",
+);
+assert.ok(
   data.events.some(
     (e) => e.type === "boundary" && e.taskHash === sha(hostile) && e.injected === false,
   ),

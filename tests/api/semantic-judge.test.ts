@@ -59,6 +59,7 @@ describe("语义 Judge fail-open 语义（审查项⑥镜像）", () => {
           '{"verdicts":[{"id":"r1","pass":true,"reason":"语气正式"},{"id":"r2","pass":false,"reason":"结论在中间"}]}',
         gateway: "deepseek",
         disclaimer: "",
+        usage: { modelCalls: 1, inputTokens: 12, outputTokens: 9, monetaryCost: null },
       }),
       draftAgent: async () => {
         throw new Error("unused");
@@ -66,8 +67,9 @@ describe("语义 Judge fail-open 语义（审查项⑥镜像）", () => {
     };
     const judge = createSemanticJudge(gw);
     expect(judge).not.toBeNull();
-    const { verdicts, modelCalls } = await judge!.judge(rules, "产出文本");
+    const { verdicts, modelCalls, usage } = await judge!.judge(rules, "产出文本");
     expect(modelCalls).toBe(1);
+    expect(usage).toMatchObject({ inputTokens: 12, outputTokens: 9, monetaryCost: null });
     expect(verdicts.get("r1")).toEqual({ status: "PASS", reason: "语气正式" });
     expect(verdicts.get("r2")!.status).toBe("FAIL");
   });

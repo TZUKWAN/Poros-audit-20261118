@@ -32,5 +32,5 @@ WORKDIR /home/poros
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD dsh --version || exit 1
 
-# 默认无参数打印帮助；真实运行由 Poros 运行服务以显式参数拉起（见 src/server/dsh-launcher.ts）。
+# 默认无参数打印帮助；真实运行由 Poros 运行服务以显式参数拉起（见 src/server/dsh-runtime.ts）。
 CMD ["dsh", "--help"]

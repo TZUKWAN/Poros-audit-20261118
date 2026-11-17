@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build-lint-unit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17-alpine
@@ -20,15 +20,15 @@ jobs:
           POSTGRES_DB: poros
         ports: ["55432:5432"]
         options: >-
-          --health-cmd "pg_isready -U poros" --health-interval 5s --health-timeout 3s --health-retries 12
+          --health-cmd "pg_isready -h 127.0.0.1 -U poros" --health-interval 5s --health-timeout 3s --health-retries 12
     env:
       POROS_DB_PASSWORD: ci-password-0123456789
       JWT_SECRET: ci-jwt-secret-0123456789abcdef
       DATABASE_URL: postgresql://poros:ci-password-0123456789@127.0.0.1:55432/poros?schema=public
       LOG_LEVEL: silent
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node24
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6, Node24
         with:
           node-version-file: .node-version
           cache: npm
@@ -42,13 +42,13 @@ jobs:
       - run: npm run lint
       - run: npm run test:api
   isolation:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       POROS_DB_PASSWORD: ci-password-0123456789
       JWT_SECRET: ci-jwt-secret-0123456789abcdef
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node24
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6, Node24
         with:
           node-version-file: .node-version
           cache: npm
@@ -56,7 +56,7 @@ jobs:
       - run: docker compose -f deploy/docker-compose.yml build dsh
       - run: npm run test:isolation
   e2e-real-dsh:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build-lint-unit, isolation]
     env:
       POROS_DB_PASSWORD: ci-password-0123456789
@@ -64,8 +64,8 @@ jobs:
       DATABASE_URL: postgresql://poros:ci-password-0123456789@127.0.0.1:55432/poros?schema=public
       POROS_E2E_REQUIRED: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node24
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6, Node24
         with:
           node-version-file: .node-version
           cache: npm
@@ -75,15 +75,9 @@ jobs:
         run: |
           docker compose -f deploy/docker-compose.yml build dsh
           docker compose -f deploy/docker-compose.yml up -d db s3
-          for i in $(seq 1 60); do docker compose -f deploy/docker-compose.yml exec -T db pg_isready -U poros >/dev/null 2>&1 && break; sleep 1; done
-          docker compose -f deploy/docker-compose.yml exec -T db pg_isready -U poros
+          for i in $(seq 1 60); do docker compose -f deploy/docker-compose.yml exec -T db pg_isready -h 127.0.0.1 -U poros >/dev/null 2>&1 && break; sleep 1; done
+          docker compose -f deploy/docker-compose.yml exec -T db pg_isready -h 127.0.0.1 -U poros
           node scripts/wait-infra.mjs
       - run: node node_modules/playwright-core/cli.js install --with-deps chromium
       - name: Real DSH/tools plus explicit test model and headless UI
         run: npm run e2e
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: poros-ui-evidence
-          path: .audit/evidence/*.png
-          if-no-files-found: warn

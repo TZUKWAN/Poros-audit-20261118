@@ -1,7 +1,7 @@
 /** Durable worker's execution unit. Published manifests and rule applications are pinned. */
 import type { PrismaClient, TaskStatus, Prisma } from "@prisma/client";
 import { effectiveRules, evaluateMechanical } from "./judgment.js";
-import { executionGateway, type ModelGateway } from "./model-gateway.js";
+import { executionGateway, addUsageCount, type ModelGateway } from "./model-gateway.js";
 import { createSemanticJudge, type SemanticJudge, type SemanticVerdict } from "./semantic-judge.js";
 import { runDshSession, auditToolCalls } from "./dsh-runtime.js";
 import { parseManifest, digest, ApiError } from "./releases.js";
@@ -40,9 +40,9 @@ export async function runTask(
   let seq = await db.runEvent.count({ where: { runId: run.id } });
   const log = (kind: string, payload: unknown) => emitEvent(db, run.id, ++seq, kind, payload);
   const usage: Record<string, unknown> = {
-    modelCalls: 0,
-    inputTokens: 0,
-    outputTokens: 0,
+    modelCalls: runtime === "dsh" ? null : 0,
+    inputTokens: runtime === "dsh" ? null : 0,
+    outputTokens: runtime === "dsh" ? null : 0,
     monetaryCost: null,
     costNote: "无经核实单价/用量时记 null，不虚构账单金额",
   };
@@ -110,6 +110,8 @@ export async function runTask(
       label = "",
       denied = 0;
     if (runtime === "dsh") {
+      let inputTokens: number | null = 0,
+        outputTokens: number | null = 0;
       if (!manifest.grants.some((g) => g.kind === "MODEL" && g.name === "deepseek-chat"))
         throw new ApiError(403, "Agent 未授权 Model deepseek-chat");
       const dsh = await runDshSession({
@@ -127,14 +129,19 @@ export async function runTask(
         onEvent: async (e) => {
           if (e.type === "status" && e.phase === "step_end") {
             const u = e.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-            usage.modelCalls = Number(usage.modelCalls) + 1;
-            usage.inputTokens = Number(usage.inputTokens) + (u?.inputTokens ?? 0);
-            usage.outputTokens = Number(usage.outputTokens) + (u?.outputTokens ?? 0);
+            usage.observedDshSteps = Number(usage.observedDshSteps ?? 0) + 1;
+            usage.inputTokens = inputTokens = addUsageCount(inputTokens, u?.inputTokens);
+            usage.outputTokens = outputTokens = addUsageCount(outputTokens, u?.outputTokens);
           }
           await log(`dsh.${e.type}`, e);
         },
       });
       label = `dsh(${dsh.modelChannel})`;
+      usage.modelCalls = dsh.modelCalls;
+      if (dsh.modelCalls !== usage.observedDshSteps) {
+        usage.inputTokens = null;
+        usage.outputTokens = null;
+      }
       denied = auditToolCalls(dsh.events, manifest.grants).filter((c) => !c.authorized).length;
       const toolErrors = dsh.events.filter(
         (e) => e.type === "tool_result" && e.status === "error",
@@ -161,6 +168,13 @@ export async function runTask(
       await log("model", { gateway: label, disclaimer: generated.disclaimer, usage });
     }
     if (!output.trim()) throw new Error("模型未返回产出");
+    usage.generation = {
+      modelCalls: usage.modelCalls,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      monetaryCost: null,
+    };
+    usage.judge = { modelCalls: 0, inputTokens: 0, outputTokens: 0, monetaryCost: null };
     let verdicts = new Map<string, SemanticVerdict>(),
       judgeCalls = 0;
     const semantics = rules.filter((r) => r.kind === "SEMANTIC");
@@ -174,7 +188,20 @@ export async function runTask(
       const result = await judge.judge(semantics, output, deps.signal);
       verdicts = result.verdicts;
       judgeCalls = result.modelCalls;
-      await log("judge", { modelCalls: judgeCalls, rules: semantics.map((r) => r.id) });
+      usage.judge = {
+        modelCalls: judgeCalls,
+        inputTokens: result.usage?.inputTokens ?? null,
+        outputTokens: result.usage?.outputTokens ?? null,
+        monetaryCost: null,
+      };
+      usage.modelCalls = addUsageCount(usage.modelCalls, judgeCalls);
+      usage.inputTokens = addUsageCount(usage.inputTokens, result.usage?.inputTokens);
+      usage.outputTokens = addUsageCount(usage.outputTokens, result.usage?.outputTokens);
+      await log("judge", {
+        modelCalls: judgeCalls,
+        usage: usage.judge,
+        rules: semantics.map((r) => r.id),
+      });
     }
     let failed = denied > 0,
       unchecked = gateway.name === "mock" && runtime !== "dsh";

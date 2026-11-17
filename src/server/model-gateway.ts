@@ -20,6 +20,21 @@ export interface GatewayResult {
   };
 }
 
+/** Unknown/invalid samples make an aggregate unknown; never invent zero consumption. */
+export function addUsageCount(total: unknown, sample: unknown): number | null {
+  if (
+    typeof total !== "number" ||
+    typeof sample !== "number" ||
+    !Number.isSafeInteger(total) ||
+    !Number.isSafeInteger(sample) ||
+    total < 0 ||
+    sample < 0
+  )
+    return null;
+  const sum = total + sample;
+  return Number.isSafeInteger(sum) ? sum : null;
+}
+
 export interface AgentDraft {
   name: string;
   description: string;
