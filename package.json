@@ -2,7 +2,6 @@
   "name": "poros",
   "version": "1.0.0",
   "description": "Poros Enterprise \u2014 agent development, configuration, collaboration and governance platform on a dedicated isolated DSH runtime.",
-  "main": "index.js",
   "scripts": {
     "test": "vitest run tests/api && npm run test:isolation",
     "build": "tsc -p tsconfig.json && npm run ui:typecheck && npm run ui:build && node scripts/copy-public.mjs",
