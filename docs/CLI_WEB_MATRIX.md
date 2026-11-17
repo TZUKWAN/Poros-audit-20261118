@@ -1,3 +1,5 @@
+> 历史记录：本文描述旧 Pi 或早期企业基线，不作为当前功能/部署验收。当前事实见 [README](../README.md)、[DEPLOYMENT](DEPLOYMENT.md)、[功能迁移矩阵](FEATURE_MIGRATION_MATRIX.md) 和 [测试证据](../TEST_EVIDENCE.md)。
+
 # CLI and Web capability matrix
 
 This matrix is the contract between the Pi extension, the local Web panel, and the shared service layer.

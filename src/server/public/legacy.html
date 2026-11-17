@@ -24,6 +24,7 @@ pre{background:#10131a;border:1px solid var(--line);border-radius:6px;padding:10
 </style>
 </head>
 <body>
+<p style="padding:20px">历史布局原型（只读，脚本停用）。<a href="/">返回当前 Poros 工作台</a></p>
 <header><b>Poros</b><span class="tag">Enterprise · 专属 DSH 隔离运行时</span>
 <nav id="nav" style="display:none">
 <button data-p="workspace">工作台</button><button data-p="agents">Agent 目录/构建</button><button data-p="judgments">Judgment</button><button data-p="files">文件</button><button data-p="integrations">集成状态</button>
@@ -31,7 +32,7 @@ pre{background:#10131a;border:1px solid var(--line);border-radius:6px;padding:10
 <span class="grow"></span><span id="who" class="tag"></span><button id="logout" class="ghost small" style="display:none">退出</button></header>
 <main id="view"></main>
 <div id="toast"></div>
-<script>
+<script type="text/plain" data-historical="true">
 const $=s=>document.querySelector(s);let token=localStorage.sf_token||'',me=null;
 const toast=m=>{const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2600)};
 async function api(path,opt={}){const r=await fetch('/api'+path,{...opt,headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})}});

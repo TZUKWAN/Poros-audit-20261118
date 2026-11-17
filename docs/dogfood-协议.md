@@ -1,3 +1,5 @@
+> 历史记录：本文描述旧 Pi 或早期企业基线，不作为当前功能/部署验收。当前事实见 [README](../README.md)、[DEPLOYMENT](DEPLOYMENT.md)、[功能迁移矩阵](FEATURE_MIGRATION_MATRIX.md) 和 [测试证据](../TEST_EVIDENCE.md)。
+
 # SceneFlow Dogfood 协议（两角色模型 §7）
 
 > 目的：拿到第一个**带真实介入曲线的案例故事**——「介入曲线第二周低于第一周」。

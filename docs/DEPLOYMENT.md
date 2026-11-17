@@ -1,55 +1,35 @@
-# DEPLOYMENT — 从零跑起来（审查项⑤：文档与实际配置一致）
+# 部署与启动
 
-> 约束：全程不接触宿主 DSH（`~/.dsh`、宿主 `dsh` 命令）。Poros 的 DSH 只存在于
-> `deploy/docker-compose.yml` 定义的专属容器内（隔离证据见 docs/ISOLATION.md）。
+Node 24.22.3（`.node-version` / CI / Dockerfile），DSH 0.2.2-rc.1，PostgreSQL 17，SeaweedFS 3.85。API `127.0.0.1:8787`、数据库 55432、S3 59000，默认仅环回。
 
-## 前置
-
-- Node ≥ 20（开发实测 v22/v24/v25 可用）；Docker + Docker Compose v2
-- 端口：55432（Postgres）、59000（SeaweedFS S3）、3000（Poros API/Web）——均只绑环回
-
-## 最小步骤（fresh clone → 运行）
-
-```bash
-npm ci                        # postinstall 自动执行 prisma generate（缺失会 build 失败）
-cp .env.example .env          # 必填：POROS_DB_PASSWORD / JWT_SECRET(≥16字符) / DATABASE_URL
-npm run db:up                 # 起 db + s3 两个容器（注意：服务名是 s3，无 minio）
-npx prisma migrate deploy     # 应用迁移（含质量状态枚举）
-npm run build                 # tsc，零错误
-npm start                     # tsx src/server/index.ts → http://127.0.0.1:3000
+```sh
+cp .env.example .env
+# 填写本部署自己的配置，不复制宿主 DSH 凭证
+npm ci
+npm run db:up
+npx prisma migrate deploy
+npm run runtime:build
+npm run build
+npm run db:seed  # 仅开发
+npm start
 ```
 
-## 测试
+Compose 显式读取 `.env`；CI 用环境变量。SeaweedFS 使用 `-s3.config` 身份，无匿名账户；3.85 仅设置 AWS 环境变量经实测不足以拒绝匿名。S3 密钥使用随机字母/数字/下划线/连字符，避免 JSON 插值歧义。认证升级保留具名数据卷，真实部署禁止 `down -v`。
 
-```bash
-npm test                      # = vitest run tests/api + test:isolation
-# tests/api 需要活的 db：先 npm run db:up；测试自建 poros_test 库并自动迁移
-# test:isolation 需要 POROS_DB_PASSWORD（compose 变量）+ Docker
-```
+`Dockerfile.dsh` 支持从零构建。若 Docker Hub 不可达且已有已验证的 `poros/dsh:0.2.2-rc.1`，可用 `docker build -f deploy/Dockerfile.runtime -t poros/dsh:0.2.2-rc.1-audit .` 叠加本机测试修复层；离线基础镜像的 Node 精确版本可能不同，完整 CI 从固定 Dockerfile 构建。Compose dsh 是隔离测试模板，实际任务不使用其共享卷。
 
-## 配置项（.env）
+## 真实模型与生产
 
-| 变量 | 必须 | 说明 |
-|---|---|---|
-| `POROS_DB_PASSWORD` | ✅ | compose db 初始化密码（仅首次建卷生效） |
-| `DATABASE_URL` | ✅ | `postgresql://poros:<密码>@127.0.0.1:55432/poros?schema=public` |
-| `JWT_SECRET` | ✅ | ≥16 字符；**没有默认值，缺失/过短服务拒绝启动**（安全审查项④） |
-| `S3_*` | 建议 | .env.example 有开发默认；生产必换 |
-| `MODEL_GATEWAY` | 可选 | `mock`（默认，UI 标注未配置）\| `deepseek`（需 `POROS_DEEPSEEK_API_KEY`） |
-| `POROS_DSH_MODEL_STUB` | 可选 | `1` = 开发/CI 用真实 DSH 执行 + 测试桩模型（生产禁用） |
-| `POROS_DSH_CONTAINER` | 可选 | DSH 容器名（默认 `poros-dsh-1`） |
+设置 `POROS_RUNTIME=dsh`、`MODEL_GATEWAY=deepseek`、`POROS_DSH_MODEL_STUB=0` 和明确授权的 `POROS_DEEPSEEK_API_KEY`。供应商密钥只留在 API 进程；容器经短期令牌访问同一准入模型。真实 DSH 的 Judge 不因 Builder 仍为 mock 而失配。
 
-## DSH 专属容器
+JWT 至少 32 字符；数据库/S3 替换开发默认，数据库不得含 `.test` 开发成员。执行 `npm run build` 后使用 `npm run start:prod`。外部入口由受控 TLS 反向代理接入环回端口。API 服务账户需要 Docker 权限；禁止将该账户凭证/socket 交给 Agent。
 
-```bash
-docker compose -f deploy/docker-compose.yml up -d dsh   # 专属网络/卷，零发布端口，非 root
-docker compose -f deploy/docker-compose.yml exec dsh dsh --version
-```
+默认配额：全局 4、组织 2 并发；组织队列/运行最多 100；任务 500ms–300s，最多 3 次显式尝试；容器 1 CPU / 768MiB / 128 PID；模型最多 64 次调用，每次至多 4096 输出 Token。事件、输出和诊断均有限额。副作用不自动重放，取消/超时/关闭/崩溃由截止时间及归属标签清理处理。
 
-模型密钥只经环境注入容器（`DEEPSEEK_API_KEY` 或 profile patch 的 `apiKeyEnv` 指向的变量名），
-绝不落库、绝不写进 profile 文件本体、绝不读取宿主 DSH 的任何登录态。
+开发前端用 `npm run ui:dev`，生产由 Fastify 提供构建 UI，同源部署。
 
-## 已知边界
+## 迁移与验证
 
-- `npm run e2e` 需要本机 Docker 与 dsh 容器（tests/e2e/run-e2e.mjs）
-- ISO-03 已脚本化（tests/isolation/iso-03-dual-instance.mjs）
+迁移只增加字段/表/枚举/保护触发器，不删除业务数据。保留旧版本记录，但拒绝按当前草稿补猜历史授权；需重新发布审批。回滚只指向已审批版本。旧 Pi/宿主 DSH 不自动访问。
+
+运行 build、lint、test:api、test:isolation、e2e、audit。API/E2E 创建 UUID 独立测试库并清理自建对象。ISO-03 唯一 project、finally 清理。Linux UI 测试前执行 `node node_modules/playwright-core/cli.js install --with-deps chromium`；Windows 使用独立无头 Edge，不控制可见桌面。

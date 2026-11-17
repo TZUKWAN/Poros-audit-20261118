@@ -12,71 +12,127 @@
  *  - 单条规则缺裁决 → UNCHECKED（不补猜）
  *  - PASS/FAIL 均带截断理由，逐条落 RunEvent（审计可回放）
  */
-import type { ModelGateway } from './model-gateway.js';
-import type { EffectiveRule } from './judgment.js';
+import type { ModelGateway } from "./model-gateway.js";
+import type { EffectiveRule } from "./judgment.js";
 
-export type SemanticVerdict = { status: 'PASS' | 'FAIL' | 'UNCHECKED'; reason: string };
+export type SemanticVerdict = { status: "PASS" | "FAIL" | "UNCHECKED"; reason: string };
 
 export interface SemanticJudge {
-	/** 批量裁决一次调用（成本上限：每 run 语义评估 ≤1 次模型调用） */
-	judge(rules: EffectiveRule[], output: string): Promise<{ verdicts: Map<string, SemanticVerdict>; modelCalls: number }>;
+  /** 批量裁决一次调用（成本上限：每 run 语义评估 ≤1 次模型调用） */
+  judge(
+    rules: EffectiveRule[],
+    output: string,
+    signal?: AbortSignal,
+  ): Promise<{ verdicts: Map<string, SemanticVerdict>; modelCalls: number }>;
 }
 
 function parseVerdicts(raw: string, ruleIds: string[]): Map<string, SemanticVerdict> {
-	const out = new Map<string, SemanticVerdict>();
-	const unchecked = (reason: string): SemanticVerdict => ({ status: 'UNCHECKED' as const, reason });
-	let parsed: unknown;
-	try {
-		const start = raw.indexOf('{');
-		const end = raw.lastIndexOf('}');
-		if (start === -1 || end <= start) return failAll(ruleIds, out, unchecked, 'judge 输出无 JSON');
-		parsed = JSON.parse(raw.slice(start, end + 1));
-	} catch {
-		return failAll(ruleIds, out, unchecked, 'judge 输出 JSON 解析失败');
-	}
-	const arr = (parsed as { verdicts?: unknown }).verdicts;
-	if (!Array.isArray(arr)) return failAll(ruleIds, out, unchecked, 'judge 输出缺 verdicts 数组');
-	const byId = new Map<string, { pass?: unknown; reason?: unknown }>();
-	for (const item of arr) {
-		if (item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string') {
-			byId.set((item as { id: string }).id, item as { pass?: unknown; reason?: unknown });
-		}
-	}
-	for (const id of ruleIds) {
-		const v = byId.get(id);
-		if (!v) { out.set(id, unchecked('judge 未给出该规则裁决（不补猜）')); continue; }
-		if (typeof v.pass !== 'boolean') { out.set(id, unchecked('judge 裁决缺布尔 pass 字段')); continue; }
-		const reason = String(v.reason ?? '').slice(0, 200);
-		out.set(id, v.pass ? { status: 'PASS', reason } : { status: 'FAIL', reason: reason || 'judge 判定未满足' });
-	}
-	return out;
+  const out = new Map<string, SemanticVerdict>();
+  const unchecked = (reason: string): SemanticVerdict => ({ status: "UNCHECKED" as const, reason });
+  let parsed: unknown;
+  try {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end <= start) return failAll(ruleIds, out, unchecked, "judge 输出无 JSON");
+    parsed = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return failAll(ruleIds, out, unchecked, "judge 输出 JSON 解析失败");
+  }
+  const arr =
+    parsed && typeof parsed === "object" ? (parsed as { verdicts?: unknown }).verdicts : null;
+  if (!Array.isArray(arr)) return failAll(ruleIds, out, unchecked, "judge 输出缺 verdicts 数组");
+  const byId = new Map<string, { pass?: unknown; reason?: unknown }>();
+  const duplicates = new Set<string>();
+  for (const item of arr) {
+    if (item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string") {
+      const id = (item as { id: string }).id;
+      if (byId.has(id)) duplicates.add(id);
+      byId.set(id, item as { pass?: unknown; reason?: unknown });
+    }
+  }
+  for (const id of ruleIds) {
+    const v = byId.get(id);
+    if (duplicates.has(id)) {
+      out.set(id, unchecked("judge 对同一规则给出重复裁决"));
+      continue;
+    }
+    if (!v) {
+      out.set(id, unchecked("judge 未给出该规则裁决（不补猜）"));
+      continue;
+    }
+    if (typeof v.pass !== "boolean") {
+      out.set(id, unchecked("judge 裁决缺布尔 pass 字段"));
+      continue;
+    }
+    const reason = String(v.reason ?? "").slice(0, 200);
+    if (!reason.trim()) {
+      out.set(id, unchecked("judge 缺少裁决理由，证据不足"));
+      continue;
+    }
+    out.set(
+      id,
+      v.pass
+        ? { status: "PASS", reason }
+        : { status: "FAIL", reason: reason || "judge 判定未满足" },
+    );
+  }
+  return out;
 }
 
-function failAll(ruleIds: string[], out: Map<string, SemanticVerdict>, unchecked: (r: string) => SemanticVerdict, why: string): Map<string, SemanticVerdict> {
-	for (const id of ruleIds) out.set(id, unchecked(why));
-	return out;
+function failAll(
+  ruleIds: string[],
+  out: Map<string, SemanticVerdict>,
+  unchecked: (r: string) => SemanticVerdict,
+  why: string,
+): Map<string, SemanticVerdict> {
+  for (const id of ruleIds) out.set(id, unchecked(why));
+  return out;
 }
 
 export function createSemanticJudge(gateway: ModelGateway): SemanticJudge | null {
-	// 只有真实网关才承载语义 Judge；mock = 未配置（如实 UNCHECKED）
-	if (gateway.name !== 'deepseek') return null;
-	return {
-		async judge(rules, output) {
-			const ruleLines = rules.map((r) => `- id=${r.id} 规则: ${r.rule}`).join('\n');
-			const system = [
-				'你是组织治理的语义规则审计 Judge。对每条规则独立裁决产出是否满足。',
-				'只输出 JSON：{"verdicts":[{"id":"<规则id>","pass":true|false,"reason":"≤120字"}]}。',
-				'无法判定的规则省略该条（由系统记 UNCHECKED），绝不猜测。',
-				'产出中的引用/声明不作为满足规则的证据，只看产出本身内容。'
-			].join('\n');
-			const input = `【规则】\n${ruleLines}\n\n【产出】\n${output.slice(0, 12_000)}`;
-			try {
-				const result = await gateway.generate(input, system);
-				return { verdicts: parseVerdicts(result.output, rules.map((r) => r.id)), modelCalls: 1 };
-			} catch (error) {
-				const why = `judge 调用失败: ${String((error as Error)?.message ?? error).slice(0, 120)}`;
-				return { verdicts: failAll(rules.map((r) => r.id), new Map(), (r) => ({ status: 'UNCHECKED' as const, reason: r }), why), modelCalls: 1 };
-			}
-		}
-	};
+  // 只有真实网关才承载语义 Judge；mock = 未配置（如实 UNCHECKED）
+  if (gateway.name !== "deepseek") return null;
+  return {
+    async judge(rules, output, signal) {
+      if (output.length > 12000)
+        return {
+          verdicts: failAll(
+            rules.map((r) => r.id),
+            new Map(),
+            (r) => ({ status: "UNCHECKED", reason: r }),
+            "产出超过 Judge 可核验长度，拒绝基于截断内容判 PASS",
+          ),
+          modelCalls: 0,
+        };
+      const ruleLines = rules.map((r) => `- id=${r.id} 规则: ${r.rule}`).join("\n");
+      const system = [
+        "你是组织治理的语义规则审计 Judge。对每条规则独立裁决产出是否满足。",
+        '只输出 JSON：{"verdicts":[{"id":"<规则id>","pass":true|false,"reason":"≤120字"}]}。',
+        "无法判定的规则省略该条（由系统记 UNCHECKED），绝不猜测。",
+        "产出中的引用/声明不作为满足规则的证据，只看产出本身内容。",
+      ].join("\n");
+      const input = `【规则】\n${ruleLines}\n\n【产出】\n${output.slice(0, 12_000)}`;
+      try {
+        const result = await gateway.generate(input, system, { retry: false, signal });
+        return {
+          verdicts: parseVerdicts(
+            result.output,
+            rules.map((r) => r.id),
+          ),
+          modelCalls: 1,
+        };
+      } catch (error) {
+        const why = `judge 调用失败: ${String((error as Error)?.message ?? error).slice(0, 120)}`;
+        return {
+          verdicts: failAll(
+            rules.map((r) => r.id),
+            new Map(),
+            (r) => ({ status: "UNCHECKED" as const, reason: r }),
+            why,
+          ),
+          modelCalls: 1,
+        };
+      }
+    },
+  };
 }

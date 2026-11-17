@@ -1,13 +1,24 @@
-import * as Tabs from '@radix-ui/react-tabs';
-import { useState } from 'react';
-import { getToken, login, logout, type OrgInfo } from './api.js';
-import { Button, Input } from './ui.js';
-import WorkspaceView from './views/workspace.js';
-import AgentsView from './views/agents.js';
-import IntegrationsView from './views/integrations.js';
+import * as Tabs from "@radix-ui/react-tabs";
+import { useEffect, useState } from "react";
+import { api, getToken, login, logout, type OrgInfo } from "./api.js";
+import { Button, Input } from "./ui.js";
+import WorkspaceView from "./views/workspace.js";
+import AgentsView from "./views/agents.js";
+import IntegrationsView from "./views/integrations.js";
+import GovernanceView from "./views/governance.js";
 
 export default function App() {
+  const [logoutError, setLogoutError] = useState("");
   const [auth, setAuth] = useState<OrgInfo | null>(getToken() ? parseJwt(getToken()!) : null);
+  useEffect(() => {
+    const expired = () => setAuth(null);
+    window.addEventListener("poros-auth-expired", expired);
+    if (getToken())
+      void api<{ info: OrgInfo }>("GET", "/api/auth/me").then((r) =>
+        setAuth(r.ok ? r.body.info : null),
+      );
+    return () => window.removeEventListener("poros-auth-expired", expired);
+  }, []);
 
   if (!auth) return <LoginView onLogin={setAuth} />;
 
@@ -22,20 +33,22 @@ export default function App() {
         </div>
         <Button
           variant="ghost"
-          onClick={() => {
-            logout();
-            setAuth(null);
+          onClick={async () => {
+            if (await logout()) setAuth(null);
+            else setLogoutError("退出未成功，请重试");
           }}
         >
           退出
         </Button>
       </header>
+      {logoutError && <p role="alert">{logoutError}</p>}
       <Tabs.Root defaultValue="workspace">
         <Tabs.List className="mb-4 flex gap-1 border-b border-[#e3e1dc]">
           {[
-            ['workspace', '工作台'],
-            ['agents', 'Agent 目录 / Builder'],
-            ['integrations', '集成与状态'],
+            ["workspace", "工作台"],
+            ["agents", "Agent 目录 / Builder"],
+            ["integrations", "集成与状态"],
+            ["governance", "审批与规则"],
           ].map(([value, label]) => (
             <Tabs.Trigger
               key={value}
@@ -55,9 +68,17 @@ export default function App() {
         <Tabs.Content value="integrations">
           <IntegrationsView />
         </Tabs.Content>
+        <Tabs.Content value="governance">
+          <GovernanceView
+            role={auth.role}
+            email={auth.email}
+            organizationId={auth.organizationId}
+          />
+        </Tabs.Content>
       </Tabs.Root>
       <footer className="mt-8 text-center text-xs text-[#a5a29b]">
-        唯一 Agent Harness：DSH（专属容器，宿主零接触）· 质量状态含 FAIL/UNCHECKED 语义 · 未配置的集成如实标注
+        唯一 Agent Harness：DSH（专属容器，宿主零接触）· 质量状态含 FAIL/UNCHECKED 语义 ·
+        未配置的集成如实标注
       </footer>
     </div>
   );
@@ -65,26 +86,31 @@ export default function App() {
 
 function parseJwt(token: string): OrgInfo | null {
   try {
-    const p = JSON.parse(atob(token.split('.')[1]!)) as OrgInfo;
-    if (typeof p.exp === 'number' && p.exp * 1000 < Date.now()) return null;
-    return { organizationId: String(p.organizationId), role: String(p.role), email: String(p.email) };
+    const p = JSON.parse(atob(token.split(".")[1]!)) as OrgInfo;
+    if (typeof p.exp === "number" && p.exp * 1000 < Date.now()) return null;
+    return {
+      organizationId: String(p.organizationId),
+      role: String(p.role),
+      email: String(p.email),
+    };
   } catch {
     return null;
   }
 }
 
 function LoginView({ onLogin }: { onLogin: (info: OrgInfo) => void }) {
-  const [email, setEmail] = useState('employee@a.test');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [organizationId, setOrganizationId] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     setBusy(true);
-    setError('');
-    const r = await login(email, password, 'org-a');
+    setError("");
+    const r = await login(email, password, organizationId);
     setBusy(false);
-    if (!r.ok || !r.info) setError(r.error ?? '登录失败');
+    if (!r.ok || !r.info) setError(r.error ?? "登录失败");
     else onLogin(r.info);
   };
 
@@ -95,17 +121,37 @@ function LoginView({ onLogin }: { onLogin: (info: OrgInfo) => void }) {
         <p className="mt-1 text-sm text-[#8a8880]">企业 Agent 开发、配置、协作与治理平台</p>
       </div>
       <div className="space-y-3 rounded-2xl border border-[#e3e1dc] bg-white p-5">
+        <label htmlFor="organization" className="block text-sm font-medium">
+          组织 ID
+        </label>
+        <Input
+          id="organization"
+          value={organizationId}
+          onChange={(e) => setOrganizationId(e.target.value)}
+        />
         <label className="block text-sm font-medium">邮箱</label>
-        <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="employee@a.test" />
+        <Input
+          aria-label="邮箱"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="您的组织邮箱"
+        />
         <label className="block text-sm font-medium">密码</label>
-        <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} placeholder="开发/CI 种子密码见 .env 或 seed.ts" />
+        <Input
+          aria-label="密码"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+        />
         {error && <p className="text-sm text-[#a1301c]">{error}</p>}
-        <Button className="w-full justify-center" disabled={busy || !password} onClick={submit}>
-          {busy ? '登录中…' : '登录'}
+        <Button
+          className="w-full justify-center"
+          disabled={busy || !password || !email || !organizationId}
+          onClick={submit}
+        >
+          {busy ? "登录中…" : "登录"}
         </Button>
-        <p className="text-xs text-[#a5a29b]">
-          种子账号：admin / builder / employee / reviewer @a.test（密码 &lt;名&gt;-pass-123）。生产环境接组织 IdP。
-        </p>
       </div>
     </div>
   );

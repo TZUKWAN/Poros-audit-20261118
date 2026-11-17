@@ -1,3 +1,5 @@
+> 历史记录：本文描述旧 Pi 或早期企业基线，不作为当前功能/部署验收。当前事实见 [README](../README.md)、[DEPLOYMENT](DEPLOYMENT.md)、[功能迁移矩阵](FEATURE_MIGRATION_MATRIX.md) 和 [测试证据](../TEST_EVIDENCE.md)。
+
 # BASELINE — 迁移前真实基线
 
 > 基线 main SHA：18ec87ba62f58ee31be8ea864398896bedd3bd96

@@ -1,3 +1,5 @@
+> 历史记录：本文描述旧 Pi 或早期企业基线，不作为当前功能/部署验收。当前事实见 [README](../README.md)、[DEPLOYMENT](DEPLOYMENT.md)、[功能迁移矩阵](FEATURE_MIGRATION_MATRIX.md) 和 [测试证据](../TEST_EVIDENCE.md)。
+
 # ISOLATION — 宿主 DSH 零影响证据（PRD §4）
 
 > 本文件只随真实运行结果更新；每项标注执行方式与局限，不用"理论上隔离"充数。

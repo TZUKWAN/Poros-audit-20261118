@@ -1,6 +1,6 @@
 # Poros 专属 DSH 运行时镜像（P0 隔离：唯一 Harness，独立 HOME/数据卷，非 root）
-# 基线锁定见 docs/REUSE_AUDIT.md；版本与镜像 digest 记录在 docs/ISOLATION.md（构建后回填）。
-FROM node:24-bookworm-slim
+# 固定 Node 和 DSH 版本；当前构建/运行证据见 TEST_EVIDENCE.md。
+FROM node:24.22.3-bookworm-slim
 
 ARG DSH_VERSION=0.2.2-rc.1
 LABEL org.poros.component="dsh-runtime" \
@@ -18,6 +18,9 @@ RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin poros \
  && chown -R poros:poros /home/poros
 
 USER poros
+COPY scripts/poros-dsh-bootstrap.mjs /opt/poros/bootstrap.mjs
+COPY scripts/poros-tool-policy.mjs /opt/poros/tool-policy.mjs
+COPY scripts/poros-test-model.mjs /opt/poros/poros-test-model.mjs
 ENV HOME=/home/poros \
     XDG_CONFIG_HOME=/home/poros/.config \
     XDG_DATA_HOME=/home/poros/.local/share \

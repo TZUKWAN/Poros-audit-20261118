@@ -1,0 +1,5 @@
+# Offline-capable security layer over the already verified, pinned Poros DSH image.
+FROM poros/dsh:0.2.2-rc.1
+COPY scripts/poros-dsh-bootstrap.mjs /opt/poros/bootstrap.mjs
+COPY scripts/poros-tool-policy.mjs /opt/poros/tool-policy.mjs
+COPY scripts/poros-test-model.mjs /opt/poros/poros-test-model.mjs

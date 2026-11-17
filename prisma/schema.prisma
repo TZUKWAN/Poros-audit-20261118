@@ -41,6 +41,8 @@ enum TaskStatus {
   // 质量验收状态（审查项⑥）：Judgment FAIL/UNCHECKED 必须体现在最终状态
   SUCCEEDED_WITH_VIOLATIONS
   UNVERIFIED
+  CANCELLED
+  TIMED_OUT
 }
 
 enum ApprovalKind {
@@ -134,6 +136,7 @@ model AgentDefinition {
   nlSource       String?
   status         AgentStatus  @default(DRAFT)
   currentVersion Int          @default(0)
+  versionCounter Int          @default(0)
   versions       AgentVersion[]
   grants         AgentGrant[]
   createdBy      String
@@ -148,6 +151,8 @@ model AgentVersion {
   agent        AgentDefinition @relation(fields: [agentId], references: [id], onDelete: Cascade)
   version      Int
   config       Json // 发布时冻结的不可变快照
+  manifest     Json            @default("{}")
+  approvedAt   DateTime?
   publishedBy  String
   createdAt    DateTime        @default(now())
   applications JudgmentApplication[]
@@ -162,6 +167,8 @@ model AgentGrant {
   kind      GrantKind
   name      String // 工具/Skill/MCP/知识/模型 名称
   scopeNote String    @default("") // 来源/版本/授权说明
+  version   String    @default("0.2.2-rc.1")
+  source    String    @default("@deepseek-ai/dsh")
   createdAt DateTime  @default(now())
   @@unique([agentId, kind, name])
 }
@@ -176,11 +183,23 @@ model Task {
   agentVersion   AgentVersion? @relation(fields: [agentVersionId], references: [id], onDelete: SetNull)
   title          String
   prompt         String
+  executionSnapshot Json       @default("{}")
+  requestKey     String?
+  requestHash    String?
+  timeoutMs      Int           @default(180000)
+  maxAttempts    Int           @default(3)
+  attempts       Int           @default(0)
+  cancelRequested Boolean      @default(false)
+  availableAt    DateTime      @default(now())
+  leaseUntil     DateTime?
+  workerId       String?
   status         TaskStatus   @default(QUEUED)
   createdBy      String
   createdAt      DateTime     @default(now())
   runs           Run[]
   artifacts      Artifact[]
+  @@unique([organizationId, createdBy, requestKey])
+  @@index([status, availableAt])
 }
 
 model Run {
@@ -192,6 +211,7 @@ model Run {
   injectedRules    Json     @default("[]") // 实际注入的 ruleId+version 列表（注入留痕）
   output           String   @default("")
   error            String   @default("")
+  usage            Json     @default("{}")
   startedAt        DateTime @default(now())
   finishedAt       DateTime?
   events           RunEvent[]
@@ -219,6 +239,7 @@ model ApprovalRequest {
   decidedBy      String?
   createdAt      DateTime         @default(now())
   decidedAt      DateTime?
+  payload        Json             @default("{}")
 }
 
 model Artifact {
@@ -262,9 +283,38 @@ model JudgmentRule {
   kind           RuleKind
   status         JudgmentStatus @default(CANDIDATE)
   version        Int          @default(1)
+  familyId       String       @default(cuid())
+  previousId     String?
+  disabledBy     String?
+  disabledAt     DateTime?
   approvedBy     String?
   createdAt      DateTime     @default(now())
   applications   JudgmentApplication[]
+  @@unique([familyId, version])
+}
+
+model AuthSession {
+  id             String   @id
+  organizationId String
+  userId         String
+  expiresAt      DateTime
+  revokedAt      DateTime?
+}
+
+model DownloadTicket {
+  id             String   @id
+  fileId         String
+  organizationId String
+  userId         String
+  sessionId      String
+  expiresAt      DateTime
+  usedAt         DateTime?
+}
+
+model RateLimitBucket {
+  id        String   @id
+  count     Int      @default(1)
+  resetAt   DateTime
 }
 
 model JudgmentApplication {

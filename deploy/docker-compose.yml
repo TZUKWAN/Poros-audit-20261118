@@ -9,7 +9,7 @@ services:
       dockerfile: deploy/Dockerfile.dsh
       args:
         DSH_VERSION: "0.2.2-rc.1"
-    image: poros/dsh:0.2.2-rc.1
+    image: poros/dsh:0.2.2-rc.1-audit
     # 常驻运行时容器：Poros API 经 docker exec 在其中拉起真实 dsh headless 会话（审查项①）。
     command: ["sleep", "infinity"]
     user: "10001:10001"
@@ -67,7 +67,10 @@ services:
 
   s3:
     image: chrislusf/seaweedfs:3.85
-    command: server -dir=/data -s3 -s3.port=8333
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/poros-s3-auth.json
+    configs:
+      - source: s3-auth
+        target: /etc/poros-s3-auth.json
     volumes:
       - s3-data:/data
     networks:
@@ -79,7 +82,7 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8333/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9333/cluster/status >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -95,3 +98,8 @@ volumes:
   dsh-cache:
   db-data:
   s3-data:
+
+configs:
+  s3-auth:
+    content: |
+      {"identities":[{"name":"poros-service","credentials":[{"accessKey":"${S3_ACCESS_KEY:-poros}","secretKey":"${S3_SECRET_KEY:-poros}"}],"actions":["Admin","Read","Write","List"]}]}
