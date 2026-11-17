@@ -45,6 +45,7 @@ npm run sbom
 8. 第二轮 CI 构建/API与完整镜像/隔离已通过，E2E基础设施阶段误认 PostgreSQL 初始化临时 Unix-socket 实例就绪。依据实际官方 entrypoint 的 `listen_addresses=''` 改用 TCP readiness。账号制品存储配额已满，未删除已有制品或购买额度；改为浏览器断言全部通过后，将该次实际截图字节数、SHA-256及执行 commit 写入日志和 Job Summary。本机真实截图随交付保留，不用仓库旧图冒充本次运行图。
 9. 用量复核发现 DSH 缺字段时曾累计0；已改为未知值传播null、实际代理上游尝试计数、步骤数不一致时Token总量未知，并分别保留generation/Judge用量。真实HTTP负向、数值契约、Judge用量传递和真实DSH落库均已通过。金额仍为null，不伪造账单。
 10. 分块HTTP真实复现UTF-8边界损坏：`中文🙂分块请求`变成`���文🙂分块请求`，失败日志`utf8-before.log`。代理、容器stdin与测试模型请求统一使用Node原生UTF-8流解码后，真实分块HTTP的3项代理回归通过（`utf8-after.log`）；ISO-06输入扩展为约74KiB、含大量中文/emoji的数据，并重新构建实际镜像验证。
+11. 两个连续PR完整运行已三job成功，但同一HEAD的push/PR重复触发留下取消检查，使PR汇总为UNSTABLE。收敛为main/企业主线push和所有PR分别触发完整三job，修复分支由PR完整验证；不删历史运行、不跳过测试，最终还需检查当前HEAD恰好三项SUCCESS与PR的CLEAN状态。
 
 CI 固定 Ubuntu24.04，checkout/setup-node 使用官方 Node24 版本并固定提交SHA，避免原Node20弃用和ubuntu-latest迁移提示。远端当前HEAD必须完成三job后才可交付，旧失败/取消运行不算通过。
 
