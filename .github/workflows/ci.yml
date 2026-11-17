@@ -20,7 +20,7 @@ jobs:
           POSTGRES_DB: poros
         ports: ["55432:5432"]
         options: >-
-          --health-cmd 'pg_isready -U poros' --health-interval 5s --health-timeout 3s --health-retries 12
+          --health-cmd "pg_isready -U poros" --health-interval 5s --health-timeout 3s --health-retries 12
     env:
       POROS_DB_PASSWORD: ci-password-0123456789
       JWT_SECRET: ci-jwt-secret-0123456789abcdef

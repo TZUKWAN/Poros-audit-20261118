@@ -521,6 +521,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
           start = 0;
         }
         for (const e of all.slice(start)) {
+          if (closed || reply.raw.destroyed) break;
           cursor = `${e.runId}:${e.seq}`;
           if (
             !reply.raw.write(
@@ -528,11 +529,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
             )
           ) {
             await new Promise<void>((resolve) => {
-              reply.raw.once("drain", resolve);
-              reply.raw.once("close", resolve);
+              const resume = () => {
+                reply.raw.off("drain", resume);
+                reply.raw.off("close", resume);
+                resolve();
+              };
+              reply.raw.once("drain", resume);
+              reply.raw.once("close", resume);
             });
           }
         }
+        if (closed || reply.raw.destroyed) break;
         if (TERMINAL.has(t.status) && !runs.some((r) => r.status === "RUNNING")) {
           const pendingApproval =
             t.status === "BLOCKED" &&

@@ -41,5 +41,6 @@ npm run sbom
 4. Prisma advisory lock 的 void 解码导致500；转text后事务与审批测试通过。
 5. S3 3.85 环境变量方式匿名仍200；改显式配置后403，原具名卷保持。
 6. SBOM暴露 esbuild覆盖声明与嵌套版本不一致；统一后生成成功，没有跳过失败。
+7. 私有仓库首轮 CI 的 Postgres service 初始化暴露 Runner 不按 Shell 单引号分组：`-U`被当成 Docker 参数，尚未运行任何应用测试。已将 health-cmd 改为 Runner 支持的双引号分组；远端复测结果由修复 PR 当前 HEAD 的 Checks 记录。
 
 没有真实模型/第三方凭证的服务验收。`dsh(stub)` 只证明真实 DSH/工具链与工程边界；费用金额未知记null，禁止外推成生产模型质量或账单证明。
