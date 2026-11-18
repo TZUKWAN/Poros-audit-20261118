@@ -29,7 +29,7 @@ npm run sbom
 
 最近本地全量 API **5文件、60/60通过**。完整隔离集 ISO-01/02/03/05/06 通过；运行代理/用量修改后，build（含两端类型检查）、ISO-06、编译后 E2E/无头 Edge再次通过，真实DSH用量落库断言通过。最后UTF-8修复又通过代理3项与实际镜像ISO-06针对性验证。lint见提交钩子及CI记录；npm ci/audit均为0漏洞，SBOM398组件。当前HEAD全量验证以最终CI为准。
 
-最终命令日志保存在 `.audit/evidence/`（build.log、lint.log、test-api.log、test-isolation.log、iso-06-final.log、e2e.log、npm-ci.log、npm-audit.log、sbom.log）。CI 由私有修复 PR 的 Checks 提供当前 HEAD 的可复核结果，不能用旧公开 PR 的成功记录替代。本文件不提前写入尚未完成的远端成功状态。
+最终命令日志保存在 `.audit/evidence/`（build.log、lint.log、test-api.log、test-isolation.log、iso-06-final.log、e2e.log、npm-ci.log、npm-audit.log、sbom.log）。修复 PR 的 Checks 提供当前提交的远端检查结果。
 
 本机业务库迁移前已生成41818字节的自定义格式备份，验证90条目录项；迁移前后九张业务表行数相同。备份与前后计数保存在 Git 忽略的 `.audit/backups/`，未公开上传，未将目录验证说成恢复演练。
 
