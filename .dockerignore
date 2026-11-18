@@ -1,0 +1,6 @@
+**
+!scripts/
+!scripts/poros-*.mjs
+!deploy/
+!deploy/Dockerfile.dsh
+!deploy/Dockerfile.runtime

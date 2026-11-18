@@ -1,31 +1,19 @@
-# ARCHITECTURE — Poros Enterprise V2
+# Poros 企业架构
 
-## 逻辑边界
+React → Fastify 权限边界 → PostgreSQL 持久任务 → Worker → 每任务独立 DSH 容器。事件在执行中落库，SSE 按 runId:seq 推送并补发。
 
-```
-Web 工作台(最小静态壳) ──► Fastify API ──► 组织身份/RBAC（服务端强制）
-                              │                │
-                    Agent Builder/版本       Judgment Layer
-                    任务运行器(mock/真实网关)   规则/注入/评估留痕
-                              │                │
-                    运行事件(SSE) / 审计日志    pass/fail/unchecked
-                              │
-              ┌───────────────┼───────────────┐
-        PostgreSQL 17   SeaweedFS(S3)   DSH 专属容器(唯一 Harness)
-```
+| 模块 | 职责 |
+|---|---|
+| auth.ts | 可撤销会话、当前成员/角色/项目、原子一次性票据 |
+| releases.ts / Prisma | 不可变 manifest、行锁分配版本、精确能力与来源；触发器保护发布内容和规则正文 |
+| routes/index.ts | principal 派生组织；独立发布/任务/规则审批；异步任务和授权检查 |
+| worker.ts | 数据库共享并发限额、租约、取消；崩溃显式失败，不自动重放副作用 |
+| runner.ts | 冻结版本、固定规则应用、实时事件、质量状态、调用/Token 留痕 |
+| dsh-runtime.ts / scripts/poros-*.mjs | 固定 argv + stdin JSON，无任务 Shell 拼接；前置授权；硬配额和容器自身截止时间；精确归属清理 |
+| model-proxy.ts | 每运行短期令牌、固定模型/上游、请求/输出限额；供应商密钥不进入 Agent |
+| judgment.ts / semantic-judge.ts | 作用域、机械冲突、独立评估；失败/缺裁决/证据不足均 UNCHECKED；真实 DSH/Judge 共用准入通道 |
+| storage.ts | 认证 S3；生产启动核查匿名拒绝 |
 
-## 模块
+API 宿主是可信 Docker broker，Agent 没有 Docker 权限。任务不共享 HOME、会话、缓存、工作区、凭证或用户卷；执行证据保存在经授权的数据库，临时会话随容器销毁。
 
-- `src/server/`：API 全量（认证/RBAC/Builder/任务/审批/Judgment/文件/集成状态）+ Web 外壳 + 种子。
-- `src/server/judgment.ts`：作用域规则筛选 + 机械/语义评估（语义无 Judge 恒 UNCHECKED）。
-- `src/server/runner.ts`：注入留痕 → 网关生成 → 逐条评估 → 事件流。
-- `src/server/dsh-paths.ts`：隔离 by construction（POROS_HOME 唯一来源，缺失即拒）。
-- `tests/api/acceptance.test.ts`：验收矩阵（真实 DB+S3）。
-- `tests/isolation/`：ISO-01/02/05（哨兵/静态审计/容器逃逸负向）；ISO-03/04 实测记录于 docs/ISOLATION.md。
-- `deploy/`：Dockerfile.dsh + compose（db/s3/dsh，隔离边界见 DEPLOYMENT.md）。
-- `prisma/`：全量数据模型。
-
-## 与旧版（pi-scenario）的根本差异
-
-旧：一句话 → 五闸门人工决策 → 场景库固化，Pi 生态运行链。
-新：企业组织内受治理的 Agent 资产——草稿/版本/授权/审批/Judgment 闭环；唯一 Harness 为容器化 DSH；宿主 DSH 零接触。
+当前不启用数据库 RLS，后端授权有负向测试。旧 Pi 和宿主 DSH 数据不导入、不删除。企业实现不等同于旧八源检索、五闸门或场景泛化，见迁移矩阵。

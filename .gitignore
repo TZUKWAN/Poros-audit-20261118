@@ -8,3 +8,10 @@ pi-package/dist/
 .minimap-*.png
 .env
 deploy/.env
+.audit/backups/
+*.dump
+# Local recovery state and final remote-CI metadata are intentionally not shipped.
+.claude/CLAUDE_STATE.md
+.audit/evidence/delivery.json
+.audit/evidence/mobile-*.png
+.audit/evidence/pc/

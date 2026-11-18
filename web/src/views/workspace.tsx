@@ -1,200 +1,404 @@
-/** 工作台：统一任务入口 + 运行事件实时流（真实执行证据可见：dsh.* 事件、Judgment 注入/评估）。 */
-import { useEffect, useRef, useState } from 'react';
-import { api } from '../api.js';
-import { Badge, Button, Card, Select, StatusBadge, Textarea } from '../ui.js';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "../api.js";
+import {
+  capabilityBlock,
+  dateTime,
+  modelPreflight,
+  sensitiveGrants,
+  type Agent,
+  type CatalogEntry,
+  type Project,
+  type StoredFile,
+  type TaskRow,
+} from "../pc.js";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  PageHeading,
+  Select,
+  StatusBadge,
+  Textarea,
+} from "../ui.js";
+import type { SettingsBody } from "./integrations.js";
+import RunDetails from "./run-details.js";
 
-interface AgentRow {
-  id: string;
-  name: string;
-  description: string;
-  status: string;
-  currentVersion: number;
+function requestKey() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
-interface RunResult {
-  runId: string;
-  status: string;
-}
-
-export default function WorkspaceView({ role }: { role: string }) {
-  const [agents, setAgents] = useState<AgentRow[]>([]);
-  const [agentId, setAgentId] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [last, setLast] = useState<{ taskId: string; run: RunResult; runtime: string } | null>(null);
-  const canRun = role === 'EMPLOYEE' || role === 'BUILDER' || role === 'REVIEWER' || role === 'ADMIN';
-
-  useEffect(() => {
-    api<{ agents: AgentRow[] }>('GET', '/api/agents').then((r) => {
-      if (r.ok) {
-        setAgents(r.body.agents ?? []);
-        const first = (r.body.agents ?? []).find((a) => a.status === 'PUBLISHED');
-        if (first) setAgentId(first.id);
-      }
+export function TaskList({
+  projectId,
+  onOpen,
+  refresh = 0,
+  title = "我的任务",
+}: {
+  projectId?: string;
+  onOpen: (id: string) => void;
+  refresh?: number;
+  title?: string;
+}) {
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [rows, setRows] = useState<TaskRow[]>([]);
+  const [more, setMore] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    const query = new URLSearchParams({
+      q,
+      page: String(page),
+      ...(projectId ? { projectId } : {}),
     });
-  }, []);
-
-  const submit = async () => {
-    setBusy(true);
-    setError('');
-    const r = await api<{ taskId: string; run: RunResult; runtime: string }>('POST', '/api/tasks', {
-      agentId,
-      prompt,
-    });
-    setBusy(false);
+    const r = await api<{ tasks: TaskRow[]; hasMore: boolean }>("GET", "/api/tasks?" + query);
     if (!r.ok) {
-      setError(r.body.error ?? `HTTP ${r.status}`);
+      setError(r.body.error ?? "读取任务失败");
       return;
     }
-    setLast({ taskId: r.body.taskId, run: r.body.run, runtime: r.body.runtime });
-  };
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <div className="mb-3 flex items-center gap-2">
-          <span className="text-sm font-medium">下达任务</span>
-          {last && (
-            <span className="ml-auto flex items-center gap-2 text-xs text-[#8a8880]">
-              执行通道 <Badge tone="brand">{last.runtime}</Badge>
-              <StatusBadge status={last.run.status} />
-            </span>
-          )}
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="sm:w-64">
-            <option value="">选择已发布 Agent…</option>
-            {agents
-              .filter((a) => a.status === 'PUBLISHED')
-              .map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} (v{a.currentVersion})
-                </option>
-              ))}
-          </Select>
-          <Button disabled={!canRun || !agentId || busy || !prompt.trim()} onClick={submit}>
-            {busy ? '执行中…' : '运行'}
-          </Button>
-        </div>
-        <Textarea
-          rows={3}
-          className="mt-2"
-          placeholder="用自然语言描述任务…"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-        {error && <p className="mt-2 text-sm text-[#a1301c]">{error}</p>}
-        {!canRun && <p className="mt-2 text-xs text-[#8a8880]">当前角色无运行权限。</p>}
-      </Card>
-      {last && <RunEvents key={last.taskId} taskId={last.taskId} />}
-    </div>
-  );
-}
-
-interface EventRow {
-  seq: number;
-  kind: string;
-  payload: Record<string, unknown>;
-}
-
-/** SSE 事件流（先到先回放 + done 终止；事件由真实运行产生落库，非历史回放冒充）。 */
-function RunEvents({ taskId }: { taskId: string }) {
-  const [events, setEvents] = useState<EventRow[]>([]);
-  const [done, setDone] = useState(false);
-  const seen = useRef(new Set<number>());
-
+    setError("");
+    setRows(r.body.tasks);
+    setMore(r.body.hasMore);
+  }, [projectId, q, page]);
   useEffect(() => {
-    const ctrl = new AbortController();
-    fetch(`/api/tasks/${taskId}/events`, {
-      headers: { authorization: `Bearer ${localStorage.getItem('poros-token')}` },
-      signal: ctrl.signal,
-    })
-      .then(async (res) => {
-        const reader = res.body!.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        for (;;) {
-          const { done: d, value } = await reader.read();
-          if (d) break;
-          buf += decoder.decode(value, { stream: true });
-          const parts = buf.split('\n\n');
-          buf = parts.pop()!;
-          for (const part of parts) {
-            const evLine = part.split('\n').find((l) => l.startsWith('event: '));
-            const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
-            if (!evLine || !dataLine) continue;
-            const kind = evLine.slice(7);
-            if (kind === 'done') {
-              setDone(true);
-              continue;
-            }
-            try {
-              const { seq, payload } = JSON.parse(dataLine.slice(6)) as EventRow;
-              if (!seen.current.has(seq)) {
-                seen.current.add(seq);
-                setEvents((prev) => [...prev, { seq, kind, payload }]);
-              }
-            } catch {
-              /* 忽略坏帧 */
-            }
-          }
-        }
-      })
-      .catch(() => setDone(true));
-    return () => ctrl.abort();
-  }, [taskId]);
-
+    void load();
+  }, [load, refresh]);
   return (
     <Card>
-      <div className="mb-2 flex items-center gap-2">
-        <span className="text-sm font-medium">运行事件</span>
-        {done && <Badge tone="ok">已结束</Badge>}
-        <span className="text-xs text-[#a5a29b]">真实执行证据逐条落库（dsh.* = 容器内 DSH 事件；judge = 语义裁决留痕）</span>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-semibold">{title}</h3>
+        <Button variant="ghost" onClick={() => void load()}>
+          刷新任务
+        </Button>
       </div>
-      <div className="max-h-80 space-y-1 overflow-y-auto font-mono text-xs">
-        {events.map((e) => (
-          <EventLine key={e.seq} kind={e.kind} payload={e.payload} />
-        ))}
-        {!events.length && <p className="text-[#a5a29b]">等待事件…</p>}
-      </div>
+      <Input
+        aria-label="搜索任务"
+        value={q}
+        onChange={(event) => {
+          setQ(event.target.value);
+          setPage(1);
+        }}
+        placeholder="按任务内容搜索"
+      />
+      {error ? (
+        <p role="alert" className="mt-3 text-sm text-red-800">
+          {error}
+        </p>
+      ) : (
+        <>
+          {!rows.length && <p className="mt-3 text-sm text-slate-600">暂无任务</p>}
+          <ul className="mt-2 space-y-2">
+            {rows.map((row) => (
+              <li key={row.id}>
+                <button
+                  className="block w-full rounded-lg border border-slate-200 px-3 py-2 text-left hover:bg-slate-50"
+                  onClick={() => onOpen(row.id)}
+                >
+                  <span className="flex flex-wrap items-start justify-between gap-2">
+                    <span className="min-w-0 break-words text-sm font-medium">{row.title}</span>
+                    <StatusBadge status={row.status} />
+                  </span>
+                  <span className="text-xs text-slate-600">
+                    {row.createdBy} · {dateTime(row.createdAt)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {(page > 1 || more) && (
+        <div className="mt-3 flex items-center gap-2 text-sm">
+          <Button variant="ghost" disabled={page === 1} onClick={() => setPage(page - 1)}>
+            上一页
+          </Button>
+          <span>第 {page} 页</span>
+          <Button variant="ghost" disabled={!more} onClick={() => setPage(page + 1)}>
+            下一页
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
 
-function EventLine({ kind, payload }: { kind: string; payload: Record<string, unknown> }) {
-  const tone =
-    kind.startsWith('dsh.tool_call') ? 'brand' :
-    kind.startsWith('dsh.tool_result') ? 'neutral' :
-    kind === 'security.audit' ? 'bad' :
-    kind === 'status' ? 'ok' : 'neutral';
+export default function WorkspaceView({ email }: { email: string }) {
+  const key = "poros-workspace-task:" + email;
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [settings, setSettings] = useState<SettingsBody | null>(null);
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  const [agentId, setAgentId] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [consent, setConsent] = useState(false);
+  const [files, setFiles] = useState<StoredFile[]>([]);
+  const [file, setFile] = useState("");
+  const [fileQuery, setFileQuery] = useState("");
+  const [fileSelection, setFileSelection] = useState<StoredFile[]>([]);
+  const [taskId, setTaskId] = useState(() => sessionStorage.getItem(key) ?? "");
+  const [refresh, setRefresh] = useState(0);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const pendingRequest = useRef<{ body: string; key: string } | null>(null);
+  const refreshTasks = useCallback(() => setRefresh((value) => value + 1), []);
+  const open = (id: string) => {
+    setTaskId(id);
+    sessionStorage.setItem(key, id);
+  };
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([
+      api<{ agents: Agent[] }>("GET", "/api/agents"),
+      api<{ projects: Project[] }>("GET", "/api/projects"),
+      api<SettingsBody>("GET", "/api/settings/integrations"),
+      api<{ capabilities: CatalogEntry[] }>("GET", "/api/capabilities"),
+    ]).then(([a, p, s, c]) => {
+      if (!alive) return;
+      if (a.ok) {
+        setAgents(a.body.agents);
+        setAgentId(
+          a.body.agents.find((row) => row.releaseReady && !row.projectRestricted)?.id ?? "",
+        );
+      }
+      if (p.ok)
+        setProjects(p.body.projects.filter((row) => !row.archivedAt && row.role !== "VIEWER"));
+      if (s.ok) setSettings(s.body);
+      if (c.ok) setCatalog(c.body.capabilities);
+      const failure = [a, p, s, c].find((r) => !r.ok);
+      if (failure) setError(failure.body.error ?? "读取任务条件失败");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    const query = new URLSearchParams({ q: fileQuery, ...(projectId ? { projectId } : {}) });
+    let alive = true;
+    void api<{ files: StoredFile[] }>("GET", "/api/files?" + query).then((r) => {
+      if (alive && r.ok) setFiles(r.body.files.filter((f) => f.textSupported));
+      else if (alive) setError(r.body.error ?? "读取可用文件失败");
+    });
+    return () => {
+      alive = false;
+    };
+  }, [projectId, fileQuery]);
+  const available = agents.filter(
+    (a) =>
+      a.releaseReady && (!a.projectRestricted || a.projects.some((p) => p.projectId === projectId)),
+  );
+  const agent = available.find((a) => a.id === agentId);
+  const manifest = agent?.versions.find((v) => v.version === agent.currentVersion)?.manifest;
+  const model = modelPreflight(manifest?.grants ?? [], settings);
+  const capabilityIssue = capabilityBlock(manifest?.grants ?? [], settings, catalog, projectId);
+  const tools = sensitiveGrants(manifest?.grants ?? []);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const body = {
+      agentId,
+      projectId: projectId || undefined,
+      prompt,
+      fileIds: fileSelection.map((v) => v.id),
+      consent: consent ? tools : [],
+    };
+    const signature = JSON.stringify(body);
+    if (pendingRequest.current?.body !== signature)
+      pendingRequest.current = { body: signature, key: requestKey() };
+    const r = await api<{ taskId: string }>("POST", "/api/tasks", body, {
+      "idempotency-key": pendingRequest.current.key,
+    });
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.body.error ?? "提交失败");
+      return;
+    }
+    pendingRequest.current = null;
+    open(r.body.taskId);
+    setConsent(false);
+    setFileSelection([]);
+    setFile("");
+    setFileQuery("");
+    refreshTasks();
+  };
   return (
-    <div className="flex gap-2 rounded bg-[#faf9f7] px-2 py-1">
-      <span className="shrink-0 text-[#a5a29b]">#{String(payload.seq ?? '')}</span>
-      <Badge tone={tone as 'brand' | 'neutral' | 'bad' | 'ok'}>{kind}</Badge>
-      <span className="truncate text-[#5c5a55]" title={JSON.stringify(payload)}>
-        {summarize(kind, payload)}
-      </span>
-    </div>
+    <>
+      <PageHeading title="工作台" />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(260px,1fr)]">
+        <div className="min-w-0 space-y-4">
+          <Card>
+            <h3 className="mb-3 font-semibold">下达任务</h3>
+            <form className="grid gap-3" onSubmit={submit}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="任务项目">
+                  <Select
+                    value={projectId}
+                    onChange={(event) => {
+                      setProjectId(event.target.value);
+                      setFileSelection([]);
+                      setFile("");
+                      setFiles([]);
+                      setConsent(false);
+                    }}
+                  >
+                    <option value="">个人任务</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Agent">
+                  <Select
+                    value={agent?.id ?? ""}
+                    onChange={(e) => {
+                      setAgentId(e.target.value);
+                      setConsent(false);
+                    }}
+                  >
+                    <option value="">选择已审批 Agent</option>
+                    {available.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} · v{a.currentVersion}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              {agent && (
+                <p>
+                  <Badge tone={model.blocked ? "warn" : "neutral"}>{model.label}</Badge>
+                </p>
+              )}
+              {capabilityIssue && (
+                <p role="status" className="text-sm text-amber-900">
+                  {capabilityIssue}
+                </p>
+              )}
+              <Textarea
+                aria-label="任务"
+                rows={4}
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                maxLength={20000}
+                placeholder="填写要交给 Agent 的任务"
+              />
+              <details className="rounded-lg border border-slate-200 p-3">
+                <summary className="cursor-pointer text-sm font-medium">
+                  输入文件 {fileSelection.length > 0 && ` · ${fileSelection.length}`}
+                </summary>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Input
+                    aria-label="按名称搜索可引用文件"
+                    value={fileQuery}
+                    onChange={(e) => setFileQuery(e.target.value)}
+                    className="max-w-60"
+                  />
+                  <Select
+                    aria-label="任务输入文件"
+                    value={file}
+                    onChange={(e) => setFile(e.target.value)}
+                  >
+                    <option value="">选择可提取文本的文件</option>
+                    {files
+                      .filter((row) => !fileSelection.some((f) => f.id === row.id))
+                      .map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.name}
+                        </option>
+                      ))}
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={!file || fileSelection.length === 3}
+                    onClick={() => {
+                      const row = files.find((f) => f.id === file);
+                      if (row) setFileSelection((selected) => [...selected, row]);
+                      setFile("");
+                    }}
+                  >
+                    添加输入文件
+                  </Button>
+                </div>
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {fileSelection.map((row) => (
+                    <li key={row.id}>
+                      <Button
+                        variant="ghost"
+                        type="button"
+                        onClick={() =>
+                          setFileSelection((selected) => selected.filter((f) => f.id !== row.id))
+                        }
+                      >
+                        {row.name} · 移除
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              {tools.length > 0 && (
+                <label className="text-sm">
+                  <input
+                    type="checkbox"
+                    checked={consent}
+                    onChange={(e) => setConsent(e.target.checked)}
+                  />{" "}
+                  同意本次使用 {tools.join("、")}，通过独立审批后执行
+                </label>
+              )}
+              <div>
+                <Button
+                  type="submit"
+                  disabled={
+                    busy ||
+                    !agent ||
+                    !prompt.trim() ||
+                    model.blocked ||
+                    Boolean(capabilityIssue) ||
+                    (tools.length > 0 && !consent)
+                  }
+                >
+                  {busy ? "正在提交…" : "提交任务"}
+                </Button>
+              </div>
+              {error && (
+                <p role="alert" className="text-sm text-red-800">
+                  {error}
+                </p>
+              )}
+            </form>
+          </Card>
+          {taskId && <RunDetails key={taskId} taskId={taskId} onChanged={refreshTasks} />}
+        </div>
+        <aside className="min-w-0">
+          <TaskList refresh={refresh} onOpen={open} />
+        </aside>
+      </div>
+    </>
   );
 }
 
-function summarize(kind: string, payload: Record<string, unknown>): string {
-  if (kind === 'judgment' && payload.phase === 'inject') {
-    const rules = (payload.rules as Array<{ ruleId: string; version: number }>) ?? [];
-    return `注入 ${rules.length} 条已批准规则（${rules.map((r) => `${r.ruleId}@v${r.version}`).join(', ') || '无'}）`;
-  }
-  if (kind === 'judgment' && payload.phase === 'evaluate') {
-    return `评估 ${String(payload.ruleId)} → ${String(payload.evaluation)}${payload.reason ? `（${String(payload.reason)}）` : ''}`;
-  }
-  if (kind === 'dsh.tool_call') {
-    const input = (payload.input as { command?: string }) ?? {};
-    return `工具 ${String(payload.tool)}：${input.command ?? JSON.stringify(payload.input ?? {})}`;
-  }
-  if (kind === 'dsh.tool_result') {
-    return `结果 ${String(payload.status)}：${String(payload.result ?? '').slice(0, 80)}`;
-  }
-  if (kind === 'status') return `终态 ${String(payload.status)}（runtime ${String(payload.runtime ?? '')}）`;
-  if (kind === 'judge') return `语义 Judge：${String(payload.modelCalls)} 次模型调用（成本留痕）`;
-  return JSON.stringify(payload).slice(0, 120);
+export function RunCenter({ taskId, onOpen }: { taskId: string; onOpen: (id: string) => void }) {
+  const [refresh, setRefresh] = useState(0);
+  const reload = useCallback(() => setRefresh((n) => n + 1), []);
+  return (
+    <>
+      <PageHeading title="运行中心" />
+      <div className="grid gap-4 lg:grid-cols-[minmax(250px,1fr)_minmax(0,2.4fr)]">
+        <TaskList refresh={refresh} onOpen={onOpen} />
+        {taskId ? (
+          <RunDetails key={taskId} taskId={taskId} onChanged={reload} />
+        ) : (
+          <Card>
+            <p className="text-sm">选择任务查看执行证据与结果。</p>
+          </Card>
+        )}
+      </div>
+    </>
+  );
 }

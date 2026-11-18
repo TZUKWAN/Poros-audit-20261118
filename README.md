@@ -1,56 +1,62 @@
-# Poros Enterprise V2
+# Poros Enterprise
 
-面向企业组织的 **Agent 开发、配置、协作与治理平台**。唯一底层 Agent Harness 为 **DeepSeek Harness（DSH）**，运行在与宿主完全隔离的专属容器中。
+企业 Agent 的构建、发布、执行和判断规则治理平台。运行时使用容器内的 **DSH 0.2.2-rc.1**。仓库和审查 PR 公开可读。根项目仍声明 UNLICENSED，第三方组件沿用各自的许可证。
 
-## 状态诚实声明
+## 当前行为
 
-- **工作台 UI = React + Radix UI + Tailwind 成熟组件栈**（`web/`，`npm run ui:dev` 开发 /
-  `npm run build` 随构建产出）：登录、工作台（任务下达 + SSE 运行事件实时流，dsh.*/judge/质量
-  状态徽章）、Agent 目录 + Builder（NL 创建对话框、草稿配置、能力授权、草稿测试、发布/回滚）、
-  集成状态页（未配置如实标注）。旧手写页面保留为 `legacy.html`。当前为最小可用版（三个主页面 +
-  可访问性由 Radix 提供），更深的表格/文件浏览器页面按 PRD §2.2 迭代。
-- **ISO-01/02/03/05 全部脚本化**（tests/isolation/，CI isolation job 可复现；ISO-03 为双实例
-  互不影响真实断言）。
-- **语义 Judge**：随模型网关接入（deepseek + 真实密钥）；mock 网关 = 无 Judge，语义规则如实
-  UNCHECKED（fail-open，绝不 mock 判 PASS 伪绿）。成本留痕（judge 事件 modelCalls）。
-- **Kdocs/IMA/TinyFish**：需要组织级真实凭证；无凭证时 mock 契约 + UI「未配置/未验证真实服务」
-  标注（物理边界，不虚报）。
-- 其余能力矩阵与真实证据见 `docs/E2E_EVIDENCE.md`、`docs/ISOLATION.md`、`docs/BASELINE.md`。
+- React 19 / Radix / Tailwind / Vite：组织登录、Builder、任务实时事件、独立审批、规则修订、个人集成设置及可安装的手机 Web App。
+- 发布申请冻结 Persona、配置、Model Policy、精确授权及版本/来源；独立审阅者批准后生效。版本单调递增，回滚只换指针。缺少历史授权快照的旧版本须重新发布审批，不虚构迁移授权。
+- 任务提交立即返回 202 和 ID，PostgreSQL Worker 后台执行；支持事件 ID/重连补发、幂等、取消、超时、显式限次重试和共享并发限额。敏感工具须本次同意和独立审批。
+- 每任务独立临时 DSH 容器，无用户卷/宿主挂载/Docker socket；非 root、只读根、资源配额。工具执行前默认拒绝，事后再审计。模型供应商密钥留在 API 宿主。
+- Judgment：显式反馈、真实作用域/来源、人工审批、机械冲突检测、不可变修订与逐次证据。FAIL/UNCHECKED/PASS 分离；开发 mock 输出为 UNVERIFIED。
+- 可撤销认证、登录/上传限流、原子一次性下载票据；SeaweedFS S3 拒绝匿名访问。
+- 成员可保存、测试和断开大模型 API、Kdocs、IMA、TinyFish。模型端点和型号随 Agent 版本审批，发起人的凭证按任务修订固定。手机端可从「我的任务」恢复事件流。
 
-## 这一版是什么
+## PC 工作流程
 
-- 组织/成员/角色（管理员·构建者·员工·审阅者）/项目的真实 RBAC，权限判定全部在服务端
-- 多 Agent 管理：自然语言草稿 → 配置差异 → 能力授权（来源留痕）→ 不可变版本发布 → 回滚
-- 统一工作台：任务执行、SSE 流式运行事件、文件产物（S3 兼容存储 + 组织/项目授权）
-- **Agent Judgment Layer**：纠正候选 → 人工审批 → 作用域注入 → pass/fail/unchecked 分离评估 → 停用/回滚——无自动晋级、无沉默通过、无伪因果归因
-- **P0 隔离**：DSH 只存在于 Poros 专属容器；ISO-01/02/03/04/05 全部实测通过（证据在 `docs/ISOLATION.md`）
+在「设置」验证任务发起人的模型生成能力。在「Agent 目录」创建和配置草稿，授权使用的能力，执行草稿测试，再提交独立审批。已审批版本可以从历史列表选择回滚。
 
-## 快速开始（开发机）
+组织管理员可在「设置」管理账号，在「项目空间」建立项目、分配项目角色、关联 Agent 及维护文件。工作台支持从同一项目选择任务输入文件，运行中心显示产物、来源、执行证据和 Judgment 评估。用「纠正结果」发起候选规则时，服务端保存任务、运行、版本和原始输出。
 
-```bash
-cp .env.example .env && cp .env deploy/.env   # 改密码
-docker compose -f deploy/docker-compose.yml up -d db s3
-npm install
+「能力中心」列出 DSH Tool、可版本化的 Skill、项目文件 Knowledge、Kdocs MCP、IMA 及 TinyFish。外部查询按发起人自己的已验证连接执行，敏感能力仍需任务同意和独立审批。任务容器禁用网络，模型和受管能力经受限的 Docker 附着通道访问。
+
+支持提取 UTF-8 文本、Markdown、CSV、JSON、文本层 PDF、DOCX 正文及 XLSX 单元格。已提取的文本按额度进入任务，来源编号和摘要留痕。图片和 PPTX 支持存储及下载。
+
+## 启动
+
+Node **24.22.3**（`.node-version`），Docker / Compose v2。API 默认只监听 `127.0.0.1:8787`。
+
+```sh
+cp .env.example .env
+# 编辑本部署自己的数据库、JWT、S3 配置，不提交真实凭证
+npm ci
+npm run db:up
 npx prisma migrate deploy
-npm run db:seed          # 组织 A 四角色 + 组织 B 隔离账号（仅开发）
-npm start                # API + Web 外壳 http://127.0.0.1:8787
+npm run runtime:build
+npm run build
+npm run db:seed       # 仅开发，生产拒绝种子
+npm start
 ```
 
-测试：`npm test`（验收 16 用例 + 隔离 ISO-01/02/05，真实 Postgres/S3）。
-基线与迁移事实：`docs/BASELINE.md`、`docs/MIGRATION_INVENTORY.md`。
+构建包含服务端、UI 和 `dist/src/server/public`。生产使用 `npm run start:prod`；配置不全、mock/stub、开发默认口令或开发成员均拒绝启动。详见 [DEPLOYMENT](docs/DEPLOYMENT.md)。
 
-## 文档族
+手机访问复用 Poros 登录、API 和审批。Windows 可启动独立部署并发布私网入口。见 [手机与个人集成](docs/MOBILE_AND_CONNECTIONS.md)。
 
-| 文档 | 内容 |
-|---|---|
-| `docs/REUSE_AUDIT.md` | 复用优先决策表（版本/许可/弃选理由） |
-| `docs/MIGRATION_INVENTORY.md` | 旧代码 KEEP/MIGRATE/DELETE 判定 |
-| `docs/BASELINE.md` | 迁移前真实基线（656 测试过 / lint 30 存量债） |
-| `docs/ISOLATION.md` | P0 宿主隔离验收证据（含豁免理由与硬化债） |
-| `docs/DEPLOYMENT.md` `docs/SECURITY.md` `docs/MIGRATION.md` `docs/THIRD_PARTY.md` `docs/CLEANUP_REPORT.md` | 部署/安全/迁移/第三方/清理报告 |
+## 验证与证据
 
-## 明确不做（PRD §0.4）
+```sh
+npm run build
+npm run lint
+npm run test:api
+npm run test:isolation
+npm run e2e
+npm run e2e:pc
+npm audit --audit-level=low
+npm run sbom
+```
 
-第二套 Harness、每 Agent 一套前端、通用编排平台、自研 UI 组件库/认证/存储引擎、默认操作宿主电脑、`dsh-purge` 宿主补丁、未授权免费模型网关作为生产通道。
+测试使用独立临时数据库、真实 PostgreSQL/S3/DSH/工具及无头浏览器。模型与第三方响应夹具用于验证协议和边界。真实服务的结果以本人的连接测试为准。
 
-> 仓库当前无根 LICENSE（迁移前事实，见 PRD §1.1）；在权利人确定许可证前，代码按未授权审查状态管理，不外发。
+交付：[审计修复报告](AUDIT_FIX_REPORT.md)、[测试证据](TEST_EVIDENCE.md)、[安全复核](SECURITY_REVIEW.md)、[功能迁移矩阵](docs/FEATURE_MIGRATION_MATRIX.md)、[已定事项](docs/DECISIONS.md)、[第三方/SBOM](docs/THIRD_PARTY.md)。旧 Pi 文档是历史资料，不能作为当前部署说明。
+
+PC 专项证据见 [功能真实性审计](docs/PC_FUNCTION_AUDIT.md)、[产品验收矩阵](docs/PC_PRODUCT_ACCEPTANCE.md) 和 [整改报告](docs/PC_REMEDIATION_REPORT.md)。
