@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { runTask, type RunnerDeps } from "./runner.js";
 import { cleanupOrphanedRuntime } from "./dsh-runtime.js";
-import { findConnection } from "./integration-connections.js";
+import { assertTaskAccess } from "./task-access.js";
+import { ApiError } from "./releases.js";
 export const TERMINAL = new Set([
   "SUCCEEDED",
   "FAILED",
@@ -57,36 +58,12 @@ export function startWorker(db: PrismaClient, overrides: Partial<RunnerDeps> = {
         const task = await db.task.findUnique({ where: { id: taskId } });
         if (!task || task.cancelRequested) job.ctrl.abort();
         else {
-          const member = await db.membership.findUnique({
-            where: {
-              organizationId_userId: {
-                organizationId: task.organizationId,
-                userId: task.createdBy,
-              },
-            },
-          });
-          const projectAllowed =
-            !task.projectId ||
-            member?.role === "ADMIN" ||
-            (await db.projectMember.findUnique({
-              where: { projectId_userId: { projectId: task.projectId, userId: task.createdBy } },
-            }));
-          if (!member || !projectAllowed)
-            job.ctrl.abort(
-              new Error("POLICY_REVOKED: task membership or project permission removed"),
-            );
-          else if (task.modelConnectionRevision) {
-            const model = await findConnection(
-              db,
-              { organizationId: task.organizationId, userId: task.createdBy },
-              "model",
-            );
-            if (
-              !model ||
-              model.revision !== task.modelConnectionRevision ||
-              model.testCode !== "OK"
-            )
-              job.ctrl.abort(new Error("POLICY_REVOKED: personal model no longer authorized"));
+          try {
+            await assertTaskAccess(db, task);
+          } catch (error) {
+            if (!(error instanceof ApiError)) throw error;
+            job.ctrl.abort(new Error("POLICY_REVOKED: " + error.message));
+            continue;
           }
         }
       }

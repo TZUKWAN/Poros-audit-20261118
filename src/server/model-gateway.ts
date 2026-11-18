@@ -46,7 +46,7 @@ export interface AgentDraft {
   name: string;
   description: string;
   department: string;
-  config: { persona: string; modelPolicy: string; outputKind: string; tools: string[] };
+  config: { persona: string; modelPolicy: string; outputKind: string };
 }
 
 export interface ModelGateway {
@@ -71,7 +71,6 @@ function draftFromDescription(name: string, description: string): AgentDraft {
       persona: `你是组织内受治理的 Agent。职责：${headline}。严格在授权能力范围内工作，输出必须可核验。`,
       modelPolicy: "default",
       outputKind: /报告|总结|文档/.test(clean) ? "markdown-document" : "chat-answer",
-      tools: [],
     },
   };
 }
@@ -167,7 +166,7 @@ class CompatibleGateway implements ModelGateway {
     if (!this.target && !key)
       throw new Error("DeepSeek 网关未配置 POROS_DEEPSEEK_API_KEY：拒绝静默降级（SEC-02）");
     const sys =
-      "你是 Poros Agent Builder。把用户的自然语言描述转成结构化 Agent 草稿 JSON，字段：name(≤12字)、department、config.persona(职责+边界)、config.outputKind(markdown-document|chat-answer)、config.tools(空数组，能力由授权表管理)。只输出 JSON。";
+      "你是 Poros Agent Builder。把用户的自然语言描述转成 Agent 草稿 JSON。字段：name、department、config.persona（职责和边界）、config.outputKind（markdown-document 或 chat-answer）。只输出 JSON。";
     const result = await this.request(
       [
         { role: "system", content: sys },
@@ -189,7 +188,7 @@ class CompatibleGateway implements ModelGateway {
     return {
       ...raw,
       description,
-      config: { ...raw.config, modelPolicy: this.target ? "default" : "deepseek-chat", tools: [] },
+      config: { ...raw.config, modelPolicy: this.target ? "personal" : "deepseek-chat" },
     };
   }
   async generate(
@@ -217,6 +216,7 @@ class CompatibleGateway implements ModelGateway {
 
 export function createGateway(kind: "mock" | "deepseek" = env.modelGateway()): ModelGateway {
   if (kind === "deepseek") return new CompatibleGateway();
+  if (process.env.NODE_ENV === "production") throw new Error("生产模式禁止模拟模型");
   return new MockGateway();
 }
 export function executionGateway(runtime: "gateway" | "dsh" = env.porosRuntime()): ModelGateway {

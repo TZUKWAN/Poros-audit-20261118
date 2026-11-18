@@ -10,6 +10,9 @@ import { ZodError } from "zod";
 import { authMiddleware } from "./auth.js";
 import { registerRoutes, CREDENTIALS_DDL } from "./routes/index.js";
 import { registerIntegrationRoutes } from "./routes/integrations.js";
+import { registerProjectRoutes } from "./routes/projects.js";
+import { registerFileRoutes } from "./routes/files.js";
+import { registerCapabilityRoutes } from "./routes/capabilities.js";
 import { getDb } from "./db.js";
 import { startWorker } from "./worker.js";
 import { validateEnvironment } from "./env.js";
@@ -74,6 +77,9 @@ export async function buildApp(
   app.get("/api/health", async () => ({ ok: true, service: "poros" }));
   await app.register(registerRoutes);
   await app.register(registerIntegrationRoutes);
+  await app.register(registerProjectRoutes);
+  await app.register(registerFileRoutes);
+  await app.register(registerCapabilityRoutes);
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "public");
   await app.register(fastifyStatic, { root: publicDir, prefix: "/" });
   app.setNotFoundHandler((req, reply) => {

@@ -20,6 +20,10 @@ Compose 显式读取 `.env`；CI 用环境变量。SeaweedFS 使用 `-s3.config`
 
 ## 真实模型与生产
 
+PC 版本包含增量数据库迁移和运行桥协议。升级时使用本部署自己的数据库配置执行 `npx prisma migrate deploy`，并用 `npm run runtime:build` 重建当前运行镜像。API 代码和 DSH 镜像需一起升级。每次任务使用 `--network none`，提供给 DSH 的模型地址仅在容器自身环回可达，数据通过受限的 Docker stdin/stdout 通道中转到 Poros。模型代理在 API 宿主环回监听。
+
+安装后管理员可为组织配置账号和项目，成员在设置中验证个人模型和连接器。开启个人连接配置时，生产部署需配置独立的 `POROS_SETTINGS_KEY`。真实模型生成失败会保留供应商错误和验证状态。
+
 设置 `POROS_RUNTIME=dsh`、`MODEL_GATEWAY=deepseek`、`POROS_DSH_MODEL_STUB=0` 和明确授权的 `POROS_DEEPSEEK_API_KEY`。供应商密钥只留在 API 进程；容器经短期令牌访问同一准入模型。真实 DSH 的 Judge 不因 Builder 仍为 mock 而失配。
 
 使用个人模型的部署可设置 `POROS_PERSONAL_MODEL_ONLY=1` 和独立的 `POROS_SETTINGS_KEY`，保留真实 DSH，运行时以完成连接测试的成员凭证为准。现有部署也可设置加密主密钥启用个人集成。精确的模型及远程访问合同见 [手机与个人集成](MOBILE_AND_CONNECTIONS.md)。

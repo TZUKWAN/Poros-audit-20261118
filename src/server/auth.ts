@@ -14,7 +14,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { getDb } from "./db.js";
 import { env } from "./env.js";
-import type { Role } from "@prisma/client";
+import type { Prisma, Role } from "@prisma/client";
 
 export interface Principal {
   userId: string;
@@ -117,9 +117,9 @@ export async function verifyDownloadTicket(ticket: string, fileId: string): Prom
       where: { organizationId_userId: { organizationId: t.organizationId, userId: t.userId } },
     });
     const f = await tx.fileObject.findFirst({
-      where: { id: fileId, organizationId: t.organizationId },
+      where: { id: fileId, organizationId: t.organizationId, deletedAt: null },
     });
-    if (!s || !m || !f) return false;
+    if (!s || !m || m.disabledAt || !f) return false;
     if (!f.projectId && f.createdBy !== t.userId && m.role !== "ADMIN") return false;
     if (
       f.projectId &&
@@ -167,7 +167,7 @@ export async function authMiddleware(req: FastifyRequest): Promise<void> {
   const member = await getDb().membership.findUnique({
     where: { organizationId_userId: { organizationId: p.organizationId, userId: p.userId } },
   });
-  if (!member) return;
+  if (!member || member.disabledAt) return;
   req.principal = { ...p, role: member.role };
 }
 
@@ -199,19 +199,61 @@ export function requireRoleExact(roles: Role[], p: Principal, reply: FastifyRepl
   return true;
 }
 
-/** 项目授权检查：项目必须属于本组织且用户在成员表内（ADMIN 例外）。 */
+export function visibleProjects(
+  organizationId: string,
+  userId: string,
+  role: Role,
+  access: "read" | "write" | "manage" = "read",
+): Prisma.ProjectWhereInput {
+  return {
+    organizationId,
+    ...(access !== "read" ? { archivedAt: null } : {}),
+    ...(role === "ADMIN"
+      ? {}
+      : {
+          members: {
+            some: {
+              userId,
+              ...(access === "manage" ? { role: "MANAGER" as const } : {}),
+              ...(access === "write" ? { role: { in: ["MANAGER", "CONTRIBUTOR"] } } : {}),
+            },
+          },
+        }),
+  };
+}
+
+export function visibleAgents(
+  p: Principal,
+  access: "read" | "write" = "read",
+): Prisma.AgentDefinitionWhereInput {
+  return {
+    organizationId: p.organizationId,
+    ...(p.role === "ADMIN"
+      ? {}
+      : {
+          OR: [
+            { projectRestricted: false },
+            {
+              projects: {
+                some: { project: visibleProjects(p.organizationId, p.userId, p.role, access) },
+              },
+            },
+          ],
+        }),
+  };
+}
+
+/** Project isolation applies to every resource operation, including queue admission. */
 export async function assertProjectAccess(
   organizationId: string,
   projectId: string,
   userId: string,
   role: Role,
+  access: "read" | "write" | "manage" = "read",
 ): Promise<boolean> {
-  const db = getDb();
-  const project = await db.project.findFirst({ where: { id: projectId, organizationId } });
-  if (!project) return false;
-  if (role === "ADMIN") return true;
-  const m = await db.projectMember.findUnique({
-    where: { projectId_userId: { projectId, userId } },
+  const project = await getDb().project.findFirst({
+    where: { id: projectId, ...visibleProjects(organizationId, userId, role, access) },
+    select: { id: true },
   });
-  return !!m;
+  return Boolean(project);
 }

@@ -4,6 +4,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
 import type { ModelConnection } from "./integration-connections.js";
 import { checkProviderResponse, ProviderError, requestModel } from "./provider-http.js";
+import { describeProviderError } from "./provider-errors.js";
 export async function createRunModelProxy(
   forward: typeof fetch = fetch,
   configured?: ModelConnection,
@@ -11,6 +12,7 @@ export async function createRunModelProxy(
   const token = randomBytes(32).toString("base64url");
   let calls = 0;
   let upstreamCalls = 0;
+  let lastFailure: ReturnType<typeof describeProviderError> | undefined;
   const server = http.createServer(async (req, res) => {
     const disconnected = new AbortController();
     res.once("close", () => disconnected.abort());
@@ -79,6 +81,7 @@ export async function createRunModelProxy(
         ? await requestModel(target.baseUrl, "/chat/completions", init)
         : await forward(target.baseUrl + "/chat/completions", { ...init, redirect: "error" });
       await checkProviderResponse(reply, true);
+      lastFailure = undefined;
       res.writeHead(reply.status, {
         "content-type": reply.headers.get("content-type") ?? "application/json",
         "cache-control": "no-store",
@@ -112,6 +115,7 @@ export async function createRunModelProxy(
       }
       res.end();
     } catch (error) {
+      lastFailure = describeProviderError(error);
       if (!res.headersSent) {
         const status =
           error instanceof ProviderError && error.http && error.http >= 400 ? error.http : 502;
@@ -119,12 +123,12 @@ export async function createRunModelProxy(
         res.end(
           JSON.stringify({
             error: {
-              message: error instanceof ProviderError ? error.reason : "MODEL_REQUEST_FAILED",
+              message: lastFailure.code,
             },
           }),
         );
       } else {
-        res.end();
+        res.destroy();
       }
     }
   });
@@ -132,15 +136,16 @@ export async function createRunModelProxy(
   server.headersTimeout = 10000;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "0.0.0.0", resolve);
+    server.listen(0, "127.0.0.1", resolve);
   });
   const port = (server.address() as { port: number }).port;
   return {
     token,
-    baseURL: `http://host.docker.internal:${port}/v1`,
+    baseURL: `http://127.0.0.1:${port}/v1`,
     port,
     calls: () => calls,
     upstreamCalls: () => upstreamCalls,
+    failure: () => lastFailure,
     async close() {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>

@@ -14,6 +14,7 @@
 | React/Radix/Tailwind/Vite | lockfile 实际版本 | MIT |
 | Vitest / Playwright Core | 5.1.0 / 1.65.1 | MIT / Apache-2.0 |
 | @poros/picomatch-secure | 4.0.7+poros.security.1 | 原 MIT 保留 |
+| PDF.js / yauzl / saxes | 6.5.438 / 3.4.0 / 6.0.0 | Apache-2.0 / MIT / ISC |
 
 匹配器上游 GHSA-fc5q-39xc-vjpf 尚无已发布修复，不能假称升级解决。私有完整源码补丁禁用项目不需要的重复 extglob；见 [补丁说明](../vendor/picomatch/SECURITY_PATCH.md) 与对应测试。没有漏洞忽略项，npm audit 检查真实依赖树。
 

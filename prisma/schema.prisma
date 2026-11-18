@@ -24,6 +24,12 @@ enum AgentStatus {
   DISABLED
 }
 
+enum ProjectRole {
+  MANAGER
+  CONTRIBUTOR
+  VIEWER
+}
+
 enum GrantKind {
   TOOL
   SKILL
@@ -55,6 +61,7 @@ enum ApprovalDecision {
   PENDING
   APPROVED
   REJECTED
+  WITHDRAWN
 }
 
 enum JudgmentStatus {
@@ -100,6 +107,7 @@ model Membership {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   userId         String
   role           Role
+  disabledAt     DateTime?
   createdAt      DateTime     @default(now())
   connections    IntegrationConnection[]
   @@unique([organizationId, userId])
@@ -124,7 +132,11 @@ model Project {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
+  description    String       @default("")
+  archivedAt     DateTime?
+  createdAt      DateTime     @default(now())
   members        ProjectMember[]
+  agents         AgentProject[]
   tasks          Task[]
   files          FileObject[]
   @@unique([organizationId, name])
@@ -135,7 +147,28 @@ model ProjectMember {
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   userId    String
+  role      ProjectRole @default(CONTRIBUTOR)
   @@unique([projectId, userId])
+}
+
+model AgentProject {
+  agentId   String
+  agent     AgentDefinition @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@id([agentId, projectId])
+}
+
+model AuditEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  projectId      String?
+  actorId        String
+  action         String
+  subjectId      String
+  detail         Json     @default("{}")
+  createdAt      DateTime @default(now())
+  @@index([organizationId, projectId, createdAt])
 }
 
 model AgentDefinition {
@@ -149,6 +182,10 @@ model AgentDefinition {
   draftConfig    Json
   // 审查项②：自然语言构建来源留痕（生成该草稿的原始描述；null = 显式表单创建）
   nlSource       String?
+  draftOrigin    String       @default("MANUAL")
+  generationModel String?
+  projectRestricted Boolean  @default(false)
+  projects       AgentProject[]
   status         AgentStatus  @default(DRAFT)
   currentVersion Int          @default(0)
   versionCounter Int          @default(0)
@@ -188,6 +225,35 @@ model AgentGrant {
   @@unique([agentId, kind, name])
 }
 
+model AgentGrantRevocation {
+  id             String   @id @default(cuid())
+  agentId        String
+  kind           GrantKind
+  name           String
+  source         String
+  throughVersion Int
+  revokedAt      DateTime @default(now())
+  @@index([agentId, kind, name])
+}
+
+model CapabilityDefinition {
+  id             String    @id @default(cuid())
+  organizationId String
+  kind           GrantKind
+  name           String
+  version        Int
+  description    String
+  instruction    String    @default("")
+  fileId         String?
+  projectId      String?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  disabledAt     DateTime?
+  disabledBy     String?
+  @@unique([organizationId, kind, name, version])
+  @@index([organizationId, projectId])
+}
+
 model Task {
   id             String       @id @default(cuid())
   organizationId String
@@ -200,6 +266,7 @@ model Task {
   prompt         String
   executionSnapshot Json       @default("{}")
   modelConnectionRevision String?
+  connectionRevisions Json @default("{}")
   requestKey     String?
   requestHash    String?
   timeoutMs      Int           @default(180000)
@@ -214,6 +281,10 @@ model Task {
   createdAt      DateTime     @default(now())
   runs           Run[]
   artifacts      Artifact[]
+  inputs         TaskInput[]
+  acceptedRunId String?
+  acceptedBy    String?
+  acceptedAt    DateTime?
   @@unique([organizationId, createdBy, requestKey])
   @@index([status, availableAt])
 }
@@ -223,7 +294,11 @@ model Run {
   taskId           String
   task             Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   status           TaskStatus @default(RUNNING)
-  modelGateway     String   @default("mock") // mock | deepseek | ...（未配置真实网关时恒为 mock 并如实标注）
+  modelGateway     String   @default("pending")
+  modelId          String?
+  failureCode      String?
+  artifact         Artifact?
+  fileUses         FileUse[]
   injectedRules    Json     @default("[]") // 实际注入的 ruleId+version 列表（注入留痕）
   output           String   @default("")
   error            String   @default("")
@@ -264,6 +339,8 @@ model Artifact {
   projectId      String?
   taskId         String?
   task           Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  runId          String?  @unique
+  run            Run?     @relation(fields: [runId], references: [id], onDelete: SetNull)
   name           String
   storageKey     String // S3 对象键（存储桶固定，元数据在此）
   sizeBytes      Int
@@ -282,8 +359,33 @@ model FileObject {
   storageKey     String
   sizeBytes      Int
   sourceUrl      String       @default("")
+  category       String       @default("")
+  deletedAt      DateTime?
+  inputs         TaskInput[]
+  uses           FileUse[]
   createdBy      String
   createdAt      DateTime     @default(now())
+}
+
+model TaskInput {
+  taskId     String
+  task       Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fileId     String
+  file       FileObject @relation(fields: [fileId], references: [id])
+  @@id([taskId, fileId])
+}
+
+model FileUse {
+  runId      String
+  run        Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+  fileId     String
+  file       FileObject @relation(fields: [fileId], references: [id])
+  digest     String
+  ref        String
+  chars      Int
+  truncated  Boolean
+  createdAt  DateTime @default(now())
+  @@id([runId, fileId])
 }
 
 // Judgment Layer V2（PRD §7）：候选→审批→作用域→注入→验证→生命周期
@@ -294,6 +396,7 @@ model JudgmentRule {
   scopeType      ScopeType
   scopeId        String
   sourceRunId    String       @default("")
+  sourceEvidence Json         @default("{}")
   sourceFeedback String       @default("") // 用户纠正原文或机器可观测失败摘录
   rule           String
   kind           RuleKind

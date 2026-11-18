@@ -19,7 +19,8 @@ export async function createTestModel(
     req.setEncoding("utf8");
     for await (const chunk of req) body += chunk;
     const input = JSON.parse(body),
-      hasResult = input.messages?.some((m) => m.role === "tool");
+      completed = (input.messages ?? []).filter((m) => m.role === "tool").length;
+    const batch = options.sequence ? calls.slice(completed, completed + 1) : completed ? [] : calls;
     if (options.model && input.model !== model) {
       res.writeHead(400).end("Unexpected model in contract fixture");
       return;
@@ -38,22 +39,29 @@ export async function createTestModel(
     if (probe) {
       send({ role: "assistant", content: probe });
       send({}, "stop");
-    } else if (!hasResult && calls.length) {
+    } else if (batch.length) {
       send({
         role: "assistant",
-        tool_calls: calls.map((c, i) => ({
+        tool_calls: batch.map((c, i) => ({
           index: i,
-          id: `call-${i}`,
+          id: `call-${completed + i}`,
           type: "function",
           function: { name: c.name, arguments: JSON.stringify(c.arguments) },
         })),
       });
       send({}, "tool_calls");
     } else {
+      const messages = (input.messages ?? [])
+        .map((message) => JSON.stringify(message.content ?? ""))
+        .join("\n");
+      const excerpts = [
+        ...new Set(messages.match(/POROS-PC-(?:WORD|EXCEL|MD|PDF|PERSONA)-[a-f0-9]{8}/g) ?? []),
+      ];
       send({
         role: "assistant",
         content:
-          "POROS-DSH-OK — deterministic test MODEL response; execution is verified only by actual tool_result events.",
+          "POROS-DSH-OK — deterministic test MODEL response; execution is verified only by actual tool_result events." +
+          (excerpts.length ? "\nFixture received: " + excerpts.join(", ") : ""),
       });
       send({}, "stop");
     }

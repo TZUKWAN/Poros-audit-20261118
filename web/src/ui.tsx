@@ -3,7 +3,7 @@
  * 不自造可访问性/焦点管理——审查项⑦"复用成熟组件"的落地件。
  */
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import type { ReactNode } from "react";
+import { cloneElement, isValidElement, useId, type ReactNode } from "react";
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "ghost" | "danger";
@@ -93,13 +93,40 @@ export function StatusBadge({ status }: { status: string }) {
           : status === "FAILED" || status === "BLOCKED" || status === "TIMED_OUT"
             ? "bad"
             : "neutral";
-  const label =
-    status === "SUCCEEDED_WITH_VIOLATIONS"
-      ? "完成·质量未通过"
-      : status === "UNVERIFIED"
-        ? "未验证"
-        : status;
+  const labels: Record<string, string> = {
+    QUEUED: "排队中",
+    RUNNING: "执行中",
+    SUCCEEDED: "执行完成",
+    SUCCEEDED_WITH_VIOLATIONS: "验收未通过",
+    UNVERIFIED: "验收未验证",
+    FAILED: "执行失败",
+    BLOCKED: "已阻止",
+    TIMED_OUT: "执行超时",
+    CANCELLED: "已取消",
+  };
+  const label = labels[status] ?? status;
   return <Badge tone={tone as "ok" | "bad" | "warn" | "neutral"}>{label}</Badge>;
+}
+
+export function Field({ label, children }: { label: string; children: ReactNode }) {
+  const control = useId();
+  return (
+    <div className="grid min-w-0 gap-1.5 text-sm font-medium">
+      <label htmlFor={control}>{label}</label>
+      {isValidElement<{ id?: string }>(children)
+        ? cloneElement(children, { id: control })
+        : children}
+    </div>
+  );
+}
+
+export function PageHeading({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+      {children}
+    </div>
+  );
 }
 
 /** Radix Dialog 封装（可访问性由 Radix 提供）。 */

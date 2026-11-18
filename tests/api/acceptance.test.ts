@@ -272,7 +272,8 @@ describe("AGT-02b 自然语言构建与草稿测试（审查项②）", () => {
       payload: { description: "创建一个能检索授权知识库并输出竞品分析报告的研究 Agent" },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().nlGenerated).toBe(true);
+    expect(res.json().nlGenerated).toBe(false);
+    expect(res.json().generation).toEqual({ origin: "TEMPLATE", model: null });
     expect(res.json().agent.nlSource).toContain("竞品");
     expect(res.json().agent.draftConfig.persona).toBeTruthy();
     nlAgentId = res.json().agent.id;

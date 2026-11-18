@@ -14,3 +14,4 @@ deploy/.env
 .claude/CLAUDE_STATE.md
 .audit/evidence/delivery.json
 .audit/evidence/mobile-*.png
+.audit/evidence/pc/

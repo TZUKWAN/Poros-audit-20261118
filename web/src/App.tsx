@@ -2,15 +2,19 @@ import * as Tabs from "@radix-ui/react-tabs";
 import { useEffect, useState } from "react";
 import { api, getToken, login, logout, type OrgInfo } from "./api.js";
 import { Button, Input } from "./ui.js";
-import WorkspaceView from "./views/workspace.js";
+import WorkspaceView, { RunCenter } from "./views/workspace.js";
 import AgentsView from "./views/agents.js";
 import IntegrationsView from "./views/integrations.js";
 import GovernanceView from "./views/governance.js";
+import ProjectsView, { MembersPanel } from "./views/projects.js";
+import CapabilitiesView from "./views/capabilities.js";
 import { InstallApp } from "./install.js";
 
 export default function App() {
   const [logoutError, setLogoutError] = useState("");
   const [auth, setAuth] = useState<OrgInfo | null>(getToken() ? parseJwt(getToken()!) : null);
+  const [tab, setTab] = useState("workspace");
+  const [runId, setRunId] = useState("");
   useEffect(() => {
     const expired = () => setAuth(null);
     window.addEventListener("poros-auth-expired", expired);
@@ -23,8 +27,12 @@ export default function App() {
 
   if (!auth) return <LoginView onLogin={setAuth} />;
 
+  const openTask = (id: string) => {
+    setRunId(id);
+    setTab("runs");
+  };
   return (
-    <div className="mx-auto min-h-screen max-w-5xl px-4 pb-10">
+    <div className="mx-auto min-h-screen max-w-[1480px] px-4 pb-10 lg:px-8">
       <header className="flex items-center justify-between gap-2 py-4">
         <div className="min-w-0">
           <h1 className="text-lg font-bold">Poros 工作台</h1>
@@ -46,16 +54,19 @@ export default function App() {
         </div>
       </header>
       {logoutError && <p role="alert">{logoutError}</p>}
-      <Tabs.Root defaultValue="workspace">
+      <Tabs.Root value={tab} onValueChange={setTab}>
         <Tabs.List
           aria-label="工作台导航"
-          className="mb-4 grid grid-cols-4 border-b border-[#e3e1dc] sm:flex sm:gap-1"
+          className="mb-5 grid grid-cols-3 border-b border-[#e3e1dc] sm:flex sm:gap-1"
         >
           {[
             ["workspace", "工作台"],
             ["agents", "Agent 目录"],
-            ["integrations", "设置"],
+            ["projects", "项目空间"],
+            ["runs", "运行中心"],
+            ["capabilities", "能力中心"],
             ["governance", "审批与规则"],
+            ["integrations", "设置"],
           ].map(([value, label]) => (
             <Tabs.Trigger
               key={value}
@@ -67,19 +78,32 @@ export default function App() {
           ))}
         </Tabs.List>
         <Tabs.Content value="workspace">
-          <WorkspaceView role={auth.role} />
+          <WorkspaceView email={auth.email} />
         </Tabs.Content>
         <Tabs.Content value="agents">
           <AgentsView role={auth.role} />
         </Tabs.Content>
         <Tabs.Content value="integrations">
-          <IntegrationsView />
+          <div className="space-y-4">
+            {auth.role === "ADMIN" && <MembersPanel />}
+            <IntegrationsView />
+          </div>
+        </Tabs.Content>
+        <Tabs.Content value="projects">
+          <ProjectsView email={auth.email} role={auth.role} onOpenTask={openTask} />
+        </Tabs.Content>
+        <Tabs.Content value="runs">
+          <RunCenter taskId={runId} onOpen={setRunId} />
+        </Tabs.Content>
+        <Tabs.Content value="capabilities">
+          <CapabilitiesView role={auth.role} />
         </Tabs.Content>
         <Tabs.Content value="governance">
           <GovernanceView
             role={auth.role}
             email={auth.email}
             organizationId={auth.organizationId}
+            onOpenTask={openTask}
           />
         </Tabs.Content>
       </Tabs.Root>

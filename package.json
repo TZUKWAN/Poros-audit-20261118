@@ -1,7 +1,7 @@
 {
   "name": "poros",
   "version": "1.0.0",
-  "description": "Poros Enterprise \u2014 agent development, configuration, collaboration and governance platform on a dedicated isolated DSH runtime.",
+  "description": "Poros Enterprise — agent development, configuration, collaboration and governance platform on a dedicated isolated DSH runtime.",
   "scripts": {
     "test": "vitest run tests/api && npm run test:isolation",
     "build": "tsc -p tsconfig.json && npm run ui:typecheck && npm run ui:build && node scripts/copy-public.mjs",
@@ -22,6 +22,7 @@
     "test:api": "vitest run tests/api",
     "test:isolation": "node tests/isolation/iso-01-sentinel.mjs && node tests/isolation/iso-02-compose-audit.mjs && node tests/isolation/iso-03-dual-instance.mjs && node tests/isolation/iso-05-container-escape.mjs && node --import tsx tests/isolation/iso-06-runtime.mjs",
     "e2e": "node tests/e2e/run-e2e.mjs",
+    "e2e:pc": "node tests/e2e/run-e2e.mjs --pc",
     "sbom": "node scripts/write-sbom.mjs"
   },
   "keywords": [],
@@ -37,9 +38,12 @@
     "bcryptjs": "3.0.2",
     "fastify": "5.12.8",
     "jsonwebtoken": "9.0.2",
+    "pdfjs-dist": "6.5.438",
     "pino": "9.5.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "saxes": "6.0.0",
+    "yauzl": "3.4.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -48,12 +52,14 @@
     "@types/node": "^24.19.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/yauzl": "3.4.0",
     "@vitejs/plugin-react": "^5.2.0",
     "@vitest/coverage-v8": "5.1.0",
     "esbuild": "0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
+    "picomatch": "file:vendor/picomatch",
     "playwright-core": "1.65.1",
     "prettier": "3.9.10",
     "prisma": "6.19.0",
@@ -62,8 +68,7 @@
     "typescript": "5.9",
     "typescript-eslint": "8.73.0",
     "vite": "^7.3.8",
-    "vitest": "5.1.0",
-    "picomatch": "file:vendor/picomatch"
+    "vitest": "5.1.0"
   },
   "overrides": {
     "undici": "8.12.2",

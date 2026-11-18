@@ -8,6 +8,7 @@ export class ProviderError extends Error {
   constructor(
     readonly reason: string,
     readonly http?: number,
+    readonly providerCode?: string,
   ) {
     super(reason);
   }

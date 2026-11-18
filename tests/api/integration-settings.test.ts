@@ -31,6 +31,14 @@ const referenceProvider = createServer(async (req, res) => {
     return;
   }
   aliveRequests.push(body.model);
+  if (/^fault-\d+$/.test(body.model)) {
+    res.writeHead(Number(body.model.slice(6))).end('{"error":{"message":"HTTP protocol fixture"}}');
+    return;
+  }
+  if (body.model === "fault-timeout") {
+    await new Promise<void>((resolve) => res.once("close", resolve));
+    return;
+  }
   if (body.model === "upstream-needs-validation") {
     res
       .writeHead(503)
@@ -53,7 +61,19 @@ const referenceProvider = createServer(async (req, res) => {
   res.writeHead(200, { "content-type": "application/json" });
   res.end(
     JSON.stringify({
-      choices: [{ message: { content: "custom model generation" } }],
+      choices: [
+        {
+          message: {
+            content: String(body.messages[0]?.content).includes("Poros Agent Builder")
+              ? JSON.stringify({
+                  name: "Provider draft",
+                  department: "PC test",
+                  config: { persona: last, outputKind: "chat-answer" },
+                })
+              : "custom model generation",
+          },
+        },
+      ],
       usage: { prompt_tokens: 5, completion_tokens: 3 },
     }),
   );
@@ -165,6 +185,13 @@ it("runs the real HTTP probe, pins approved model and blocks changed or unverifi
   const verify = await caller("POST", settings + "/model/test");
   expect(verify.json()).toMatchObject({ passed: true, code: "OK" });
   expect(aliveRequests).toContain("fixture-chat");
+  const generated = await caller("POST", "/api/agents/drafts", {
+    description: "Caller-specific draft instruction",
+    generationMode: "live",
+  });
+  expect(generated.statusCode).toBe(200);
+  expect(generated.json().generation).toEqual({ origin: "MODEL", model: "fixture-chat" });
+  expect(generated.json().agent.draftConfig.persona).toBe("Caller-specific draft instruction");
   const registered = await caller("POST", "/api/agents/drafts", {
     name: "Personal endpoint",
     config: { persona: "Approved fixture" },
@@ -235,6 +262,47 @@ it("runs the real HTTP probe, pins approved model and blocks changed or unverifi
   expect((await caller("GET", settings)).json().connections).toEqual([]);
 });
 
+it("reports actual HTTP 401, 403, 429, 503 and timeout as failed model verification", async () => {
+  for (const [http, code] of [
+    [401, "AUTH_REJECTED"],
+    [403, "AUTH_REJECTED"],
+    [429, "RATE_LIMITED"],
+    [503, "UPSTREAM_FAILURE"],
+  ] as const) {
+    const saved = await caller("PUT", settings + "/model", {
+      apiKey: "test-settings-key",
+      baseUrl,
+      model: "fault-" + http,
+    });
+    expect(saved.statusCode).toBe(200);
+    const tested = await caller("POST", settings + "/model/test");
+    expect(tested.json()).toMatchObject({ passed: false, http, code });
+    expect(aliveRequests).toContain("fault-" + http);
+  }
+  const saved = await caller("PUT", settings + "/model", {
+    apiKey: "test-settings-key",
+    baseUrl,
+    model: "fault-timeout",
+  });
+  expect(saved.statusCode).toBe(200);
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  const timer = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockImplementation((duration) => timeout(Math.min(duration, 250)));
+  try {
+    const tested = await caller("POST", settings + "/model/test");
+    expect(tested.json()).toMatchObject({ passed: false, code: "TIMEOUT" });
+    expect(aliveRequests).toContain("fault-timeout");
+    expect((await caller("GET", settings)).json().connections[0]).toMatchObject({
+      verified: false,
+      testCode: "TIMEOUT",
+    });
+  } finally {
+    timer.mockRestore();
+    await caller("DELETE", settings + "/model");
+  }
+});
+
 it("uses provider-specific credential headers and real endpoint contracts for Kdocs, IMA and TinyFish", async () => {
   const calls: Array<{ url: string; method?: string; headers: Headers; body?: unknown }> = [];
   // Vendor response contract fixtures. Actual provider accounts are not part of this test.
@@ -246,8 +314,24 @@ it("uses provider-specific credential headers and real endpoint contracts for Kd
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     };
     calls.push(request);
+    if (request.url.endsWith("/search_knowledge"))
+      return Response.json({
+        retcode: 0,
+        data: {
+          info_list: [
+            {
+              title: "Authorized matching article",
+              highlight_content: "Verified excerpt fixture",
+              media_id: "article-a",
+            },
+          ],
+        },
+      });
     if (request.url.includes("ima.qq.com"))
-      return Response.json({ retcode: 0, data: { info_list: [{ name: "Knowledge base" }] } });
+      return Response.json({
+        retcode: 0,
+        data: { info_list: [{ id: "knowledge-a", name: "Knowledge base" }] },
+      });
     if (request.url.includes("api.search.tinyfish.ai"))
       return Response.json({ results: [{ title: "TinyFish", url: "https://www.tinyfish.ai/" }] });
     if (request.url.includes("api.fetch.tinyfish.ai"))
@@ -315,6 +399,81 @@ it("uses provider-specific credential headers and real endpoint contracts for Kd
     expect(kdocs?.headers.get("authorization")).toBe("Bearer fixture-kdocs");
     expect(kdocs?.body).toMatchObject({ params: { name: "kso_yundoc_search_yundoc" } });
     expect((await caller("GET", settings)).body).not.toContain("fixture-client");
+    const { connectors } = await import("../../src/server/capability-catalog.js");
+    const { brokerRuntime, freezeCapabilityConnections } =
+      await import("../../src/server/capabilities.js");
+    const { assertTaskAccess } = await import("../../src/server/task-access.js");
+    const owner = { userId: "builder@example.test", organizationId: "org-settings" };
+    const grants = connectors.map((connector) => ({
+      kind: connector.kind,
+      name: connector.capability,
+      source: connector.source,
+      version: connector.version,
+    }));
+    const foreign = { userId: "reviewer@example.test", organizationId: owner.organizationId };
+    await expect(freezeCapabilityConnections(db, foreign, grants, null)).rejects.toThrow(
+      /需要发起人/,
+    );
+    const revisions = await freezeCapabilityConnections(db, owner, grants, null);
+    const task = await db.task.create({
+      data: {
+        organizationId: owner.organizationId,
+        createdBy: owner.userId,
+        title: "Broker wire contract",
+        prompt: "Evidence from permitted sources",
+        executionSnapshot: { grants },
+        connectionRevisions: revisions,
+      },
+    });
+    const events: Array<{ kind: string; value: unknown }> = [];
+    const broker = await brokerRuntime(
+      db,
+      task,
+      grants,
+      async () => {
+        await assertTaskAccess(db, task);
+      },
+      async (kind, value) => {
+        events.push({ kind, value });
+      },
+    );
+    const signal = AbortSignal.timeout(10000);
+    for (const [name, args, expected] of [
+      ["kdocs_search", { query: "cloud docs" }, "Cloud document"],
+      ["kdocs_read", { file_id: "file-a", drive_id: "drive-a" }, "Cloud document"],
+      ["ima_list", { query: "" }, "knowledge-a"],
+      [
+        "ima_search",
+        { query: "matching article", knowledge_base_id: "knowledge-a" },
+        "Verified excerpt fixture",
+      ],
+      ["web_search", { query: "Poros" }, "TinyFish"],
+      ["web_fetch", { url: "https://www.tinyfish.ai/" }, "Extracted page text"],
+    ] as const) {
+      const outcome = await broker.invoke(name, args, signal);
+      expect(outcome).toMatchObject({ ok: true });
+      expect(JSON.stringify(outcome)).toContain(expected);
+      expect(JSON.stringify(outcome)).not.toMatch(/fixture-(kdocs|ima|tinyfish|client)/);
+    }
+    expect(
+      calls.some(
+        (c) =>
+          (c.body as { params?: { name?: string } })?.params?.name ===
+          "kso_yundoc_extract_yundoc_content",
+      ),
+    ).toBe(true);
+    expect(events.filter((event) => event.kind === "capability.result")).toHaveLength(6);
+    const recorded = calls.length;
+    expect(await broker.invoke("unknown", {}, signal)).toMatchObject({ ok: false });
+    expect(await broker.invoke("web_search", { url: "unexpected argument" }, signal)).toMatchObject(
+      { ok: false },
+    );
+    expect(calls).toHaveLength(recorded);
+    await caller("DELETE", settings + "/kdocs");
+    expect(
+      await broker.invoke("kdocs_read", { file_id: "file-a", drive_id: "drive-a" }, signal),
+    ).toMatchObject({ ok: false });
+    expect(calls).toHaveLength(recorded);
   } finally {
     fetchVendor.mockRestore();
   }

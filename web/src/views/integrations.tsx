@@ -41,11 +41,13 @@ export interface PersonalConnectionView {
   testedAt: string | null;
   testMessage?: string;
 }
-interface SettingsBody {
+export interface SettingsBody {
   connections: PersonalConnectionView[];
   runtime: string;
   builtinModel: string | null;
   testModel: boolean;
+  modelMode: "SIMULATION" | "CONFIGURED";
+  personalModelOnly: boolean;
 }
 type Item = { title: string; snippet?: string; url?: string };
 
@@ -73,7 +75,7 @@ export default function IntegrationsView() {
         {state && (
           <p className="mt-2 text-xs text-[#5c5a55]">
             {state.runtime === "dsh" ? "DSH 独立运行容器" : "开发网关"}
-            {state.testModel ? " · 测试模型模式" : ""}
+            {state.modelMode === "SIMULATION" ? " · 模拟环境 · 测试模型" : " · 已配置模型通道"}
             {state.builtinModel ? " · 部署模型 " + state.builtinModel : ""}
           </p>
         )}

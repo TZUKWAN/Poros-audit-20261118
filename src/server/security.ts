@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { getDb } from "./db.js";
-import { ApiError } from "./releases.js";
+import { ApiError } from "./errors.js";
 /** Shared PostgreSQL rate limit: multi-worker/multi-instance atomic window. */
 export async function consumeLimit(key: string, limit: number, windowMs: number): Promise<void> {
   const id = createHash("sha256").update(key).digest("hex");

@@ -24,18 +24,23 @@ const requestJson = (url: string | URL, init: RequestInit) =>
   fetch(url, {
     ...init,
     redirect: "error",
-    signal: AbortSignal.timeout(14000),
+    signal: AbortSignal.any([AbortSignal.timeout(14000), ...(init.signal ? [init.signal] : [])]),
   }).then(jsonResponse);
 
 const imaSchema = z.object({
   retcode: z.number(),
-  data: z.object({ info_list: z.array(z.object({ name: z.string() })).optional() }).optional(),
+  data: z
+    .object({
+      info_list: z.array(z.object({ name: z.string(), id: z.string().optional() })).optional(),
+    })
+    .optional(),
 });
-async function imaSearch(row: IntegrationConnection, query: string) {
+async function imaSearch(row: IntegrationConnection, query: string, signal?: AbortSignal) {
   const { clientId, apiKey } = connectionSecret(row);
   const result = imaSchema.safeParse(
     await requestJson("https://ima.qq.com/openapi/wiki/v1/search_knowledge_base", {
       method: "POST",
+      signal,
       headers: {
         "content-type": "application/json",
         "ima-openapi-clientid": clientId!,
@@ -46,10 +51,64 @@ async function imaSearch(row: IntegrationConnection, query: string) {
     }),
   );
   if (!result.success) throw new ProviderError("INVALID_RESPONSE");
-  if (result.data.retcode !== 0) throw new ProviderError("PROVIDER_REQUEST_REJECTED");
+  if (result.data.retcode !== 0)
+    throw new ProviderError("PROVIDER_REQUEST_REJECTED", undefined, `IMA ${result.data.retcode}`);
   if (!result.data.data) throw new ProviderError("INVALID_RESPONSE");
-  return (result.data.data.info_list ?? []).slice(0, 8).map(({ name }) => ({
+  return (result.data.data.info_list ?? []).slice(0, 8).map(({ name, id }) => ({
     title: mask(name, apiKey, clientId).slice(0, 300),
+    ...(id ? { id: mask(id, apiKey, clientId).slice(0, 200) } : {}),
+  }));
+}
+async function imaContent(
+  row: IntegrationConnection,
+  query: string,
+  knowledgeBaseId: string,
+  signal?: AbortSignal,
+) {
+  const { clientId, apiKey } = connectionSecret(row);
+  const validated = z
+    .object({
+      retcode: z.number(),
+      data: z
+        .object({
+          info_list: z
+            .array(
+              z.object({
+                title: z.string().optional(),
+                name: z.string().optional(),
+                media_id: z.string().optional(),
+                highlight_content: z.string().optional(),
+              }),
+            )
+            .optional(),
+        })
+        .optional(),
+    })
+    .safeParse(
+      await requestJson("https://ima.qq.com/openapi/wiki/v1/search_knowledge", {
+        method: "POST",
+        signal,
+        headers: {
+          "content-type": "application/json",
+          "ima-openapi-clientid": clientId!,
+          "ima-openapi-apikey": apiKey,
+          "ima-openapi-ctx": "app=poros",
+        },
+        body: JSON.stringify({ query, knowledge_base_id: knowledgeBaseId, cursor: "" }),
+      }),
+    );
+  if (!validated.success) throw new ProviderError("INVALID_RESPONSE");
+  if (validated.data.retcode !== 0)
+    throw new ProviderError(
+      "PROVIDER_REQUEST_REJECTED",
+      undefined,
+      `IMA ${validated.data.retcode}`,
+    );
+  if (!validated.data.data) throw new ProviderError("INVALID_RESPONSE");
+  return (validated.data.data.info_list ?? []).slice(0, 8).map((item) => ({
+    title: mask(item.title ?? item.name ?? "IMA 条目", apiKey, clientId).slice(0, 300),
+    id: item.media_id ? mask(item.media_id, apiKey, clientId).slice(0, 200) : undefined,
+    snippet: mask(item.highlight_content ?? "", apiKey, clientId).slice(0, 1600),
   }));
 }
 
@@ -71,12 +130,12 @@ const fetchSchema = z.object({
     }),
   ),
 });
-async function tinySearch(row: IntegrationConnection, query: string) {
+async function tinySearch(row: IntegrationConnection, query: string, signal?: AbortSignal) {
   const { apiKey } = connectionSecret(row);
   const url = new URL("https://api.search.tinyfish.ai/");
   url.searchParams.set("query", query);
   const result = searchSchema.safeParse(
-    await requestJson(url, { headers: { "X-API-Key": apiKey } }),
+    await requestJson(url, { headers: { "X-API-Key": apiKey }, signal }),
   );
   if (!result.success) throw new ProviderError("INVALID_RESPONSE");
   return result.data.results.slice(0, 8).map((item) => ({
@@ -85,12 +144,13 @@ async function tinySearch(row: IntegrationConnection, query: string) {
     url: safeLink(mask(item.url, apiKey)),
   }));
 }
-async function tinyFetch(row: IntegrationConnection, input: string) {
+async function tinyFetch(row: IntegrationConnection, input: string, signal?: AbortSignal) {
   const { apiKey } = connectionSecret(row);
   const url = input === "https://www.tinyfish.ai/" ? input : await checkPublicTarget(input);
   const result = fetchSchema.safeParse(
     await requestJson("https://api.fetch.tinyfish.ai/", {
       method: "POST",
+      signal,
       headers: { "X-API-Key": apiKey, "content-type": "application/json" },
       body: JSON.stringify({ urls: [url], format: "markdown" }),
     }),
@@ -113,9 +173,14 @@ const rpcSchema = z.object({
   result: z.unknown().optional(),
   error: z.unknown().optional(),
 });
-async function kdocsSearch(row: IntegrationConnection, query: string) {
+async function kdocsRequest(
+  row: IntegrationConnection,
+  operation: "search" | "read",
+  args: Record<string, string | number>,
+  taskSignal?: AbortSignal,
+) {
   const { apiKey } = connectionSecret(row);
-  const signal = AbortSignal.timeout(14000);
+  const signal = AbortSignal.any([AbortSignal.timeout(14000), ...(taskSignal ? [taskSignal] : [])]);
   const headers = {
     authorization: "Bearer " + apiKey,
     "content-type": "application/json",
@@ -139,7 +204,14 @@ async function kdocsSearch(row: IntegrationConnection, query: string) {
     const validate = (raw: string) => {
       const parsed = rpcSchema.safeParse(JSON.parse(raw));
       if (!parsed.success || parsed.data.id !== id) return undefined;
-      if (parsed.data.error) throw new ProviderError("PROVIDER_REQUEST_REJECTED");
+      if (parsed.data.error) {
+        const rpc = z.object({ code: z.number().optional() }).safeParse(parsed.data.error);
+        throw new ProviderError(
+          "PROVIDER_REQUEST_REJECTED",
+          undefined,
+          rpc.success && typeof rpc.data.code === "number" ? `WPS MCP ${rpc.data.code}` : undefined,
+        );
+      }
       return parsed.data.result;
     };
     if (res.headers.get("content-type")?.includes("text/event-stream")) {
@@ -176,8 +248,11 @@ async function kdocsSearch(row: IntegrationConnection, query: string) {
         await rpc(
           "tools/call",
           {
-            name: "kso_yundoc_search_yundoc",
-            arguments: { keyword: query, page_size: 5, type: "all" },
+            name:
+              operation === "search"
+                ? "kso_yundoc_search_yundoc"
+                : "kso_yundoc_extract_yundoc_content",
+            arguments: args,
           },
           2,
         ),
@@ -187,8 +262,9 @@ async function kdocsSearch(row: IntegrationConnection, query: string) {
       .filter((c) => c.type === "text")
       .slice(0, 5)
       .map((c) => ({
-        title: "金山文档搜索结果",
-        snippet: mask(c.text ?? "", apiKey).slice(0, 5000),
+        title: operation === "search" ? "金山文档搜索结果" : "金山文档正文",
+        snippet: mask(c.text ?? "", apiKey).slice(0, operation === "search" ? 5000 : 12000),
+        ...(operation === "read" && args.file_id ? { id: mask(String(args.file_id), apiKey) } : {}),
       }));
   } finally {
     if (headers["mcp-session-id"] && !signal.aborted) {
@@ -198,6 +274,8 @@ async function kdocsSearch(row: IntegrationConnection, query: string) {
     }
   }
 }
+const kdocsSearch = (row: IntegrationConnection, query: string, signal?: AbortSignal) =>
+  kdocsRequest(row, "search", { keyword: query, page_size: 5, type: "all" }, signal);
 
 function mask(value: string, ...secrets: Array<string | undefined>) {
   for (const secret of secrets) if (secret) value = value.replaceAll(secret, "[REDACTED]");
@@ -275,16 +353,37 @@ export async function verifyIntegration(row: IntegrationConnection): Promise<voi
   }
 }
 
-export type IntegrationItem = { title: string; snippet?: string; url?: string };
+export type IntegrationItem = { title: string; snippet?: string; url?: string; id?: string };
 export async function useIntegration(
   row: IntegrationConnection,
   action: "search" | "fetch",
   query: string,
+  signal?: AbortSignal,
 ): Promise<IntegrationItem[]> {
   if (row.testCode !== "OK") throw new ProviderError("NOT_VERIFIED");
   if (row.provider === "tinyfish")
-    return action === "fetch" ? tinyFetch(row, query) : tinySearch(row, query);
-  if (action === "search" && row.provider === "ima") return imaSearch(row, query);
-  if (action === "search" && row.provider === "kdocs") return kdocsSearch(row, query);
+    return action === "fetch" ? tinyFetch(row, query, signal) : tinySearch(row, query, signal);
+  if (action === "search" && row.provider === "ima") return imaSearch(row, query, signal);
+  if (action === "search" && row.provider === "kdocs") return kdocsSearch(row, query, signal);
   throw new ProviderError("ACTION_NOT_SUPPORTED");
+}
+
+export async function useIntegrationTool(
+  row: IntegrationConnection,
+  action: "search" | "fetch" | "read" | "knowledge",
+  input: Record<string, string>,
+  signal: AbortSignal,
+): Promise<IntegrationItem[]> {
+  if (row.testCode !== "OK") throw new ProviderError("NOT_VERIFIED");
+  if (action === "read" && row.provider === "kdocs")
+    return kdocsRequest(
+      row,
+      action,
+      { drive_id: input.drive_id!, file_id: input.file_id! },
+      signal,
+    );
+  if (action === "knowledge" && row.provider === "ima")
+    return imaContent(row, input.query!, input.knowledge_base_id!, signal);
+  if (action === "read" || action === "knowledge") throw new ProviderError("ACTION_NOT_SUPPORTED");
+  return useIntegration(row, action, action === "fetch" ? input.url! : input.query!, signal);
 }

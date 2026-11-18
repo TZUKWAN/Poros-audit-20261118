@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import type { IntegrationConnection, PrismaClient } from "@prisma/client";
+import type { IntegrationConnection, Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import type { Principal } from "./auth.js";
 import { env } from "./env.js";
@@ -89,7 +89,7 @@ export function connectionView(row: IntegrationConnection) {
   };
 }
 
-export function findConnection(db: PrismaClient, p: Owner, provider: Provider) {
+export function findConnection(db: Prisma.TransactionClient, p: Owner, provider: Provider) {
   return db.integrationConnection.findUnique({
     where: { organizationId_userId_provider: address(p, provider) },
   });
@@ -135,7 +135,11 @@ export async function saveConnection(
   });
 }
 
-export function recordConnectionCheck(db: PrismaClient, row: IntegrationConnection, code: string) {
+export function recordConnectionCheck(
+  db: Prisma.TransactionClient,
+  row: IntegrationConnection,
+  code: string,
+) {
   return db.integrationConnection.updateMany({
     where: {
       organizationId: row.organizationId,

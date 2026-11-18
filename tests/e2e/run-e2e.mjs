@@ -6,6 +6,8 @@ import { mkdir, appendFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
 import { createTestModel } from "../../scripts/poros-test-model.mjs";
+import { runPcWorkflows } from "./pc-workflows.mjs";
+const pcOnly = process.argv.includes("--pc");
 const database = "poros_e2e_" + randomUUID().replaceAll("-", ""),
   url = new URL(
     process.env.DATABASE_URL ||
@@ -33,10 +35,41 @@ let server,
   serverLog = "",
   created = false;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function startServer(port = "0") {
+  base = "";
+  serverLog = "";
+  server = spawn(process.execPath, ["dist/src/server/index.js"], {
+    env: { ...environment, PORT: port },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  server.stdout.on("data", (chunk) => {
+    serverLog = (serverLog + chunk.toString()).slice(-8000);
+    const match = serverLog.match(/Poros Enterprise API: (http:\/\/127\.0\.0\.1:\d+)/);
+    if (match) base = match[1];
+  });
+  server.stderr.on("data", (chunk) => {
+    serverLog = (serverLog + chunk.toString()).slice(-8000);
+  });
+  for (let i = 0; i < 100 && !base; i++) await pause(100);
+  assert.ok(base, "compiled server failed to start: " + serverLog);
+}
+async function stopServer() {
+  if (!server || server.exitCode !== null || server.signalCode !== null) return;
+  const exiting = new Promise((resolve) => server.once("close", resolve));
+  server.kill("SIGTERM");
+  await Promise.race([exiting, pause(5000)]);
+  if (server.exitCode === null && server.signalCode === null) server.kill("SIGKILL");
+  await exiting;
+}
 try {
-  execFileSync("docker", ["image", "inspect", "poros/dsh:0.2.2-rc.1-audit"], { stdio: "pipe" });
+  execFileSync(
+    "docker",
+    ["image", "inspect", process.env.POROS_DSH_IMAGE || "poros/dsh:0.2.2-rc.1-audit"],
+    { stdio: "pipe" },
+  );
   const verificationKey = randomUUID();
-  const verifiedModel = "mobile-wire-contract-model";
+  const verifiedModel = pcOnly ? "pc-wire-contract-model" : "mobile-wire-contract-model";
   verificationProvider = await createTestModel([], {
     model: verifiedModel,
     apiKey: verificationKey,
@@ -54,21 +87,7 @@ try {
     env: environment,
     stdio: "pipe",
   });
-  server = spawn(process.execPath, ["dist/src/server/index.js"], {
-    env: environment,
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
-  server.stdout.on("data", (chunk) => {
-    serverLog = (serverLog + chunk.toString()).slice(-8000);
-    const match = serverLog.match(/Poros Enterprise API: (http:\/\/127\.0\.0\.1:\d+)/);
-    if (match) base = match[1];
-  });
-  server.stderr.on("data", (chunk) => {
-    serverLog = (serverLog + chunk.toString()).slice(-8000);
-  });
-  for (let i = 0; i < 100 && !base; i++) await pause(100);
-  assert.ok(base, "compiled server failed to start: " + serverLog);
+  await startServer();
   const api = async (method, path, token, body, key) => {
     const response = await fetch(base + path, {
       method,
@@ -149,10 +168,7 @@ try {
     assert.ok(sse.text.includes("POROS-DSH-REAL-EXEC"));
     assert.ok(sse.text.includes("dsh(stub)"));
     const view = await api("GET", `/api/tasks/${r.json.taskId}`, employee);
-    assert.ok(
-      ["SUCCEEDED", "UNVERIFIED"].includes(view.json.task.status),
-      JSON.stringify(view.json),
-    );
+    assert.ok(view.json.task.status === "UNVERIFIED", JSON.stringify(view.json));
     const usage = view.json.runs[0].usage;
     assert.ok(Number.isInteger(usage.modelCalls) && usage.modelCalls > 0);
     assert.equal(usage.generation.modelCalls, usage.modelCalls);
@@ -198,126 +214,149 @@ try {
   browser = await chromium.launch(
     process.platform === "win32" ? { channel: "msedge", headless: true } : { headless: true },
   );
-  const employeePage = await browser.newPage(),
-    reviewPage = await browser.newPage();
-  const errors = [];
-  for (const page of [employeePage, reviewPage])
-    page.on("pageerror", (e) => errors.push(e.message));
-  const uiLogin = async (page, role) => {
-    await page.goto(base);
-    await page.getByLabel("组织 ID").fill("org-a");
-    await page.getByLabel("邮箱", { exact: true }).fill(`${role}@a.test`);
-    await page.getByLabel("密码", { exact: true }).fill(`${role}-pass-123`);
-    await page.getByRole("button", { name: "登录", exact: true }).click();
-    await page.getByRole("heading", { name: "Poros 工作台" }).waitFor();
-  };
-  await uiLogin(employeePage, "employee");
-  await uiLogin(reviewPage, "reviewer");
-  await employeePage.getByLabel("Agent", { exact: true }).selectOption(agentId);
-  await employeePage.getByLabel("任务", { exact: true }).fill("浏览器真实工作台执行检查");
-  await employeePage.getByRole("checkbox").check();
-  await employeePage.getByRole("button", { name: "提交任务", exact: true }).click();
-  await employeePage.getByText("本次敏感操作已提交", { exact: false }).waitFor();
-  await reviewPage.getByRole("tab", { name: "审批与规则" }).click();
-  await reviewPage.getByRole("button", { name: "刷新", exact: true }).click();
-  await reviewPage.getByRole("button", { name: "批准", exact: true }).click();
-  const toolResult = employeePage.getByText("dsh.tool_result", { exact: true });
-  await toolResult.waitFor({ timeout: 30000 });
-  assert.ok((await toolResult.locator("..").textContent()).includes("POROS-DSH-REAL-EXEC"));
-  await employeePage.getByText("已结束", { exact: true }).waitFor();
-  assert.equal(await employeePage.getByText("本次敏感操作已提交", { exact: false }).count(), 0);
-  assert.equal(await employeePage.getByRole("checkbox").isChecked(), false);
-  assert.equal(
-    await employeePage.getByRole("button", { name: "取消", exact: true }).isDisabled(),
-    true,
-  );
-  await mkdir(".audit/evidence", { recursive: true });
-  const screenshot = await employeePage.screenshot({
-    path: ".audit/evidence/workspace.png",
-    fullPage: true,
-  });
-  await employeePage.getByRole("tab", { name: "设置", exact: true }).click();
-  await employeePage.getByText("未配置", { exact: false }).first().waitFor();
-  const mobile = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    isMobile: true,
-    hasTouch: true,
-    deviceScaleFactor: 2,
-  });
-  const phone = await mobile.newPage();
-  phone.on("pageerror", (e) => errors.push(e.message));
-  await uiLogin(phone, "employee");
-  await phone.getByRole("button", { name: /浏览器真实工作台执行检查/ }).click();
-  await phone.getByText("dsh.tool_result", { exact: true }).waitFor({ timeout: 20000 });
-  await phone.getByRole("tab", { name: "设置", exact: true }).click();
-  await phone.getByRole("heading", { name: "个人集成设置" }).waitFor();
-  for (const name of ["大模型 API", "Kdocs 金山文档", "IMA 知识库", "TinyFish"]) {
-    await phone.getByRole("heading", { name, exact: true }).waitFor();
-  }
-  const modelPanel = phone
-    .getByRole("heading", { name: "大模型 API", exact: true })
-    .locator("../..");
-  await modelPanel.getByLabel("API Base URL").fill(verificationBase);
-  await modelPanel.getByLabel("模型 ID").fill(verifiedModel);
-  await modelPanel.getByLabel("模型 API Key").fill(verificationKey);
-  await modelPanel.getByRole("button", { name: "保存连接" }).click();
-  await modelPanel.getByText("已保存，请测试连接").waitFor();
-  assert.equal(await modelPanel.getByLabel("模型 API Key").inputValue(), "");
-  await modelPanel.getByRole("button", { name: "测试连接" }).click();
-  await modelPanel.getByText("已验证", { exact: true }).waitFor();
-  const pwa = await phone.evaluate(async () => {
-    const registration = await navigator.serviceWorker.ready;
-    const manifest = await (await fetch("/manifest.webmanifest")).json();
-    const assets = await Promise.all(
-      manifest.icons.map(async (icon) => (await fetch(icon.src)).ok),
-    );
-    const cacheUrls = (
-      await Promise.all((await caches.keys()).map(async (name) => (await caches.open(name)).keys()))
-    )
-      .flat()
-      .map((request) => request.url);
-    return {
-      scope: registration.scope,
-      mode: manifest.display,
-      assets,
-      cacheUrls,
-      overflow: document.documentElement.scrollWidth > innerWidth,
+  if (pcOnly) {
+    const db = new PrismaClient({ datasources: { db: { url: url.href } } });
+    try {
+      await runPcWorkflows({
+        browser,
+        base,
+        api,
+        login,
+        db,
+        modelFixture: { baseUrl: verificationBase, model: verifiedModel, key: verificationKey },
+        restart: async () => {
+          const port = new URL(base).port;
+          await stopServer();
+          await startServer(port);
+        },
+      });
+    } finally {
+      await db.$disconnect();
+    }
+  } else {
+    const employeePage = await browser.newPage(),
+      reviewPage = await browser.newPage();
+    const errors = [];
+    for (const page of [employeePage, reviewPage])
+      page.on("pageerror", (e) => errors.push(e.message));
+    const uiLogin = async (page, role) => {
+      await page.goto(base);
+      await page.getByLabel("组织 ID").fill("org-a");
+      await page.getByLabel("邮箱", { exact: true }).fill(`${role}@a.test`);
+      await page.getByLabel("密码", { exact: true }).fill(`${role}-pass-123`);
+      await page.getByRole("button", { name: "登录", exact: true }).click();
+      await page.getByRole("heading", { name: "Poros 工作台" }).waitFor();
     };
-  });
-  assert.equal(pwa.mode, "standalone");
-  assert.ok(pwa.scope.startsWith(base));
-  assert.deepEqual(pwa.assets, [true, true]);
-  assert.equal(pwa.overflow, false);
-  assert.ok(pwa.cacheUrls.every((url) => !new URL(url).pathname.startsWith("/api/")));
-  await phone.screenshot({ path: ".audit/evidence/mobile-settings.png", fullPage: true });
-  await mobile.setOffline(true);
-  await phone.reload();
-  await phone.getByRole("heading", { name: "连接已中断" }).waitFor();
-  await mobile.close();
-  assert.deepEqual(errors, []);
-  const screenshotHash = createHash("sha256").update(screenshot).digest("hex");
-  console.log(`UI screenshot: ${screenshot.length} bytes, sha256=${screenshotHash}`);
-  if (process.env.GITHUB_STEP_SUMMARY)
-    await appendFile(
-      process.env.GITHUB_STEP_SUMMARY,
-      [
-        "## Real DSH and headless UI evidence",
-        "- API/DSH/tools, independent approvals, rule reuse and cross-organization denial: PASS",
-        "- Headless Chromium UI, real tool_result, terminal status, consent reset and no page errors: PASS",
-        "- Mobile viewport, cross-device task recovery, four connection forms, real HTTP model probe against the wire-contract fixture, PWA manifest and offline cache boundary: PASS",
-        `- Screenshot generated by this browser run: ${screenshot.length} bytes; SHA-256: \`${screenshotHash}\``,
-        `- Executed commit: \`${process.env.GITHUB_SHA || "local"}\``,
-        "- Deterministic test MODEL only; no paid-model or external-connector acceptance.",
-        "- Artifact upload is unavailable due to account storage quota. No existing user artifacts were deleted; screenshot bytes/hash and this run's assertions are recorded here and in job logs. The local delivery includes a real browser screenshot.",
-        "",
-      ].join("\n"),
+    await uiLogin(employeePage, "employee");
+    await uiLogin(reviewPage, "reviewer");
+    await employeePage.getByLabel("Agent", { exact: true }).selectOption(agentId);
+    await employeePage.getByLabel("任务", { exact: true }).fill("浏览器真实工作台执行检查");
+    await employeePage.getByRole("checkbox").check();
+    await employeePage.getByRole("button", { name: "提交任务", exact: true }).click();
+    await employeePage.getByText("本次敏感操作已提交", { exact: false }).waitFor();
+    await reviewPage.getByRole("tab", { name: "审批与规则" }).click();
+    await reviewPage.getByRole("button", { name: "刷新", exact: true }).click();
+    await reviewPage.getByRole("button", { name: "批准", exact: true }).click();
+    const toolResult = employeePage.getByText("dsh.tool_result", { exact: true });
+    await toolResult.waitFor({ timeout: 30000 });
+    assert.ok((await toolResult.locator("..").textContent()).includes("POROS-DSH-REAL-EXEC"));
+    await employeePage.getByText("已结束", { exact: true }).waitFor();
+    assert.equal(await employeePage.getByText("本次敏感操作已提交", { exact: false }).count(), 0);
+    assert.equal(await employeePage.getByRole("checkbox").isChecked(), false);
+    assert.equal(
+      await employeePage.getByRole("button", { name: "取消", exact: true }).isDisabled(),
+      true,
     );
-  console.log(
-    "PASS UI: real headless browser login, explicit sensitive consent, independent reviewer decision, live DSH tool result and completed status; no browser errors",
-  );
-  console.log(
-    "PASS mobile: 390px layout, cross-device task replay, personal settings, HTTP probe fixture, installable PWA and offline page",
-  );
+    await mkdir(".audit/evidence", { recursive: true });
+    const screenshot = await employeePage.screenshot({
+      path: ".audit/evidence/workspace.png",
+      fullPage: true,
+    });
+    await employeePage.getByRole("tab", { name: "设置", exact: true }).click();
+    await employeePage.getByText("未配置", { exact: false }).first().waitFor();
+    const mobile = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+      deviceScaleFactor: 2,
+    });
+    const phone = await mobile.newPage();
+    phone.on("pageerror", (e) => errors.push(e.message));
+    await uiLogin(phone, "employee");
+    await phone.getByRole("button", { name: /浏览器真实工作台执行检查/ }).click();
+    await phone.getByText("dsh.tool_result", { exact: true }).waitFor({ timeout: 20000 });
+    await phone.getByRole("tab", { name: "设置", exact: true }).click();
+    await phone.getByRole("heading", { name: "个人集成设置" }).waitFor();
+    for (const name of ["大模型 API", "Kdocs 金山文档", "IMA 知识库", "TinyFish"]) {
+      await phone.getByRole("heading", { name, exact: true }).waitFor();
+    }
+    const modelPanel = phone
+      .getByRole("heading", { name: "大模型 API", exact: true })
+      .locator("../..");
+    await modelPanel.getByLabel("API Base URL").fill(verificationBase);
+    await modelPanel.getByLabel("模型 ID").fill(verifiedModel);
+    await modelPanel.getByLabel("模型 API Key").fill(verificationKey);
+    await modelPanel.getByRole("button", { name: "保存连接" }).click();
+    await modelPanel.getByText("已保存，请测试连接").waitFor();
+    assert.equal(await modelPanel.getByLabel("模型 API Key").inputValue(), "");
+    await modelPanel.getByRole("button", { name: "测试连接" }).click();
+    await modelPanel.getByText("已验证", { exact: true }).waitFor();
+    const pwa = await phone.evaluate(async () => {
+      const registration = await navigator.serviceWorker.ready;
+      const manifest = await (await fetch("/manifest.webmanifest")).json();
+      const assets = await Promise.all(
+        manifest.icons.map(async (icon) => (await fetch(icon.src)).ok),
+      );
+      const cacheUrls = (
+        await Promise.all(
+          (await caches.keys()).map(async (name) => (await caches.open(name)).keys()),
+        )
+      )
+        .flat()
+        .map((request) => request.url);
+      return {
+        scope: registration.scope,
+        mode: manifest.display,
+        assets,
+        cacheUrls,
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    assert.equal(pwa.mode, "standalone");
+    assert.ok(pwa.scope.startsWith(base));
+    assert.deepEqual(pwa.assets, [true, true]);
+    assert.equal(pwa.overflow, false);
+    assert.ok(pwa.cacheUrls.every((url) => !new URL(url).pathname.startsWith("/api/")));
+    await phone.screenshot({ path: ".audit/evidence/mobile-settings.png", fullPage: true });
+    await mobile.setOffline(true);
+    await phone.reload();
+    await phone.getByRole("heading", { name: "连接已中断" }).waitFor();
+    await mobile.close();
+    assert.deepEqual(errors, []);
+    const screenshotHash = createHash("sha256").update(screenshot).digest("hex");
+    console.log(`UI screenshot: ${screenshot.length} bytes, sha256=${screenshotHash}`);
+    if (process.env.GITHUB_STEP_SUMMARY)
+      await appendFile(
+        process.env.GITHUB_STEP_SUMMARY,
+        [
+          "## Real DSH and headless UI evidence",
+          "- API/DSH/tools, independent approvals, rule reuse and cross-organization denial: PASS",
+          "- Headless Chromium UI, real tool_result, terminal status, consent reset and no page errors: PASS",
+          "- Mobile viewport, cross-device task recovery, four connection forms, real HTTP model probe against the wire-contract fixture, PWA manifest and offline cache boundary: PASS",
+          `- Screenshot generated by this browser run: ${screenshot.length} bytes; SHA-256: \`${screenshotHash}\``,
+          `- Executed commit: \`${process.env.GITHUB_SHA || "local"}\``,
+          "- Deterministic test MODEL only; no paid-model or external-connector acceptance.",
+          "- Artifact upload is unavailable due to account storage quota. No existing user artifacts were deleted; screenshot bytes/hash and this run's assertions are recorded here and in job logs. The local delivery includes a real browser screenshot.",
+          "",
+        ].join("\n"),
+      );
+    console.log(
+      "PASS UI: real headless browser login, explicit sensitive consent, independent reviewer decision, live DSH tool result and completed status; no browser errors",
+    );
+    console.log(
+      "PASS mobile: 390px layout, cross-device task replay, personal settings, HTTP probe fixture, installable PWA and offline page",
+    );
+  }
   console.log(
     "MODEL channel: dsh(stub) = real DSH/tools + deterministic test MODEL. No paid/real-model acceptance claimed.",
   );
@@ -327,11 +366,7 @@ try {
     verificationProvider.closeAllConnections();
     await new Promise((resolve) => verificationProvider.close(resolve));
   }
-  if (server) {
-    server.kill("SIGTERM");
-    await Promise.race([new Promise((resolve) => server.once("close", resolve)), pause(5000)]);
-    if (server.exitCode === null) server.kill("SIGKILL");
-  }
+  await stopServer();
   if (created && /^poros_e2e_[a-f0-9]{32}$/.test(database))
     await control.$executeRawUnsafe(`DROP DATABASE "${database}" WITH (FORCE)`);
   await control.$disconnect();

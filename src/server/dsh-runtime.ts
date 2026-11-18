@@ -4,6 +4,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { env } from "./env.js";
 import { createRunModelProxy } from "./model-proxy.js";
+import type { describeProviderError } from "./provider-errors.js";
+import { runtimeToolName } from "./capability-catalog.js";
 import { personalModelSource, type ModelConnection } from "./integration-connections.js";
 import { StringDecoder } from "node:string_decoder";
 export interface DshGrant {
@@ -11,6 +13,7 @@ export interface DshGrant {
   name: string;
   version?: string;
   source?: string;
+  scopeNote?: string;
 }
 export interface DshEvent {
   type: string;
@@ -30,8 +33,13 @@ export interface DshRunOptions {
   model?: ModelConnection;
   signal?: AbortSignal;
   onEvent?: (event: DshEvent) => Promise<void>;
+  brokerTools?: Array<{ name: string; description: string; input: Record<string, "string"> }>;
+  invokeTool?: (name: string, input: unknown, signal: AbortSignal) => Promise<unknown>;
+  authorizeTool?: (name: string) => Promise<void>;
+  authorizeModel?: () => Promise<void>;
   /** Deterministic MODEL fixture only. Real DSH/tool bodies. Production rejects this. */
   testCalls?: Array<{ name: string; arguments: Record<string, unknown> }>;
+  testSequence?: boolean;
 }
 export interface DshRunResult {
   modelCalls: number | null;
@@ -42,20 +50,10 @@ export interface DshRunResult {
   events: DshEvent[];
   diagnostics: string;
   modelChannel: "configured" | "stub";
+  modelFailure?: ReturnType<typeof describeProviderError>;
 }
-const TOOL_MAP: Record<string, string[]> = {
-  bash: ["bash"],
-  read: ["read"],
-  write: ["write"],
-  edit: ["edit"],
-  glob: ["glob"],
-  grep: ["grep"],
-  working_directory: ["working_directory"],
-  "web.fetch": ["web_fetch"],
-  "web.search": ["web_search"],
-};
 export function grantedToolNames(grants: DshGrant[]): Set<string> {
-  return new Set(grants.filter((g) => g.kind === "TOOL").flatMap((g) => TOOL_MAP[g.name] ?? []));
+  return new Set(grants.map(runtimeToolName).filter((name): name is string => name !== null));
 }
 export function grantedEntryIds(grants: DshGrant[]): Set<string> {
   const tools = grantedToolNames(grants);
@@ -124,6 +122,7 @@ export function buildProfilePatch(opts: {
       "skill-filesystem",
       "tool-skill",
       "mcp-resources",
+      "tool-web",
       "llm-deepseek",
       "llm-deepseek-account",
       "agent-instructions",
@@ -135,8 +134,11 @@ export function dockerCommand(
   args: string[],
   input = "",
   signal?: AbortSignal,
-  onLine?: (line: string) => void,
+  onLine?: (line: string, send: (value: unknown) => Promise<void>) => void,
+  interactive = false,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
+  // Node readline treats these Unicode characters as delimiters even inside a JSON string.
+  const frame = (json: string) => json.replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029") + "\n";
   return new Promise((resolve, reject) => {
     const child = spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     let stdout = "",
@@ -144,6 +146,16 @@ export function dockerCommand(
       pending = "",
       bytes = 0;
     const decoder = new StringDecoder("utf8");
+    const send = (value: unknown) =>
+      new Promise<void>((resolve, reject) => {
+        if (child.stdin.destroyed || !child.stdin.writable) {
+          reject(new Error("DSH bridge input is closed"));
+          return;
+        }
+        child.stdin.write(frame(JSON.stringify(value)), (error) =>
+          error ? reject(error) : resolve(),
+        );
+      });
     const abort = () => {
       child.kill();
       reject(new Error("DSH cancelled/aborted or timed out"));
@@ -162,7 +174,7 @@ export function dockerCommand(
         pending += decoder.write(d);
         let index: number;
         while ((index = pending.indexOf("\n")) >= 0) {
-          onLine(pending.slice(0, index));
+          onLine(pending.slice(0, index), send);
           pending = pending.slice(index + 1);
         }
       } else stdout += decoder.write(d);
@@ -179,10 +191,11 @@ export function dockerCommand(
       if (deadline) clearTimeout(deadline);
       signal?.removeEventListener("abort", abort);
       pending += decoder.end();
-      if (pending) onLine?.(pending);
+      if (pending) onLine?.(pending, send);
       resolve({ code: code ?? -1, stdout, stderr });
     });
-    child.stdin.end(input);
+    if (interactive) child.stdin.write(frame(input));
+    else child.stdin.end(input);
   });
 }
 export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> {
@@ -191,7 +204,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
     throw new Error("DSH requires organization, Agent and task authorization context");
   if (Buffer.byteLength(opts.task) > 80000) throw new Error("Task exceeds size quota");
   const stub = env.dshModelStub();
-  if (process.env.NODE_ENV === "production" && (stub || opts.testCalls))
+  if (process.env.NODE_ENV === "production" && (stub || opts.testCalls || opts.testSequence))
     throw new Error("Production forbids DSH model fixtures");
   if (opts.model && stub) throw new Error("Personal model cannot run through a test model");
   if (!stub && !opts.model && !env.deepseekApiKey())
@@ -210,8 +223,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
   const scope = deploymentScope();
   const proxy = stub ? null : await createRunModelProxy(undefined, model);
   const id = createHash("sha256").update(opts.runId).digest("hex").slice(0, 24),
-    name = `poros-run-${id}`,
-    network = `poros-net-${id}`;
+    name = `poros-run-${id}`;
   const ownerToken = randomUUID();
   const ctrl = new AbortController(),
     abort = () => ctrl.abort();
@@ -231,7 +243,84 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
     diagnostics: "",
     modelChannel: stub ? "stub" : "configured",
   };
-  const dispatch = (line: string) => {
+  const requests = new Map<string, AbortController>();
+  const allowedBrokerTools = new Set(opts.brokerTools?.map((tool) => tool.name) ?? []);
+  const allowedTools = grantedToolNames(opts.grants ?? []);
+  let toolRequests = 0;
+  const relay = async (e: DshEvent, send: (value: unknown) => Promise<void>) => {
+    if (typeof e.id !== "string" || !/^[a-f0-9-]{36}$/.test(e.id)) return;
+    const id = e.id;
+    if (e.type === "bridge.cancel") {
+      requests.get(id)?.abort();
+      return;
+    }
+    if (requests.has(id)) return;
+    const request = new AbortController();
+    const signal = AbortSignal.any([ctrl.signal, request.signal, AbortSignal.timeout(35000)]);
+    requests.set(id, request);
+    const reply = (part: Record<string, unknown>) => send({ type: "bridge.reply", id, ...part });
+    const chunk = (data: string | Uint8Array) => {
+      const bytes = typeof data === "string" ? Buffer.from(data) : Buffer.from(data);
+      return reply({ chunk: bytes.toString("base64") });
+    };
+    let sentHeaders = false;
+    try {
+      if (requests.size > 4) {
+        await reply({ status: 429, done: true });
+      } else if (e.route === "model" && proxy) {
+        await opts.authorizeModel?.();
+        const response = await fetch(proxy.baseURL + "/chat/completions", {
+          method: "POST",
+          signal,
+          headers: { "content-type": "application/json", authorization: "Bearer " + proxy.token },
+          body: JSON.stringify(e.body),
+          redirect: "error",
+        });
+        await reply({ status: response.status, contentType: response.headers.get("content-type") });
+        sentHeaders = true;
+        if (response.body) {
+          const reader = response.body.getReader();
+          try {
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              await chunk(value);
+            }
+          } finally {
+            await reader.cancel().catch(() => {});
+          }
+        }
+        await reply({ done: true });
+      } else if (e.route === "tool" && opts.invokeTool) {
+        const body = e.body as { name?: string; input?: unknown } | undefined;
+        if (!body?.name || !allowedBrokerTools.has(body.name) || ++toolRequests > 64) {
+          await reply({ status: 403, done: true });
+          return;
+        }
+        const output = await opts.invokeTool(body.name, body.input, signal);
+        await reply({ status: 200, contentType: "application/json" });
+        sentHeaders = true;
+        await chunk(JSON.stringify(output));
+        await reply({ done: true });
+      } else if (e.route === "authorize") {
+        const body = e.body as { name?: string } | undefined;
+        if (!body?.name || !allowedTools.has(body.name)) {
+          await reply({ status: 403, done: true });
+          return;
+        }
+        await opts.authorizeTool?.(body.name);
+        await reply({ status: 204, done: true });
+      } else {
+        await reply({ status: 403, done: true });
+      }
+    } catch {
+      if (!sentHeaders) await reply({ status: 502, done: true }).catch(() => {});
+      else await reply({ abort: true }).catch(() => {});
+    } finally {
+      requests.delete(id);
+    }
+  };
+  const dispatch = (line: string, send: (value: unknown) => Promise<void>) => {
     let e: DshEvent;
     try {
       e = JSON.parse(line) as DshEvent;
@@ -239,6 +328,10 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
       return;
     }
     if (!e || typeof e.type !== "string") return;
+    if (e.type === "bridge.request" || e.type === "bridge.cancel") {
+      void relay(e, send).catch(() => {});
+      return;
+    }
     if (events.length >= 2000) {
       streamError = new Error("DSH event quota exceeded");
       ctrl.abort();
@@ -260,26 +353,6 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
       });
   };
   try {
-    if (!stub) {
-      const net = await dockerCommand(
-        [
-          "network",
-          "create",
-          "--label",
-          "org.poros.owner=runtime",
-          "--label",
-          `org.poros.deployment=${scope}`,
-          "--label",
-          `org.poros.run=${opts.runId}`,
-          "--label",
-          `org.poros.token=${ownerToken}`,
-          network,
-        ],
-        "",
-        ctrl.signal,
-      );
-      if (net.code) throw new Error("Cannot create isolated DSH network");
-    }
     const create = await dockerCommand(
       [
         "create",
@@ -311,9 +384,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
         "--cpus",
         "1",
         "--network",
-        stub ? "none" : network,
-        "--add-host",
-        "host.docker.internal:host-gateway",
+        "none",
         "--tmpfs",
         "/home/poros:rw,noexec,nosuid,size=268435456,uid=10001,gid=10001,mode=0700",
         "--tmpfs",
@@ -336,10 +407,11 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
         persona: opts.persona,
         grants: opts.grants,
         stub,
-        modelBaseURL: proxy?.baseURL,
+        modelBaseURL: "http://127.0.0.1:9918/v1",
         modelId: model?.model,
       }),
-      allowedTools: [...grantedToolNames(opts.grants ?? [])],
+      allowedTools: [...allowedTools],
+      brokerTools: opts.brokerTools ?? [],
       context: {
         organizationId: opts.organizationId,
         projectId: opts.projectId,
@@ -351,6 +423,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
       stub,
       key: stub ? "test-fixture" : proxy!.token,
       testCalls: stub ? opts.testCalls : undefined,
+      testSequence: stub ? opts.testSequence : undefined,
       container: name,
       timeoutMs: opts.timeoutMs ?? 180000,
     });
@@ -359,6 +432,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
       input,
       ctrl.signal,
       dispatch,
+      true,
     );
     await writes;
     if (streamError) throw streamError;
@@ -366,6 +440,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
     result.modelCalls = proxy
       ? proxy.upstreamCalls()
       : events.filter((e) => e.type === "status" && e.phase === "step_end").length;
+    result.modelFailure = proxy?.failure();
     if (executed.code !== 0) result.error = `DSH process exit ${executed.code}`;
     if (!result.completed && !result.error) result.error = "DSH terminated without done event";
     return result;
@@ -382,10 +457,10 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
     throw error;
   } finally {
     clearTimeout(timer);
+    for (const request of requests.values()) request.abort();
     opts.signal?.removeEventListener("abort", abort);
     try {
       await removeOwnedResource("container", name, opts.runId, ownerToken, scope);
-      if (!stub) await removeOwnedResource("network", network, opts.runId, ownerToken, scope);
     } finally {
       await proxy?.close();
     }

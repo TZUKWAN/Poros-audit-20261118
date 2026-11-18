@@ -4,11 +4,9 @@ import { randomUUID, createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   runDshSession,
-  dockerCommand,
   deploymentScope,
   removeOwnedResource,
 } from "../../src/server/dsh-runtime.ts";
-import { createRunModelProxy } from "../../src/server/model-proxy.ts";
 import { createTestModel } from "../../scripts/poros-test-model.mjs";
 
 process.env.POROS_DSH_MODEL_STUB = "1";
@@ -42,7 +40,20 @@ assert.ok(
 );
 console.log("PASS ISO-06 quotes/multiline/heredoc/Unicode/long task stays data");
 
-for (const name of ["bash", "skill", "mcp", "unknown_plugin"]) {
+for (const name of [
+  "bash",
+  "read",
+  "write",
+  "edit",
+  "glob",
+  "grep",
+  "working_directory",
+  "web_search",
+  "web_fetch",
+  "skill",
+  "mcp",
+  "unknown_plugin",
+]) {
   const denied = await run({
     grants: [],
     testCalls: [
@@ -87,6 +98,8 @@ const a = run({
 await ready;
 const meta = JSON.parse(execFileSync("docker", ["inspect", aContainer], { encoding: "utf8" }))[0];
 assert.equal(meta.Config.Labels["org.poros.deployment"], deploymentScope());
+assert.equal(meta.HostConfig.NetworkMode, "none");
+assert.deepEqual(meta.HostConfig.ExtraHosts ?? [], []);
 await removeOwnedResource(
   "container",
   aContainer,
@@ -175,45 +188,103 @@ assert.equal(
 );
 console.log("PASS ISO-06 real executing tool timeout terminates processes and cleans container");
 
-const proxy = await createRunModelProxy(
-  async () =>
-    new Response("model-transport-fixture", { headers: { "content-type": "text/plain" } }),
-);
-const probeName = "poros-proxy-probe-" + randomUUID();
-try {
-  const code =
-    "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',async()=>{const p=JSON.parse(s);const r=await fetch('http://host.docker.internal:'+p.port+'/v1/chat/completions',{method:'POST',headers:{authorization:'Bearer '+p.token},body:JSON.stringify({messages:[]}),signal:AbortSignal.timeout(8000)});console.log(r.status,await r.text());if(r.status!==200)process.exitCode=1;});";
-  const transport = await dockerCommand(
-    [
-      "run",
-      "--rm",
-      "-i",
-      "--name",
-      probeName,
-      "--add-host",
-      "host.docker.internal:host-gateway",
-      "--user",
-      "10001:10001",
-      "--read-only",
-      "--cap-drop",
-      "ALL",
-      "--entrypoint",
-      "node",
-      "poros/dsh:0.2.2-rc.1-audit",
-      "-e",
-      code,
-    ],
-    JSON.stringify({ port: proxy.port, token: proxy.token }),
-  );
-  assert.equal(transport.code, 0, transport.stderr);
-  assert.ok(transport.stdout.includes("200 model-transport-fixture"));
-  console.log(
-    "PASS ISO-06 container reaches authenticated run proxy; provider credential remains on host (test upstream only)",
-  );
-} finally {
-  await dockerCommand(["rm", "-f", probeName]);
-  await proxy.close();
+const nativeCalls = [
+  { name: "working_directory", arguments: {} },
+  { name: "write", arguments: { file_path: "poros-tool-test.txt", content: "before-change\n" } },
+  {
+    name: "edit",
+    arguments: {
+      file_path: "poros-tool-test.txt",
+      old_string: "before-change",
+      new_string: "after-change",
+    },
+  },
+  { name: "read", arguments: { file_path: "poros-tool-test.txt" } },
+  { name: "glob", arguments: { pattern: "*.txt" } },
+  { name: "grep", arguments: { pattern: "after-change", path: "." } },
+];
+const native = await run({
+  grants: nativeCalls.map((call) => ({ kind: "TOOL", name: call.name })),
+  testCalls: nativeCalls,
+  testSequence: true,
+});
+const nativeResults = native.events.filter((event) => event.type === "tool_result");
+assert.equal(nativeResults.length, nativeCalls.length, JSON.stringify(native.events));
+const nativeMarkers = [
+  "/home/poros/work",
+  "poros-tool-test.txt",
+  "poros-tool-test.txt",
+  "after-change",
+  "poros-tool-test.txt",
+  "after-change",
+];
+for (const [i, result] of nativeResults.entries()) {
+  assert.equal(result.status, "completed", JSON.stringify(result));
+  assert.ok(JSON.stringify(result).includes(nativeMarkers[i]), JSON.stringify(result));
 }
+console.log(
+  "PASS ISO-06 actual working_directory, write, edit, read, glob and grep execute in the same isolated workspace",
+);
+
+const revoked = await run({
+  grants: [{ kind: "TOOL", name: "bash" }],
+  authorizeTool: async () => {
+    throw new Error("test policy was revoked while task was admitted");
+  },
+  testCalls: [
+    {
+      name: "bash",
+      arguments: { command: "touch /home/poros/INJECTED", description: "real-time revocation" },
+    },
+  ],
+});
+assert.ok(
+  revoked.events.some(
+    (event) => event.type === "policy" && event.tool === "bash" && event.authorized === false,
+  ),
+);
+assert.ok(revoked.events.some((event) => event.type === "boundary" && event.injected === false));
+console.log(
+  "PASS ISO-06 live authorization refusal prevents native tool execution with frozen grant",
+);
+
+const brokerCalls = [
+  { name: "web_search", arguments: { query: "Poros test query" } },
+  { name: "web_fetch", arguments: { url: "https://example.com/" } },
+  { name: "poros_skill_review", arguments: {} },
+  { name: "poros_knowledge_project_file", arguments: {} },
+];
+const brokerInputs = [];
+const broker = await run({
+  grants: [
+    { kind: "TOOL", name: "web.search" },
+    { kind: "TOOL", name: "web.fetch" },
+    { kind: "SKILL", name: "review", source: "poros-catalog:test-review", version: "1" },
+    { kind: "KNOWLEDGE", name: "project_file", source: "poros-catalog:test-file", version: "1" },
+  ],
+  brokerTools: brokerCalls.map((c) => ({
+    name: c.name,
+    description: "Explicit tool transport fixture",
+    input: Object.fromEntries(Object.keys(c.arguments).map((key) => [key, "string"])),
+  })),
+  invokeTool: async (name, args) => {
+    brokerInputs.push({ name, arguments: args });
+    return { ok: true, items: [{ title: "test-tool-transport:" + name }] };
+  },
+  testCalls: brokerCalls,
+  testSequence: true,
+});
+assert.deepEqual(brokerInputs, brokerCalls);
+for (const call of brokerCalls)
+  assert.ok(
+    broker.events.some(
+      (e) =>
+        e.type === "tool_result" && JSON.stringify(e).includes("test-tool-transport:" + call.name),
+    ),
+  );
+console.log(
+  "PASS ISO-06 DSH invokes exact registered web, Skill and Knowledge tools through attached streams (explicit provider contract fixture)",
+);
 
 // Real container, DSH and tool execution through an OpenAI wire-contract fixture.
 const model = "custom-contract-chat";
@@ -236,6 +307,15 @@ try {
       { kind: "TOOL", name: "bash" },
     ],
     timeoutMs: 45000,
+    onEvent: async (event) => {
+      if (event.type !== "container") return;
+      const actual = JSON.parse(
+        execFileSync("docker", ["inspect", event.name], { encoding: "utf8" }),
+      )[0];
+      assert.equal(actual.HostConfig.NetworkMode, "none");
+      assert.deepEqual(actual.HostConfig.ExtraHosts ?? [], []);
+      assert.ok(actual.Mounts.every((mount) => mount.Type !== "bind"));
+    },
   });
   assert.equal(
     runResult.completed,
@@ -252,7 +332,7 @@ try {
   );
   assert.ok(!JSON.stringify(runResult).includes(apiKey));
   console.log(
-    "PASS ISO-06 actual DSH executes with its frozen custom model through the host proxy (explicit OpenAI contract fixture)",
+    "PASS ISO-06 actual DSH with no network reaches its frozen custom model through the Docker attached stream (explicit OpenAI contract fixture)",
   );
 } finally {
   if (oldBases === undefined) delete process.env.POROS_LOCAL_MODEL_BASES;

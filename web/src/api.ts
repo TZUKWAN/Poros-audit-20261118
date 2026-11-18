@@ -91,3 +91,29 @@ export async function logout(): Promise<boolean> {
   setToken(null);
   return true;
 }
+
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function download(path: string, filename: string): Promise<string | null> {
+  try {
+    const response = await fetch(path, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!response.ok)
+      return (
+        (await response.json().catch(() => ({}))).error ?? `下载失败（HTTP ${response.status}）`
+      );
+    saveBlob(await response.blob(), filename);
+    return null;
+  } catch {
+    return "下载连接中断，请重试";
+  }
+}

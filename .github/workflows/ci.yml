@@ -81,3 +81,5 @@ jobs:
       - run: node node_modules/playwright-core/cli.js install --with-deps chromium
       - name: Real DSH/tools plus explicit test model and headless UI
         run: npm run e2e
+      - name: PC workflow acceptance on two desktop viewports
+        run: npm run e2e:pc

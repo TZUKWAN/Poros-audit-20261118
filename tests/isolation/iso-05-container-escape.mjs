@@ -21,7 +21,7 @@ try {
     "no-new-privileges:true",
     "--tmpfs",
     "/home/poros:uid=10001,gid=10001,mode=0700",
-    "poros/dsh:0.2.2-rc.1-audit",
+    process.env.POROS_DSH_IMAGE || "poros/dsh:0.2.2-rc.1-audit",
     "sleep",
     "infinity",
   ]);

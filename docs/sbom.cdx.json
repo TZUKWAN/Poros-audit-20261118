@@ -2,10 +2,10 @@
   "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:a4e5fca4-4ef2-44e2-a03d-8ec83dd9c015",
+  "serialNumber": "urn:uuid:b0fca787-b5fe-4613-9c41-d47b11733abb",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-17T19:39:09.784Z",
+    "timestamp": "2026-11-18T10:27:53.182Z",
     "lifecycles": [
       {
         "phase": "build"
@@ -21,7 +21,7 @@
     "component": {
       "bom-ref": "poros@1.0.0",
       "type": "library",
-      "name": "pi-scenario",
+      "name": ".tmp-poros-pc-2b5e84",
       "version": "1.0.0",
       "scope": "required",
       "description": "Poros Enterprise — agent development, configuration, collaboration and governance platform on a dedicated isolated DSH runtime.",
@@ -3478,6 +3478,72 @@
       ]
     },
     {
+      "bom-ref": "@napi-rs/canvas@1.1.1",
+      "type": "library",
+      "name": "@napi-rs/canvas",
+      "version": "1.1.1",
+      "scope": "optional",
+      "description": "Canvas for Node.js with skia backend",
+      "purl": "pkg:npm/%40napi-rs/canvas@1.1.1",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas/-/canvas-1.1.1.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/Brooooooklyn/canvas.git"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "53236ca67c74ad772501330e057896832d71b565125039b850e3baf983bcc73c9529a651a6f2be4a52520ad468488f49fe612a9252623d8b6ba0dd41fa180b5e"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@napi-rs/canvas-win32-x64-msvc@1.1.1",
+      "type": "library",
+      "name": "@napi-rs/canvas-win32-x64-msvc",
+      "version": "1.1.1",
+      "scope": "optional",
+      "description": "Canvas for Node.js with skia backend",
+      "purl": "pkg:npm/%40napi-rs/canvas-win32-x64-msvc@1.1.1",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-win32-x64-msvc/-/canvas-win32-x64-msvc-1.1.1.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/Brooooooklyn/canvas.git"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e867b5005d5254ef98a636b0f483dc0299bde64ad1dc6437d87815aa521c91b37f5aa5255984b48676fc64876edded086eeb5b26077c0f6a9279bdbf09da5b77"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
       "bom-ref": "@pinojs/redact@0.4.0",
       "type": "library",
       "name": "@pinojs/redact",
@@ -5997,6 +6063,48 @@
         {
           "alg": "SHA-512",
           "content": "648edb538da66575ca1e7fea34b130d88adb888354ed7e7ebdf81d8b10479023696165e32a07d0fcffaec866f90a338b07d51c9d37a0debca542d5768729b8e1"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@types/yauzl@3.4.0",
+      "type": "library",
+      "name": "@types/yauzl",
+      "version": "3.4.0",
+      "scope": "required",
+      "description": "TypeScript definitions for yauzl",
+      "purl": "pkg:npm/%40types/yauzl@3.4.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:development",
+          "value": "true"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/yauzl/-/yauzl-3.4.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/yauzl"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "3513e7e70ea1f1d85c9e6c7760845072a332c18ffe9cd0ffb8e9097acb1e75cae8c0edc2d00b2c1e9ded309a71280c0e8453a8d0e575cbd56db02e616ca28103"
         }
       ],
       "licenses": [
@@ -12678,6 +12786,81 @@
       ]
     },
     {
+      "bom-ref": "pdfjs-dist@6.5.438",
+      "type": "library",
+      "name": "pdfjs-dist",
+      "version": "6.5.438",
+      "scope": "required",
+      "description": "Generic build of Mozilla's PDF.js library.",
+      "purl": "pkg:npm/pdfjs-dist@6.5.438",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.5.438.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/mozilla/pdf.js.git"
+        },
+        {
+          "type": "website",
+          "url": "https://mozilla.github.io/pdf.js/"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "be0f0fc35c7e0052b2e00303be1b9697970e615f1debdf14a0400da0516173bf61a970e7650aa7397a31c371c6f74ed61ce8352583af2e13fbe7a6e875d171a4"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pend@1.2.0",
+      "type": "library",
+      "name": "pend",
+      "version": "1.2.0",
+      "scope": "required",
+      "author": "Andrew Kelley <superjoe30@gmail.com>",
+      "description": "dead-simple optimistic async helper",
+      "purl": "pkg:npm/pend@1.2.0",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/pend/-/pend-1.2.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git://github.com/andrewrk/node-pend.git"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/andrewrk/node-pend/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "1776acbf8d94b97721773b7ec57a9f5b538695505efa6c5ada6a88d29839c801d93ef16663763a76b49ffc643503ce9681610df4ace1fd6ae029aea219c1d72e"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
       "bom-ref": "perfect-debounce@1.0.0",
       "type": "library",
       "name": "perfect-debounce",
@@ -14071,6 +14254,36 @@
         {
           "license": {
             "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "saxes@6.0.0",
+      "type": "library",
+      "name": "saxes",
+      "version": "6.0.0",
+      "scope": "required",
+      "author": "Louis-Dominique Dubeau <ldd@lddubeau.com>",
+      "description": "An evented streaming XML parser in JavaScript",
+      "purl": "pkg:npm/saxes@6.0.0",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/saxes/-/saxes-6.0.0.tgz"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "c4083b48e9c486b9b9cc8de9b8e38acb2d4e31c32520965834963bc4b0704b37b452384f2e759f8f6185d84a53d239b368928858a1cbb1a4926a37f7e5b7189c"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC"
           }
         }
       ]
@@ -15568,6 +15781,36 @@
       ]
     },
     {
+      "bom-ref": "xmlchars@2.2.0",
+      "type": "library",
+      "name": "xmlchars",
+      "version": "2.2.0",
+      "scope": "required",
+      "author": "Louis-Dominique Dubeau <ldd@lddubeau.com>",
+      "description": "Utilities for determining if characters belong to character classes defined by the XML specs.",
+      "purl": "pkg:npm/xmlchars@2.2.0",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/xmlchars/-/xmlchars-2.2.0.tgz"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "2599c328af01d11083c3ce0535d0c022964af89b89c3eb3b2f3f2792c23b488b94dd45c926c954b61b22fae5815183b03c5c16ed6ecf44b45f50aa718ed8c50b"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
       "bom-ref": "yallist@3.1.1",
       "type": "library",
       "name": "yallist",
@@ -15602,6 +15845,48 @@
         {
           "license": {
             "id": "ISC"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "yauzl@3.4.0",
+      "type": "library",
+      "name": "yauzl",
+      "version": "3.4.0",
+      "scope": "required",
+      "author": "Josh Wolfe <thejoshwolfe@gmail.com>",
+      "description": "yet another unzip library for node",
+      "purl": "pkg:npm/yauzl@3.4.0",
+      "properties": [],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/yauzl/-/yauzl-3.4.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/thejoshwolfe/yauzl.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/thejoshwolfe/yauzl"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/thejoshwolfe/yauzl/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "8c81fdc8b47dc2aaf4c0e4b44e906fa3f83fd948191f9a9e3d56e3811962885d0162f399c9a0649cab05fb1f4886dd0eeacaa09c1f77ac220274e64579c26e0f"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
           }
         }
       ]
@@ -15733,21 +16018,26 @@
         "bcryptjs@3.0.2",
         "fastify@5.12.8",
         "jsonwebtoken@9.0.2",
+        "pdfjs-dist@6.5.438",
         "pino@9.5.0",
         "react@19.3.1",
         "react-dom@19.3.1",
+        "saxes@6.0.0",
+        "yauzl@3.4.0",
         "zod@4.6.7",
         "@tailwindcss/vite@4.3.5",
         "@types/jsonwebtoken@9.0.10",
         "@types/node@24.19.0",
         "@types/react@19.3.0",
         "@types/react-dom@19.3.0",
+        "@types/yauzl@3.4.0",
         "@vitejs/plugin-react@5.2.0",
         "@vitest/coverage-v8@5.1.0",
         "esbuild@0.28.2",
         "eslint@9.39.5",
         "eslint-config-prettier@10.1.8",
         "husky@9.1.7",
+        "@poros/picomatch-secure@4.0.7+poros.security.1",
         "playwright-core@1.65.1",
         "prettier@3.9.10",
         "prisma@6.19.0",
@@ -15756,8 +16046,7 @@
         "typescript@5.9.3",
         "typescript-eslint@8.73.0",
         "vite@7.3.8",
-        "vitest@5.1.0",
-        "@poros/picomatch-secure@4.0.7+poros.security.1"
+        "vitest@5.1.0"
       ]
     },
     {
@@ -16368,6 +16657,16 @@
       "dependsOn": []
     },
     {
+      "ref": "@napi-rs/canvas@1.1.1",
+      "dependsOn": [
+        "@napi-rs/canvas-win32-x64-msvc@1.1.1"
+      ]
+    },
+    {
+      "ref": "@napi-rs/canvas-win32-x64-msvc@1.1.1",
+      "dependsOn": []
+    },
+    {
       "ref": "@pinojs/redact@0.4.0",
       "dependsOn": []
     },
@@ -16860,6 +17159,12 @@
       "ref": "@types/react-dom@19.3.0",
       "dependsOn": [
         "@types/react@19.3.0"
+      ]
+    },
+    {
+      "ref": "@types/yauzl@3.4.0",
+      "dependsOn": [
+        "@types/node@24.19.0"
       ]
     },
     {
@@ -17906,6 +18211,16 @@
       "dependsOn": []
     },
     {
+      "ref": "pdfjs-dist@6.5.438",
+      "dependsOn": [
+        "@napi-rs/canvas@1.1.1"
+      ]
+    },
+    {
+      "ref": "pend@1.2.0",
+      "dependsOn": []
+    },
+    {
       "ref": "perfect-debounce@1.0.0",
       "dependsOn": []
     },
@@ -18104,6 +18419,12 @@
     {
       "ref": "safe-stable-stringify@2.5.0",
       "dependsOn": []
+    },
+    {
+      "ref": "saxes@6.0.0",
+      "dependsOn": [
+        "xmlchars@2.2.0"
+      ]
     },
     {
       "ref": "scheduler@0.28.0",
@@ -18324,8 +18645,18 @@
       "dependsOn": []
     },
     {
+      "ref": "xmlchars@2.2.0",
+      "dependsOn": []
+    },
+    {
       "ref": "yallist@3.1.1",
       "dependsOn": []
+    },
+    {
+      "ref": "yauzl@3.4.0",
+      "dependsOn": [
+        "pend@1.2.0"
+      ]
     },
     {
       "ref": "yocto-queue@0.1.0",

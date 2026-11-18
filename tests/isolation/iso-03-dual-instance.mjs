@@ -15,7 +15,7 @@ const docker = (args) =>
   });
 const exec = (project, code) => docker(["exec", project + "-dsh-1", "node", "-e", code]).trim();
 try {
-  docker(["image", "inspect", "poros/dsh:0.2.2-rc.1-audit"]);
+  docker(["image", "inspect", process.env.POROS_DSH_IMAGE || "poros/dsh:0.2.2-rc.1-audit"]);
   for (const p of [a, b]) docker(["compose", "-p", p, "-f", file, "up", "-d", "--no-build", "dsh"]);
   exec(a, "require('fs').writeFileSync('/home/poros/.dsh/iso-marker','A-MARKER')");
   assert.equal(
