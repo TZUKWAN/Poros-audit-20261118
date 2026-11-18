@@ -7,6 +7,13 @@
  */
 import { env } from "./env.js";
 import { z } from "zod";
+import type { ModelConnection } from "./integration-connections.js";
+import {
+  checkProviderResponse,
+  ProviderError,
+  readProviderText,
+  requestModel,
+} from "./provider-http.js";
 
 export interface GatewayResult {
   output: string;
@@ -88,43 +95,57 @@ export class MockGateway implements ModelGateway {
   }
 }
 
-class DeepSeekGateway implements ModelGateway {
-  name = "deepseek";
+export function isLiveModelGateway(name: string): boolean {
+  return name === "deepseek" || name === "openai-compatible";
+}
+class CompatibleGateway implements ModelGateway {
+  readonly name: string;
+  constructor(private readonly target?: ModelConnection) {
+    this.name = target ? "openai-compatible" : "deepseek";
+  }
   private async request(
     messages: Array<{ role: string; content: string }>,
     signal?: AbortSignal,
     json = false,
     retry = true,
   ) {
-    const key = env.deepseekApiKey();
-    if (!key) throw new Error("DeepSeek credential missing (SEC-02)");
+    const target = this.target ?? {
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-chat",
+      apiKey: env.deepseekApiKey(),
+    };
+    if (!target.apiKey) throw new Error("DeepSeek credential missing (SEC-02)");
     let calls = 0;
     for (;;) {
       calls++;
       try {
-        const res = await fetch("https://api.deepseek.com/chat/completions", {
+        const request = {
           method: "POST",
-          headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+          headers: { "content-type": "application/json", authorization: "Bearer " + target.apiKey },
           signal: AbortSignal.any([AbortSignal.timeout(30000), ...(signal ? [signal] : [])]),
           body: JSON.stringify({
-            model: "deepseek-chat",
+            model: target.model,
             messages,
             max_tokens: 4096,
-            ...(json ? { response_format: { type: "json_object" } } : {}),
+            ...(json && !this.target ? { response_format: { type: "json_object" } } : {}),
           }),
-        });
+        } as const;
+        const res = this.target
+          ? await requestModel(target.baseUrl, "/chat/completions", request)
+          : await fetch(target.baseUrl + "/chat/completions", { ...request, redirect: "error" });
         if ([429, 502, 503].includes(res.status) && calls < 2 && retry) {
           await res.body?.cancel();
           await new Promise((resolve) => setTimeout(resolve, 250));
           continue;
         }
-        if (!res.ok) throw new Error(`DeepSeek HTTP ${res.status}; modelCalls=${calls}`);
-        const data = (await res.json()) as {
+        await checkProviderResponse(res, true);
+        const data = JSON.parse(await readProviderText(res)) as {
           choices?: Array<{ message?: { content?: string } }>;
           usage?: { prompt_tokens?: number; completion_tokens?: number };
         };
         const output = data.choices?.[0]?.message?.content;
-        if (!output?.trim()) throw new Error(`DeepSeek returned no content; modelCalls=${calls}`);
+        if (typeof output !== "string" || !output.trim())
+          throw new ProviderError("INVALID_RESPONSE", res.status);
         return {
           output,
           usage: {
@@ -143,7 +164,8 @@ class DeepSeekGateway implements ModelGateway {
   }
   async draftAgent(description: string): Promise<AgentDraft> {
     const key = env.deepseekApiKey();
-    if (!key) throw new Error("DeepSeek 网关未配置 POROS_DEEPSEEK_API_KEY：拒绝静默降级（SEC-02）");
+    if (!this.target && !key)
+      throw new Error("DeepSeek 网关未配置 POROS_DEEPSEEK_API_KEY：拒绝静默降级（SEC-02）");
     const sys =
       "你是 Poros Agent Builder。把用户的自然语言描述转成结构化 Agent 草稿 JSON，字段：name(≤12字)、department、config.persona(职责+边界)、config.outputKind(markdown-document|chat-answer)、config.tools(空数组，能力由授权表管理)。只输出 JSON。";
     const result = await this.request(
@@ -163,11 +185,11 @@ class DeepSeekGateway implements ModelGateway {
           outputKind: z.enum(["markdown-document", "chat-answer"]),
         }),
       })
-      .parse(JSON.parse(result.output));
+      .parse(JSON.parse(result.output.trim().replace(/^\x60{3}(?:json)?\s*|\s*\x60{3}$/gi, "")));
     return {
       ...raw,
       description,
-      config: { ...raw.config, modelPolicy: "deepseek-chat", tools: [] },
+      config: { ...raw.config, modelPolicy: this.target ? "default" : "deepseek-chat", tools: [] },
     };
   }
   async generate(
@@ -176,7 +198,7 @@ class DeepSeekGateway implements ModelGateway {
     options?: { signal?: AbortSignal; retry?: boolean },
   ): Promise<GatewayResult> {
     const key = env.deepseekApiKey();
-    if (!key)
+    if (!this.target && !key)
       throw new Error(
         "DeepSeek 网关未配置 POROS_DEEPSEEK_API_KEY：拒绝静默降级到未授权公共网关（SEC-02）",
       );
@@ -194,9 +216,11 @@ class DeepSeekGateway implements ModelGateway {
 }
 
 export function createGateway(kind: "mock" | "deepseek" = env.modelGateway()): ModelGateway {
-  if (kind === "deepseek") return new DeepSeekGateway();
+  if (kind === "deepseek") return new CompatibleGateway();
   return new MockGateway();
 }
 export function executionGateway(runtime: "gateway" | "dsh" = env.porosRuntime()): ModelGateway {
   return createGateway(runtime === "dsh" && !env.dshModelStub() ? "deepseek" : env.modelGateway());
 }
+export const createPersonalGateway = (target: ModelConnection): ModelGateway =>
+  new CompatibleGateway(target);

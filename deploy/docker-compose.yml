@@ -58,9 +58,9 @@ services:
       - poros-net
     # 仅环回发布供开发机迁移/测试；生产走 poros-net 内部、不发布。
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:${POROS_DB_PORT:-55432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U poros"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "poros"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -76,7 +76,7 @@ services:
     networks:
       - poros-net
     ports:
-      - "127.0.0.1:59000:8333"
+      - "127.0.0.1:${POROS_S3_PORT:-59000}:8333"
     security_opt:
       - no-new-privileges:true
     cap_drop:

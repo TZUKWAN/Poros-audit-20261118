@@ -6,6 +6,7 @@ import WorkspaceView from "./views/workspace.js";
 import AgentsView from "./views/agents.js";
 import IntegrationsView from "./views/integrations.js";
 import GovernanceView from "./views/governance.js";
+import { InstallApp } from "./install.js";
 
 export default function App() {
   const [logoutError, setLogoutError] = useState("");
@@ -24,36 +25,42 @@ export default function App() {
 
   return (
     <div className="mx-auto min-h-screen max-w-5xl px-4 pb-10">
-      <header className="flex items-center justify-between py-4">
-        <div>
+      <header className="flex items-center justify-between gap-2 py-4">
+        <div className="min-w-0">
           <h1 className="text-lg font-bold">Poros 工作台</h1>
-          <p className="text-xs text-[#8a8880]">
+          <p className="truncate text-xs text-[#8a8880]">
             {auth.email} · 角色 {auth.role}
           </p>
         </div>
-        <Button
-          variant="ghost"
-          onClick={async () => {
-            if (await logout()) setAuth(null);
-            else setLogoutError("退出未成功，请重试");
-          }}
-        >
-          退出
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          <InstallApp />
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              if (await logout()) setAuth(null);
+              else setLogoutError("退出未成功，请重试");
+            }}
+          >
+            退出
+          </Button>
+        </div>
       </header>
       {logoutError && <p role="alert">{logoutError}</p>}
       <Tabs.Root defaultValue="workspace">
-        <Tabs.List className="mb-4 flex gap-1 border-b border-[#e3e1dc]">
+        <Tabs.List
+          aria-label="工作台导航"
+          className="mb-4 grid grid-cols-4 border-b border-[#e3e1dc] sm:flex sm:gap-1"
+        >
           {[
             ["workspace", "工作台"],
-            ["agents", "Agent 目录 / Builder"],
-            ["integrations", "集成与状态"],
+            ["agents", "Agent 目录"],
+            ["integrations", "设置"],
             ["governance", "审批与规则"],
           ].map(([value, label]) => (
             <Tabs.Trigger
               key={value}
               value={value!}
-              className="rounded-t-lg px-4 py-2 text-sm text-[#8a8880] hover:text-[#1f1f1e] data-[state=active]:border-b-2 data-[state=active]:border-[#c9694b] data-[state=active]:font-medium data-[state=active]:text-[#1f1f1e]"
+              className="min-h-11 rounded-t-lg px-1 py-2 text-sm text-[#66625c] hover:text-[#1f1f1e] sm:px-4 data-[state=active]:border-b-2 data-[state=active]:border-[#c9694b] data-[state=active]:font-medium data-[state=active]:text-[#1f1f1e]"
             >
               {label}
             </Tabs.Trigger>
@@ -76,10 +83,6 @@ export default function App() {
           />
         </Tabs.Content>
       </Tabs.Root>
-      <footer className="mt-8 text-center text-xs text-[#a5a29b]">
-        唯一 Agent Harness：DSH（专属容器，宿主零接触）· 质量状态含 FAIL/UNCHECKED 语义 ·
-        未配置的集成如实标注
-      </footer>
     </div>
   );
 }
@@ -126,12 +129,17 @@ function LoginView({ onLogin }: { onLogin: (info: OrgInfo) => void }) {
         </label>
         <Input
           id="organization"
+          autoCapitalize="none"
+          autoComplete="organization"
           value={organizationId}
           onChange={(e) => setOrganizationId(e.target.value)}
         />
         <label className="block text-sm font-medium">邮箱</label>
         <Input
           aria-label="邮箱"
+          type="email"
+          autoComplete="username"
+          autoCapitalize="none"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="您的组织邮箱"
@@ -140,6 +148,7 @@ function LoginView({ onLogin }: { onLogin: (info: OrgInfo) => void }) {
         <Input
           aria-label="密码"
           type="password"
+          autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
@@ -152,6 +161,9 @@ function LoginView({ onLogin }: { onLogin: (info: OrgInfo) => void }) {
         >
           {busy ? "登录中…" : "登录"}
         </Button>
+      </div>
+      <div className="mt-4 flex justify-center">
+        <InstallApp />
       </div>
     </div>
   );

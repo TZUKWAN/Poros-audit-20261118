@@ -101,7 +101,22 @@ model Membership {
   userId         String
   role           Role
   createdAt      DateTime     @default(now())
+  connections    IntegrationConnection[]
   @@unique([organizationId, userId])
+}
+
+model IntegrationConnection {
+  organizationId String
+  userId         String
+  provider       String
+  membership     Membership @relation(fields: [organizationId, userId], references: [organizationId, userId], onDelete: Cascade)
+  revision       String
+  settings       Json
+  encryptedKey   String
+  testedAt       DateTime?
+  testCode       String?
+  updatedAt      DateTime @updatedAt
+  @@id([organizationId, userId, provider])
 }
 
 model Project {
@@ -184,6 +199,7 @@ model Task {
   title          String
   prompt         String
   executionSnapshot Json       @default("{}")
+  modelConnectionRevision String?
   requestKey     String?
   requestHash    String?
   timeoutMs      Int           @default(180000)

@@ -40,6 +40,7 @@ export const env = {
   modelGateway: (): "mock" | "deepseek" =>
     process.env.MODEL_GATEWAY === "deepseek" ? "deepseek" : "mock",
   deepseekApiKey: () => process.env.POROS_DEEPSEEK_API_KEY || "",
+  personalModelOnly: () => process.env.POROS_PERSONAL_MODEL_ONLY === "1",
 };
 
 export { required };
@@ -60,16 +61,19 @@ export function validateEnvironment(): void {
   if (process.env.NODE_ENV !== "production") return;
   if (env.jwtSecret().length < 32)
     throw new Error("Production JWT_SECRET must have at least 32 characters");
-  for (const name of [
-    "DATABASE_URL",
-    "S3_ENDPOINT",
-    "S3_BUCKET",
-    "S3_ACCESS_KEY",
-    "S3_SECRET_KEY",
-    "POROS_DEEPSEEK_API_KEY",
-  ])
+  for (const name of ["DATABASE_URL", "S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY"])
     required(name);
-  if (env.porosRuntime() !== "dsh" || env.modelGateway() !== "deepseek" || env.dshModelStub())
+  if (env.personalModelOnly()) {
+    if (!/^[0-9a-f]{64}$/i.test(required("POROS_SETTINGS_KEY")))
+      throw new Error("Production POROS_SETTINGS_KEY must be 32 random bytes in hex");
+  } else {
+    required("POROS_DEEPSEEK_API_KEY");
+  }
+  if (
+    env.porosRuntime() !== "dsh" ||
+    (!env.personalModelOnly() && env.modelGateway() !== "deepseek") ||
+    env.dshModelStub()
+  )
     throw new Error("Production requires DSH + admitted real model; mock/stub forbidden");
   if (
     /change-me|ci-password|test-secret/.test(required("DATABASE_URL") + env.jwtSecret()) ||

@@ -12,7 +12,7 @@
  *  - 单条规则缺裁决 → UNCHECKED（不补猜）
  *  - PASS/FAIL 均带截断理由，逐条落 RunEvent（审计可回放）
  */
-import type { ModelGateway, GatewayResult } from "./model-gateway.js";
+import { isLiveModelGateway, type ModelGateway, type GatewayResult } from "./model-gateway.js";
 import type { EffectiveRule } from "./judgment.js";
 
 export type SemanticVerdict = { status: "PASS" | "FAIL" | "UNCHECKED"; reason: string };
@@ -95,7 +95,7 @@ function failAll(
 
 export function createSemanticJudge(gateway: ModelGateway): SemanticJudge | null {
   // 只有真实网关才承载语义 Judge；mock = 未配置（如实 UNCHECKED）
-  if (gateway.name !== "deepseek") return null;
+  if (!isLiveModelGateway(gateway.name)) return null;
   return {
     async judge(rules, output, signal) {
       if (output.length > 12000)

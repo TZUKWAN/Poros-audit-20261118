@@ -2,7 +2,12 @@
 import http from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { env } from "./env.js";
-export async function createRunModelProxy(forward: typeof fetch = fetch) {
+import type { ModelConnection } from "./integration-connections.js";
+import { checkProviderResponse, ProviderError, requestModel } from "./provider-http.js";
+export async function createRunModelProxy(
+  forward: typeof fetch = fetch,
+  configured?: ModelConnection,
+) {
   const token = randomBytes(32).toString("base64url");
   let calls = 0;
   let upstreamCalls = 0;
@@ -33,24 +38,47 @@ export async function createRunModelProxy(forward: typeof fetch = fetch) {
           return;
         }
       }
-      const body = JSON.parse(raw) as { messages: unknown; stream?: boolean; max_tokens?: number };
+      const body = JSON.parse(raw) as {
+        messages: unknown;
+        stream?: boolean;
+        max_tokens?: number;
+        max_completion_tokens?: number;
+        n?: number;
+      };
       if (!Array.isArray(body.messages) || body.messages.length > 300)
         throw new Error("Invalid messages");
       upstreamCalls++;
-      const reply = await forward("https://api.deepseek.com/chat/completions", {
+      const target = configured ?? {
+        baseUrl: "https://api.deepseek.com",
+        model: "deepseek-chat",
+        apiKey: env.deepseekApiKey(),
+      };
+      const init = {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${env.deepseekApiKey()}`,
+          authorization: "Bearer " + target.apiKey,
         },
         signal: AbortSignal.any([disconnected.signal, AbortSignal.timeout(30000)]),
-        redirect: "error",
         body: JSON.stringify({
           ...body,
-          model: "deepseek-chat",
-          max_tokens: Math.min(4096, Math.max(1, Number(body.max_tokens) || 4096)),
+          model: target.model,
+          ...(body.max_completion_tokens === undefined
+            ? { max_tokens: Math.min(4096, Math.max(1, Number(body.max_tokens) || 4096)) }
+            : {
+                max_tokens: undefined,
+                max_completion_tokens: Math.min(
+                  4096,
+                  Math.max(1, Number(body.max_completion_tokens) || 4096),
+                ),
+              }),
+          ...(body.n !== undefined ? { n: 1 } : {}),
         }),
-      });
+      } as const;
+      const reply = configured
+        ? await requestModel(target.baseUrl, "/chat/completions", init)
+        : await forward(target.baseUrl + "/chat/completions", { ...init, redirect: "error" });
+      await checkProviderResponse(reply, true);
       res.writeHead(reply.status, {
         "content-type": reply.headers.get("content-type") ?? "application/json",
         "cache-control": "no-store",
@@ -83,9 +111,21 @@ export async function createRunModelProxy(forward: typeof fetch = fetch) {
         }
       }
       res.end();
-    } catch {
-      if (!res.headersSent) res.writeHead(502);
-      res.end();
+    } catch (error) {
+      if (!res.headersSent) {
+        const status =
+          error instanceof ProviderError && error.http && error.http >= 400 ? error.http : 502;
+        res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(
+          JSON.stringify({
+            error: {
+              message: error instanceof ProviderError ? error.reason : "MODEL_REQUEST_FAILED",
+            },
+          }),
+        );
+      } else {
+        res.end();
+      }
     }
   });
   server.requestTimeout = 35000;

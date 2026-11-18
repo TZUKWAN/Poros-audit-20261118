@@ -2,6 +2,8 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { createHash } from "node:crypto";
 import type { Principal } from "./auth.js";
 import type { DshGrant } from "./dsh-runtime.js";
+import { modelId, personalModelSource } from "./integration-connections.js";
+import { canonicalModelBase } from "./provider-http.js";
 
 export class ApiError extends Error {
   constructor(
@@ -53,17 +55,32 @@ export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export function validateGrant(g: DshGrant): void {
   if (g.kind === "TOOL" && TOOL_NAMES.includes(g.name)) return;
-  if (g.kind === "MODEL" && g.name === "deepseek-chat") return;
+  if (g.kind === "MODEL" && g.source?.startsWith(personalModelSource)) {
+    const base = g.source.slice(personalModelSource.length);
+    try {
+      if (modelId.safeParse(g.name).success && canonicalModelBase(base) === base) return;
+    } catch {
+      /* Reject malformed grants, including embedded credentials. */
+    }
+  } else if (g.kind === "MODEL" && g.name === "deepseek-chat") return;
   throw new ApiError(
     400,
     "能力未注册或尚未配置真实绑定；默认拒绝（Tool/Skill/MCP/Knowledge/Model 均需精确授权）",
   );
+}
+export function personalModelGrant(grants: DshGrant[]) {
+  const matching = grants.filter(
+    (grant) => grant.kind === "MODEL" && grant.source?.startsWith(personalModelSource),
+  );
+  if (matching.length > 1) throw new ApiError(409, "一个 Agent 版本只能指定一个个人模型连接");
+  return matching[0] as (DshGrant & { source: string }) | undefined;
 }
 export function parseManifest(raw: unknown): Manifest {
   const m = raw as Manifest;
   if (!m || !m.agentId || !Array.isArray(m.grants) || m.harness !== "@deepseek-ai/dsh@0.2.2-rc.1")
     throw new ApiError(409, "旧版缺少可验证授权快照，请重新申请发布并审批");
   for (const g of m.grants) validateGrant(g);
+  personalModelGrant(m.grants);
   validateConfig(m.config);
   return m;
 }
@@ -78,6 +95,7 @@ export async function requestPublication(db: PrismaClient, p: Principal, agentId
     if (!a) throw new ApiError(404, "Agent 不存在");
     validateConfig(a.draftConfig);
     a.grants.forEach(validateGrant);
+    personalModelGrant(a.grants);
     const manifest: Manifest = {
       agentId: a.id,
       name: a.name,

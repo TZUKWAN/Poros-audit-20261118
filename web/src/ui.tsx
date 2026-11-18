@@ -19,7 +19,7 @@ export function Button({ variant = "primary", className = "", ...rest }: ButtonP
   return (
     <button
       {...rest}
-      className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed ${VARIANTS[variant]} ${className}`}
+      className={`inline-flex min-h-10 items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed ${VARIANTS[variant]} ${className}`}
     />
   );
 }
@@ -29,7 +29,7 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...rest}
-      className={`w-full rounded-lg border border-[#d9d7d2] bg-white px-3 py-1.5 text-sm outline-none focus:border-[#c9694b] ${className}`}
+      className={`min-h-11 w-full min-w-0 rounded-lg border border-[#d9d7d2] bg-white px-3 py-1.5 text-base outline-none focus:border-[#c9694b] ${className}`}
     />
   );
 }

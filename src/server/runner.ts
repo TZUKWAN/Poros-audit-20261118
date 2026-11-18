@@ -1,10 +1,17 @@
 /** Durable worker's execution unit. Published manifests and rule applications are pinned. */
 import type { PrismaClient, TaskStatus, Prisma } from "@prisma/client";
 import { effectiveRules, evaluateMechanical } from "./judgment.js";
-import { executionGateway, addUsageCount, type ModelGateway } from "./model-gateway.js";
+import {
+  executionGateway,
+  createPersonalGateway,
+  addUsageCount,
+  type ModelGateway,
+} from "./model-gateway.js";
 import { createSemanticJudge, type SemanticJudge, type SemanticVerdict } from "./semantic-judge.js";
 import { runDshSession, auditToolCalls } from "./dsh-runtime.js";
-import { parseManifest, digest, ApiError } from "./releases.js";
+import { parseManifest, personalModelGrant, digest, ApiError } from "./releases.js";
+import { readyPersonalModel } from "./integration-connections.js";
+import { ProviderError } from "./provider-http.js";
 import { redact } from "./security.js";
 import { env } from "./env.js";
 export interface RunnerDeps {
@@ -21,9 +28,10 @@ export async function emitEvent(
   seq: number,
   kind: string,
   payload: unknown,
+  secrets: readonly string[] = [],
 ): Promise<void> {
   await db.runEvent.create({
-    data: { runId, seq, kind, payload: redact(payload) as Prisma.InputJsonValue },
+    data: { runId, seq, kind, payload: redact(payload, secrets) as Prisma.InputJsonValue },
   });
 }
 export async function runTask(
@@ -32,13 +40,14 @@ export async function runTask(
 ): Promise<{ runId: string; status: TaskStatus }> {
   const { db } = deps,
     task = await db.task.findUniqueOrThrow({ where: { id: taskId } }),
-    runtime = deps.runtime ?? env.porosRuntime(),
-    gateway = deps.gateway ?? executionGateway(runtime);
+    runtime = deps.runtime ?? env.porosRuntime();
   const run = deps.runId
     ? await db.run.findUniqueOrThrow({ where: { id: deps.runId } })
     : await db.run.create({ data: { taskId, status: "RUNNING" } });
   let seq = await db.runEvent.count({ where: { runId: run.id } });
-  const log = (kind: string, payload: unknown) => emitEvent(db, run.id, ++seq, kind, payload);
+  const secrets: string[] = [];
+  const log = (kind: string, payload: unknown) =>
+    emitEvent(db, run.id, ++seq, kind, payload, secrets);
   const usage: Record<string, unknown> = {
     modelCalls: runtime === "dsh" ? null : 0,
     inputTokens: runtime === "dsh" ? null : 0,
@@ -72,6 +81,28 @@ export async function runTask(
       : null;
     if (task.agentVersionId && !version) throw new ApiError(409, "任务版本未审批或组织不匹配");
     const manifest = parseManifest(version?.manifest ?? task.executionSnapshot);
+    const selected = personalModelGrant(manifest.grants);
+    const personal = selected
+      ? await readyPersonalModel(
+          db,
+          { organizationId: task.organizationId, userId: task.createdBy },
+          {
+            ...selected,
+            revision: task.modelConnectionRevision || "",
+          },
+        ).catch((error: unknown) => {
+          throw new ApiError(409, error instanceof ProviderError ? error.reason : "个人模型不可用");
+        })
+      : null;
+    if (!personal && (selected || env.personalModelOnly()))
+      throw new ApiError(409, "没有可用的个人模型连接");
+    if (personal) {
+      secrets.push(personal.model.apiKey);
+      await log("model.binding", { model: personal.model.model, baseUrl: personal.model.baseUrl });
+    }
+    const gateway = personal
+      ? createPersonalGateway(personal.model)
+      : (deps.gateway ?? executionGateway(runtime));
     const rules = await effectiveRules(db, task.organizationId, {
       projectId: task.projectId,
       agentId: manifest.agentId,
@@ -112,7 +143,10 @@ export async function runTask(
     if (runtime === "dsh") {
       let inputTokens: number | null = 0,
         outputTokens: number | null = 0;
-      if (!manifest.grants.some((g) => g.kind === "MODEL" && g.name === "deepseek-chat"))
+      if (
+        !personal &&
+        !manifest.grants.some((g) => g.kind === "MODEL" && g.name === "deepseek-chat")
+      )
         throw new ApiError(403, "Agent 未授权 Model deepseek-chat");
       const dsh = await runDshSession({
         task: task.prompt,
@@ -125,6 +159,7 @@ export async function runTask(
         version: version?.version ?? 0,
         taskId: task.id,
         timeoutMs: task.timeoutMs,
+        model: personal?.model,
         signal: deps.signal,
         onEvent: async (e) => {
           if (e.type === "status" && e.phase === "step_end") {
@@ -157,6 +192,7 @@ export async function runTask(
       output = dsh.final;
     } else {
       if (
+        !personal &&
         gateway.name !== "mock" &&
         !manifest.grants.some((g) => g.kind === "MODEL" && g.name === "deepseek-chat")
       )
@@ -220,7 +256,7 @@ export async function runTask(
         data: {
           evaluation: v.status,
           evidenceRef: `run:${run.id}:sha256:${digest(output)}:rule:${r.id}@${r.version}`,
-          failureReason: String(redact(v.reason)),
+          failureReason: String(redact(v.reason, secrets)),
         },
       });
       await log("judgment", {
@@ -248,7 +284,7 @@ export async function runTask(
         where: { id: run.id },
         data: {
           status,
-          output: String(redact(output)),
+          output: String(redact(output, secrets)),
           usage: usage as Prisma.InputJsonValue,
           modelGateway: label,
           finishedAt: new Date(),
@@ -276,6 +312,7 @@ export async function runTask(
           : error instanceof Error
             ? error.message
             : String(error),
+        secrets,
       ),
     );
     await log("status", { status, error: message });

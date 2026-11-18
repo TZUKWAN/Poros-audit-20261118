@@ -22,6 +22,7 @@ export async function api<T = Record<string, unknown>>(
   path: string,
   body?: unknown,
   extraHeaders: Record<string, string> = {},
+  timeoutMs = 15000,
 ): Promise<ApiResult<T>> {
   let res: Response;
   try {
@@ -33,7 +34,7 @@ export async function api<T = Record<string, unknown>>(
         ...extraHeaders,
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     return {

@@ -13,6 +13,7 @@ import {
   Textarea,
 } from "../ui.js";
 import { RunEvents } from "./workspace.js";
+import type { PersonalConnectionView } from "./integrations.js";
 
 interface AgentRow {
   releaseReady: boolean;
@@ -25,7 +26,7 @@ interface AgentRow {
   versions: Array<{ version: number; approvedAt: string | null }>;
   nlSource: string | null;
   draftConfig: Record<string, unknown>;
-  grants: Array<{ kind: string; name: string; scopeNote: string }>;
+  grants: Array<{ id: string; kind: string; name: string; scopeNote: string; source: string }>;
 }
 
 export default function AgentsView({ role }: { role: string }) {
@@ -53,7 +54,7 @@ export default function AgentsView({ role }: { role: string }) {
       <Card>
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">Agent 目录（{agents.length}）</span>
-          {canBuild && <Button onClick={() => setNlOpen(true)}>+ 自然语言创建</Button>}
+          {canBuild && <Button onClick={() => setNlOpen(true)}>新建 Agent</Button>}
         </div>
         <div className="mt-3 grid gap-2">
           {agents.map((a) => (
@@ -110,23 +111,38 @@ function NlCreateDialog({
   onCreated: (id: string) => void;
 }) {
   const [description, setDescription] = useState("");
+  const [name, setName] = useState("");
+  const [manual, setManual] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const create = async () => {
     setBusy(true);
     setError("");
-    const r = await api<{ agent: { id: string } }>("POST", "/api/agents/drafts", { description });
+    const r = await api<{ agent: { id: string } }>(
+      "POST",
+      "/api/agents/drafts",
+      manual ? { name, config: { persona: description } } : { description },
+      {},
+      65000,
+    );
     setBusy(false);
     if (!r.ok) setError(r.body.error ?? `HTTP ${r.status}`);
     else onCreated(r.body.agent.id);
   };
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()} title="自然语言创建 Agent">
-      <p className="mb-2 text-xs text-[#8a8880]">
-        描述目标与边界；系统生成结构化草稿（人设/输出类型），能力默认为空，由授权表逐项批准。生成来源会留痕（nlSource）。
-      </p>
+    <Dialog open onOpenChange={(o) => !o && onClose()} title="新建 Agent">
+      <label className="mb-2 flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} />{" "}
+        手动填写
+      </label>
+      {manual && (
+        <label className="mb-2 grid gap-1 text-sm">
+          Agent 名称
+          <Input value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+      )}
       <Textarea
         rows={4}
         value={description}
@@ -138,15 +154,18 @@ function NlCreateDialog({
         <DialogClose asChild>
           <Button variant="ghost">取消</Button>
         </DialogClose>
-        <Button disabled={busy || description.trim().length < 4} onClick={create}>
-          {busy ? "生成中…" : "生成草稿"}
+        <Button
+          disabled={busy || (manual ? !name.trim() : description.trim().length < 4)}
+          onClick={create}
+        >
+          {busy ? "处理中…" : manual ? "创建草稿" : "生成草稿"}
         </Button>
       </div>
     </Dialog>
   );
 }
 
-const GRANT_KINDS = ["TOOL", "SKILL", "MCP", "KNOWLEDGE", "MODEL"] as const;
+const GRANT_KINDS = ["TOOL", "MODEL"] as const;
 const TOOL_NAMES = [
   "bash",
   "read",
@@ -165,6 +184,7 @@ function BuilderPanel({ agent, onChanged }: { agent: AgentRow; onChanged: () => 
   const [grantKind, setGrantKind] = useState<(typeof GRANT_KINDS)[number]>("TOOL");
   const [grantName, setGrantName] = useState("bash");
   const [grantNote, setGrantNote] = useState("");
+  const [personal, setPersonal] = useState<PersonalConnectionView>();
   const [testPrompt, setTestPrompt] = useState("");
   const [testResult, setTestResult] = useState<{
     status: string;
@@ -175,6 +195,16 @@ function BuilderPanel({ agent, onChanged }: { agent: AgentRow; onChanged: () => 
   const [draftText, setDraftText] = useState(JSON.stringify(agent.draftConfig, null, 2));
   const [consent, setConsent] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  useEffect(() => {
+    void api<{ connections: PersonalConnectionView[] }>("GET", "/api/settings/integrations").then(
+      (response) => {
+        if (response.ok)
+          setPersonal(
+            response.body.connections.find((connection) => connection.provider === "model"),
+          );
+      },
+    );
+  }, []);
 
   return (
     <Card>
@@ -224,25 +254,44 @@ function BuilderPanel({ agent, onChanged }: { agent: AgentRow; onChanged: () => 
           能力授权（每次工具执行前检查；发布时冻结授权与来源）
         </p>
         <div className="mb-2 flex flex-wrap gap-2">
-          {grants.map((g, i) => (
-            <Badge key={`${g.kind}-${g.name}-${i}`} tone="brand">
-              {g.kind}:{g.name}
-            </Badge>
+          {grants.map((g) => (
+            <div key={g.id} className="flex min-w-0 items-center gap-1">
+              <Badge tone="brand">
+                {g.kind}:{g.name}
+              </Badge>
+              <Button
+                variant="ghost"
+                disabled={Boolean(busy)}
+                aria-label={"撤销草稿授权 " + g.name}
+                onClick={async () => {
+                  setBusy("revoke");
+                  const result = await api("DELETE", "/api/agents/" + agent.id + "/grants/" + g.id);
+                  if (result.ok) {
+                    setGrants((all) => all.filter((grant) => grant.id !== g.id));
+                    onChanged();
+                  } else setMsg({ tone: "bad", text: result.body.error ?? "撤销失败" });
+                  setBusy("");
+                }}
+              >
+                撤销
+              </Button>
+            </div>
           ))}
           {!grants.length && (
             <span className="text-xs text-[#a5a29b]">未授予任何能力（Agent 只能对话）。</span>
           )}
         </div>
         <p className="mt-2 text-xs">
-          SKILL、MCP、KNOWLEDGE 尚未配置真实能力绑定，服务端会拒绝授权。真实运行需授予
-          MODEL:deepseek-chat。
+          模型授权会记录模型名与端点。运行个人模型时，任务发起人需要在设置中验证同一个端点和模型。
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Select
             value={grantKind}
             onChange={(e) => {
               setGrantKind(e.target.value as (typeof GRANT_KINDS)[number]);
-              setGrantName(e.target.value === "MODEL" ? "deepseek-chat" : "bash");
+              setGrantName(
+                e.target.value === "MODEL" ? (personal ? "personal" : "builtin") : "bash",
+              );
             }}
           >
             {GRANT_KINDS.map((k) => (
@@ -260,12 +309,16 @@ function BuilderPanel({ agent, onChanged }: { agent: AgentRow; onChanged: () => 
               ))}
             </Select>
           ) : (
-            <Input
-              className="w-40"
+            <Select
+              aria-label="模型连接"
               value={grantName}
               onChange={(e) => setGrantName(e.target.value)}
-              placeholder="能力名"
-            />
+            >
+              {personal?.settings.model && (
+                <option value="personal">个人模型 · {personal.settings.model}</option>
+              )}
+              <option value="builtin">部署模型 · deepseek-chat</option>
+            </Select>
           )}
           <Input
             className="w-56"
@@ -276,18 +329,24 @@ function BuilderPanel({ agent, onChanged }: { agent: AgentRow; onChanged: () => 
           <Button
             variant="ghost"
             disabled={
-              busy === "grant" || (grantKind !== "TOOL" && !grantName.trim()) || !grantNote.trim()
+              Boolean(busy) ||
+              (grantKind === "MODEL" && grantName === "personal" && !personal?.settings.baseUrl) ||
+              !grantNote.trim()
             }
             onClick={async () => {
               setBusy("grant");
+              const custom =
+                grantKind === "MODEL" && grantName === "personal" ? personal?.settings : undefined;
+              const name = grantKind === "MODEL" ? (custom?.model ?? "deepseek-chat") : grantName;
               const r = await api(`POST`, `/api/agents/${agent.id}/grants`, {
                 kind: grantKind,
-                name: grantName,
+                name,
+                ...(custom ? { source: "personal-openai-compatible:" + custom.baseUrl } : {}),
                 scopeNote: grantNote,
               });
               setBusy("");
               if (r.ok) {
-                setMsg({ tone: "ok", text: `已授权 ${grantKind}:${grantName}` });
+                setMsg({ tone: "ok", text: `已授权 ${grantKind}:${name}` });
                 setGrantNote("");
                 const fresh = await api<{ agents: AgentRow[] }>("GET", "/api/agents");
                 const me = fresh.ok

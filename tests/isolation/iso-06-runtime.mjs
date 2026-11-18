@@ -9,6 +9,7 @@ import {
   removeOwnedResource,
 } from "../../src/server/dsh-runtime.ts";
 import { createRunModelProxy } from "../../src/server/model-proxy.ts";
+import { createTestModel } from "../../scripts/poros-test-model.mjs";
 
 process.env.POROS_DSH_MODEL_STUB = "1";
 const sha = (s) => createHash("sha256").update(s).digest("hex");
@@ -212,4 +213,51 @@ try {
 } finally {
   await dockerCommand(["rm", "-f", probeName]);
   await proxy.close();
+}
+
+// Real container, DSH and tool execution through an OpenAI wire-contract fixture.
+const model = "custom-contract-chat";
+const apiKey = randomUUID();
+const upstream = await createTestModel(undefined, { model, apiKey, port: 0 });
+const baseUrl = "http://127.0.0.1:" + upstream.address().port + "/v1";
+const oldBases = process.env.POROS_LOCAL_MODEL_BASES;
+try {
+  process.env.POROS_LOCAL_MODEL_BASES = baseUrl;
+  process.env.POROS_DSH_MODEL_STUB = "0";
+  const runResult = await runDshSession({
+    task: "Run the granted fixture tool",
+    runId: randomUUID(),
+    organizationId: "iso-model",
+    agentId: "iso-model-agent",
+    taskId: randomUUID(),
+    model: { model, baseUrl, apiKey },
+    grants: [
+      { kind: "MODEL", name: model, source: "personal-openai-compatible:" + baseUrl },
+      { kind: "TOOL", name: "bash" },
+    ],
+    timeoutMs: 45000,
+  });
+  assert.equal(
+    runResult.completed,
+    true,
+    JSON.stringify({ error: runResult.error, diagnostics: runResult.diagnostics }),
+  );
+  assert.equal(runResult.modelChannel, "configured");
+  assert.equal(runResult.modelCalls, 2);
+  assert.ok(
+    runResult.events.some(
+      (event) =>
+        event.type === "tool_result" && String(event.result).includes("POROS-DSH-REAL-EXEC"),
+    ),
+  );
+  assert.ok(!JSON.stringify(runResult).includes(apiKey));
+  console.log(
+    "PASS ISO-06 actual DSH executes with its frozen custom model through the host proxy (explicit OpenAI contract fixture)",
+  );
+} finally {
+  if (oldBases === undefined) delete process.env.POROS_LOCAL_MODEL_BASES;
+  else process.env.POROS_LOCAL_MODEL_BASES = oldBases;
+  process.env.POROS_DSH_MODEL_STUB = "1";
+  upstream.closeAllConnections();
+  await new Promise((resolve) => upstream.close(resolve));
 }

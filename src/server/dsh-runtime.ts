@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { env } from "./env.js";
 import { createRunModelProxy } from "./model-proxy.js";
+import { personalModelSource, type ModelConnection } from "./integration-connections.js";
 import { StringDecoder } from "node:string_decoder";
 export interface DshGrant {
   kind: "TOOL" | "SKILL" | "MCP" | "KNOWLEDGE" | "MODEL";
@@ -26,6 +27,7 @@ export interface DshRunOptions {
   version?: number;
   taskId?: string;
   timeoutMs?: number;
+  model?: ModelConnection;
   signal?: AbortSignal;
   onEvent?: (event: DshEvent) => Promise<void>;
   /** Deterministic MODEL fixture only. Real DSH/tool bodies. Production rejects this. */
@@ -71,7 +73,9 @@ export function buildProfilePatch(opts: {
   grants?: DshGrant[];
   stub: boolean;
   modelBaseURL?: string;
+  modelId?: string;
 }): string {
+  const model = opts.stub ? "poros-stub" : (opts.modelId ?? "deepseek-chat");
   return JSON.stringify([
     {
       id: "system-prompt",
@@ -87,7 +91,7 @@ export function buildProfilePatch(opts: {
             apiKeyEnv: "POROS_MODEL_KEY",
             models: [
               {
-                id: opts.stub ? "poros-stub" : "deepseek-chat",
+                id: model,
                 contextWindow: 32768,
                 maxTokens: 4096,
               },
@@ -98,7 +102,7 @@ export function buildProfilePatch(opts: {
     },
     {
       id: "agent-default-model",
-      config: { provider: "poros", model: opts.stub ? "poros-stub" : "deepseek-chat" },
+      config: { provider: "poros", model },
     },
     ...[
       "plugin-manager",
@@ -189,12 +193,22 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
   const stub = env.dshModelStub();
   if (process.env.NODE_ENV === "production" && (stub || opts.testCalls))
     throw new Error("Production forbids DSH model fixtures");
-  if (!stub && !env.deepseekApiKey())
+  if (opts.model && stub) throw new Error("Personal model cannot run through a test model");
+  if (!stub && !opts.model && !env.deepseekApiKey())
     throw new Error("DSH model credential not configured (SEC-02)");
-  if (!opts.grants?.some((g) => g.kind === "MODEL" && g.name === "deepseek-chat"))
+  const model = opts.model;
+  if (
+    !opts.grants?.some(
+      (g) =>
+        g.kind === "MODEL" &&
+        (model
+          ? g.name === model.model && g.source === personalModelSource + model.baseUrl
+          : g.name === "deepseek-chat" && !g.source?.startsWith(personalModelSource)),
+    )
+  )
     throw new Error("DSH Model capability not granted");
   const scope = deploymentScope();
-  const proxy = stub ? null : await createRunModelProxy();
+  const proxy = stub ? null : await createRunModelProxy(undefined, model);
   const id = createHash("sha256").update(opts.runId).digest("hex").slice(0, 24),
     name = `poros-run-${id}`,
     network = `poros-net-${id}`;
@@ -323,6 +337,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
         grants: opts.grants,
         stub,
         modelBaseURL: proxy?.baseURL,
+        modelId: model?.model,
       }),
       allowedTools: [...grantedToolNames(opts.grants ?? [])],
       context: {

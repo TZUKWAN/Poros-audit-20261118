@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
 import { authMiddleware } from "./auth.js";
 import { registerRoutes, CREDENTIALS_DDL } from "./routes/index.js";
+import { registerIntegrationRoutes } from "./routes/integrations.js";
 import { getDb } from "./db.js";
 import { startWorker } from "./worker.js";
 import { validateEnvironment } from "./env.js";
@@ -48,15 +49,13 @@ export async function buildApp(
     const status =
       (error as { statusCode?: number }).statusCode ||
       (code === "P2002" ? 409 : code === "P2025" ? 404 : 500);
-    return reply
-      .code(status)
-      .send({
-        ok: false,
-        error: status >= 500 ? "内部错误" : error instanceof Error ? error.message : "请求失败",
-      });
+    return reply.code(status).send({
+      ok: false,
+      error: status >= 500 ? "内部错误" : error instanceof Error ? error.message : "请求失败",
+    });
   });
   app.addHook("onRequest", authMiddleware);
-  app.addHook("onSend", async (_req, reply, payload) => {
+  app.addHook("onSend", async (req, reply, payload) => {
     reply
       .header("x-content-type-options", "nosniff")
       .header("referrer-policy", "no-referrer")
@@ -65,10 +64,16 @@ export async function buildApp(
         "content-security-policy",
         "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
       );
+    if (
+      req.url.startsWith("/api/") ||
+      ["/", "/index.html", "/sw.js", "/manifest.webmanifest"].includes(req.url.split("?")[0]!)
+    )
+      reply.header("cache-control", "no-store");
     return payload;
   });
   app.get("/api/health", async () => ({ ok: true, service: "poros" }));
   await app.register(registerRoutes);
+  await app.register(registerIntegrationRoutes);
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "public");
   await app.register(fastifyStatic, { root: publicDir, prefix: "/" });
   app.setNotFoundHandler((req, reply) => {

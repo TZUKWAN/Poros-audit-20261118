@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { runTask, type RunnerDeps } from "./runner.js";
 import { cleanupOrphanedRuntime } from "./dsh-runtime.js";
+import { findConnection } from "./integration-connections.js";
 export const TERMINAL = new Set([
   "SUCCEEDED",
   "FAILED",
@@ -74,6 +75,19 @@ export function startWorker(db: PrismaClient, overrides: Partial<RunnerDeps> = {
             job.ctrl.abort(
               new Error("POLICY_REVOKED: task membership or project permission removed"),
             );
+          else if (task.modelConnectionRevision) {
+            const model = await findConnection(
+              db,
+              { organizationId: task.organizationId, userId: task.createdBy },
+              "model",
+            );
+            if (
+              !model ||
+              model.revision !== task.modelConnectionRevision ||
+              model.testCode !== "OK"
+            )
+              job.ctrl.abort(new Error("POLICY_REVOKED: personal model no longer authorized"));
+          }
         }
       }
       const job = await db.$transaction(async (tx) => {

@@ -14,13 +14,22 @@ import {
   verifyDownloadTicket,
   type Principal,
 } from "../auth.js";
-import { createGateway, executionGateway } from "../model-gateway.js";
+import { createGateway, createPersonalGateway, executionGateway } from "../model-gateway.js";
+import {
+  findConnection,
+  modelConnection,
+  personalModelSource,
+  readyPersonalModel,
+} from "../integration-connections.js";
+import { ProviderError } from "../provider-http.js";
+import { describeProviderError } from "./integrations.js";
 import { putObject, getObject, storageKeyFor, deleteObject } from "../storage.js";
 import { env } from "../env.js";
 import {
   requestPublication,
   approvePublication,
   validateGrant,
+  personalModelGrant,
   parseManifest,
   digest,
   ApiError,
@@ -32,6 +41,13 @@ import { TERMINAL } from "../worker.js";
 
 const idParam = z.object({ id: z.string().min(1).max(120) });
 const configSchema = z.record(z.string(), z.unknown());
+const sensitiveTools = (grants: Manifest["grants"]) =>
+  grants
+    .filter(
+      (g) =>
+        g.kind === "TOOL" && ["bash", "write", "edit", "web.fetch", "web.search"].includes(g.name),
+    )
+    .map((g) => g.name);
 export const CREDENTIALS_DDL = `CREATE TABLE IF NOT EXISTS user_credentials (email TEXT PRIMARY KEY,password_hash TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());`;
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   const db = getDb();
@@ -104,6 +120,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       })
       .parse(req.body);
     if (!b.name && !b.description) throw new ApiError(400, "需要 Agent 名称或自然语言描述");
+    const model = b.name
+      ? null
+      : await readyPersonalModel(db, p).catch((error: unknown) => {
+          throw new ApiError(409, describeProviderError(error).message);
+        });
+    if (!b.name && !model && env.personalModelOnly())
+      throw new ApiError(409, "请先在设置中保存并测试个人模型");
     const draft = b.name
       ? {
           name: b.name,
@@ -111,7 +134,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
           department: b.department,
           config: b.config ?? {},
         }
-      : await createGateway().draftAgent(b.description!);
+      : await (model ? createPersonalGateway(model.model) : createGateway())
+          .draftAgent(b.description!)
+          .catch((error: unknown) => {
+            if (error instanceof ProviderError)
+              throw new ApiError(422, describeProviderError(error).message);
+            throw error;
+          });
     let name = draft.name;
     if (!b.name) {
       const base = name;
@@ -181,10 +210,22 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         name: z.string().min(1).max(120),
         scopeNote: z.string().min(1).max(1000),
         version: z.literal("0.2.2-rc.1").default("0.2.2-rc.1"),
-        source: z.literal("@deepseek-ai/dsh").default("@deepseek-ai/dsh"),
+        source: z.string().max(350).default("@deepseek-ai/dsh"),
       })
       .parse(req.body);
     validateGrant(b);
+    if (b.source !== "@deepseek-ai/dsh") {
+      if (b.kind !== "MODEL" || !b.source.startsWith(personalModelSource))
+        throw new ApiError(400, "能力来源不合法");
+      const row = await findConnection(db, p, "model");
+      const binding = row ? modelConnection(row) : null;
+      if (
+        !binding ||
+        b.name !== binding.model ||
+        b.source !== personalModelSource + binding.baseUrl
+      )
+        throw new ApiError(409, "请先在设置中保存相同端点和模型名");
+    }
     const grant = await db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "AgentDefinition" WHERE id=${id} AND "organizationId"=${p.organizationId} FOR UPDATE`;
       if (
@@ -298,13 +339,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         }
       : parseManifest(v!.manifest);
     manifest.grants.forEach(validateGrant);
-    const sensitive = manifest.grants
-      .filter(
-        (g) =>
-          g.kind === "TOOL" &&
-          ["bash", "write", "edit", "web.fetch", "web.search"].includes(g.name),
-      )
-      .map((g) => g.name);
+    const sensitive = sensitiveTools(manifest.grants);
+    const modelGrant = personalModelGrant(manifest.grants);
     if (sensitive.some((name) => !b.consent.includes(name)))
       throw new ApiError(403, "本次任务需要明确同意敏感能力：" + sensitive.join(", "));
     const hash = digest({ b, versionId: v?.id ?? null, manifest });
@@ -323,6 +359,16 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         if (prior.requestHash !== hash) throw new ApiError(409, "幂等键对应不同请求");
         return { taskId: prior.id, status: prior.status, duplicate: true };
       }
+      let modelConnectionRevision: string | undefined;
+      if (modelGrant) {
+        const binding = await readyPersonalModel(db, p, modelGrant).catch((error: unknown) => {
+          throw new ApiError(409, describeProviderError(error).message);
+        });
+        if (!binding) throw new ApiError(409, "请在设置中配置并验证此 Agent 授权的个人模型");
+        modelConnectionRevision = binding.revision;
+      } else if (env.personalModelOnly()) {
+        throw new ApiError(409, "此 Agent 版本尚未审批个人模型端点和模型名");
+      }
       if (
         (await tx.task.count({
           where: { organizationId: p.organizationId, status: { in: ["QUEUED", "RUNNING"] } },
@@ -335,6 +381,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
           projectId: b.projectId ?? null,
           agentVersionId: v?.id ?? null,
           executionSnapshot: manifest as unknown as Prisma.InputJsonValue,
+          modelConnectionRevision,
           title: (draft ? "【草稿测试】" : "") + b.prompt.slice(0, 80),
           prompt: b.prompt,
           createdBy: p.userId,
@@ -403,6 +450,39 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       runtime: env.porosRuntime(),
     });
   });
+  app.get("/api/tasks", async (req, reply) => {
+    const p = requirePrincipal(req, reply);
+    if (!p) return;
+    const tasks = await db.task.findMany({
+      where: {
+        organizationId: p.organizationId,
+        createdBy: p.userId,
+        ...(p.role !== "ADMIN"
+          ? { OR: [{ projectId: null }, { project: { members: { some: { userId: p.userId } } } }] }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 25,
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        createdAt: true,
+        attempts: true,
+        maxAttempts: true,
+        executionSnapshot: true,
+      },
+    });
+    return {
+      ok: true,
+      tasks: tasks.map(({ executionSnapshot, ...task }) => ({
+        ...task,
+        sensitive: Array.isArray((executionSnapshot as Partial<Manifest>)?.grants)
+          ? sensitiveTools((executionSnapshot as unknown as Manifest).grants)
+          : [],
+      })),
+    };
+  });
   app.get("/api/tasks/:id", async (req, reply) => {
     const p = requirePrincipal(req, reply);
     if (!p) return;
@@ -442,13 +522,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       )
         throw new ApiError(409, "任务不可重试或已达尝试上限");
       const manifest = parseManifest(current.executionSnapshot),
-        tools = manifest.grants
-          .filter(
-            (g) =>
-              g.kind === "TOOL" &&
-              ["bash", "write", "edit", "web.fetch", "web.search"].includes(g.name),
-          )
-          .map((g) => g.name);
+        tools = sensitiveTools(manifest.grants),
+        selected = personalModelGrant(manifest.grants);
+      if (selected) {
+        const binding = await readyPersonalModel(db, p, {
+          ...selected,
+          revision: current.modelConnectionRevision || "",
+        }).catch((error: unknown) => {
+          throw new ApiError(409, describeProviderError(error).message);
+        });
+        if (!binding) throw new ApiError(409, "个人模型已断开，请重新提交任务");
+      }
       if (tools.some((name) => !body.consent.includes(name)))
         throw new ApiError(403, "重试需要重新同意敏感能力");
       const status = tools.length ? ("BLOCKED" as const) : ("QUEUED" as const);
@@ -910,7 +994,16 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await getObject(f.storageKey));
   });
   app.get("/api/integrations/status", async (req, reply) => {
-    if (!requirePrincipal(req, reply)) return;
+    const p = requirePrincipal(req, reply);
+    if (!p) return;
+    const connections = await db.integrationConnection.findMany({
+      where: { organizationId: p.organizationId, userId: p.userId },
+      select: { provider: true, testCode: true },
+    });
+    const state = (provider: string) => {
+      const row = connections.find((item) => item.provider === provider);
+      return row?.testCode === "OK" ? "已验证" : row ? "已保存，尚未验证成功" : "未配置";
+    };
     return {
       ok: true,
       runtime: env.porosRuntime(),
@@ -928,9 +1021,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
           ? "已配置：使用同一准入模型，逐次留痕"
           : "UNCHECKED（未配置真实 Judge）",
       modelDisclaimer: env.modelGateway() === "mock" ? "未配置真实模型服务" : "",
-      kdocs: "未配置/未验证真实服务",
-      ima: "未配置/未验证真实服务",
-      tinyfish: "未配置/未验证真实服务",
+      kdocs: state("kdocs"),
+      ima: state("ima"),
+      tinyfish: state("tinyfish"),
     };
   });
 }

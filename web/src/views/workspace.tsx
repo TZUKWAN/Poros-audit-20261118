@@ -9,6 +9,17 @@ interface AgentRow {
   currentVersion: number;
   versions: Array<{ version: number; manifest: { grants: Array<{ kind: string; name: string }> } }>;
 }
+interface RecentTask {
+  id: string;
+  title: string;
+  status: string;
+  sensitive: string[];
+}
+function requestKey(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
 export default function WorkspaceView({ role }: { role: string }) {
   const [agents, setAgents] = useState<AgentRow[]>([]),
     [agentId, setAgentId] = useState(""),
@@ -19,10 +30,21 @@ export default function WorkspaceView({ role }: { role: string }) {
   const [last, setLast] = useState<{
     taskId: string;
     status: string;
-    runtime: string;
+    runtime?: string;
+    sensitive: string[];
     pendingApproval: boolean;
   } | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [recent, setRecent] = useState<RecentTask[]>([]);
+  const [recentError, setRecentError] = useState("");
+  const [retryConsent, setRetryConsent] = useState(false);
+  const refreshRecent = useCallback(async () => {
+    const r = await api<{ tasks: RecentTask[] }>("GET", "/api/tasks");
+    if (r.ok) {
+      setRecent(r.body.tasks);
+      setRecentError("");
+    } else setRecentError(r.body.error ?? "读取任务失败");
+  }, []);
   const pendingRequest = useRef<{ body: string; key: string } | null>(null);
   const onStatus = useCallback(
     (status: string, pendingApproval = false) =>
@@ -51,21 +73,23 @@ export default function WorkspaceView({ role }: { role: string }) {
         setAgentId(r.body.agents.find((a) => a.releaseReady)?.id ?? "");
       }
     });
-  }, []);
+    void refreshRecent();
+  }, [refreshRecent]);
   return (
     <div className="space-y-4">
       <Card>
-        <div className="mb-3 flex gap-2">
+        <div className="mb-3 flex flex-wrap gap-2">
           <span>下达任务 · {role}</span>
           {last && (
             <>
-              <Badge tone="brand">{last.runtime}</Badge>
+              {last.runtime && <Badge tone="brand">{last.runtime}</Badge>}
               <StatusBadge status={last.status} />
             </>
           )}
         </div>
         <Select
           aria-label="Agent"
+          className="max-w-full"
           value={agentId}
           onChange={(e) => {
             setAgentId(e.target.value);
@@ -108,7 +132,7 @@ export default function WorkspaceView({ role }: { role: string }) {
               const body = { agentId, prompt, consent: consent ? sensitive : [] },
                 encoded = JSON.stringify(body);
               if (pendingRequest.current?.body !== encoded)
-                pendingRequest.current = { body: encoded, key: crypto.randomUUID() };
+                pendingRequest.current = { body: encoded, key: requestKey() };
               const r = await api<{ taskId: string; status: string; runtime: string }>(
                 "POST",
                 "/api/tasks",
@@ -117,8 +141,10 @@ export default function WorkspaceView({ role }: { role: string }) {
               );
               if (r.ok) {
                 pendingRequest.current = null;
-                setLast({ ...r.body, pendingApproval: r.body.status === "BLOCKED" });
+                setLast({ ...r.body, sensitive, pendingApproval: r.body.status === "BLOCKED" });
                 setConsent(false);
+                setRetryConsent(false);
+                void refreshRecent();
               } else setError(r.body.error ?? "提交失败");
             } catch {
               setError("网络中断，请检查连接");
@@ -130,25 +156,37 @@ export default function WorkspaceView({ role }: { role: string }) {
           {busy ? "提交中…" : "提交任务"}
         </Button>
         {last && (
-          <>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <Button
               variant="ghost"
               disabled={!["QUEUED", "RUNNING", "BLOCKED"].includes(last.status)}
               onClick={async () => {
                 const r = await api("POST", `/api/tasks/${last.taskId}/cancel`);
                 if (!r.ok) setError(r.body.error ?? "取消失败");
+                else void refreshRecent();
               }}
             >
               取消
             </Button>
+            {["FAILED", "TIMED_OUT"].includes(last.status) && last.sensitive.length > 0 && (
+              <label className="w-full text-sm">
+                <input
+                  type="checkbox"
+                  checked={retryConsent}
+                  onChange={(e) => setRetryConsent(e.target.checked)}
+                />{" "}
+                同意重试使用 {last.sensitive.join("、")}
+              </label>
+            )}
             <Button
               variant="ghost"
               disabled={
-                !["FAILED", "TIMED_OUT"].includes(last.status) || (sensitive.length > 0 && !consent)
+                !["FAILED", "TIMED_OUT"].includes(last.status) ||
+                (last.sensitive.length > 0 && !retryConsent)
               }
               onClick={async () => {
                 const r = await api<{ status: string }>("POST", `/api/tasks/${last.taskId}/retry`, {
-                  consent: consent ? sensitive : [],
+                  consent: retryConsent ? last.sensitive : [],
                 });
                 if (r.ok) {
                   setLast({
@@ -156,16 +194,17 @@ export default function WorkspaceView({ role }: { role: string }) {
                     status: r.body.status,
                     pendingApproval: r.body.status === "BLOCKED",
                   });
-                  setConsent(false);
+                  setRetryConsent(false);
                   setError("");
                   setAttempt((a) => a + 1);
+                  void refreshRecent();
                 } else setError(r.body.error ?? "重试失败");
               }}
             >
               重试
             </Button>
-            <p className="mt-2 text-xs">任务 ID：{last.taskId}</p>
-          </>
+            <p className="break-all text-xs">任务 ID：{last.taskId}</p>
+          </div>
         )}
         {last?.pendingApproval && last.status === "BLOCKED" && (
           <p role="status" className="mt-2 text-sm">
@@ -181,6 +220,43 @@ export default function WorkspaceView({ role }: { role: string }) {
       {last && (
         <RunEvents key={`${last.taskId}:${attempt}`} taskId={last.taskId} onStatus={onStatus} />
       )}
+      <Card>
+        <div className="flex justify-between gap-2">
+          <h2 className="font-medium">我的任务</h2>
+          <Button variant="ghost" onClick={refreshRecent}>
+            刷新任务
+          </Button>
+        </div>
+        {recentError && (
+          <p role="alert" className="text-sm">
+            {recentError}
+          </p>
+        )}
+        {recent.length === 0 && !recentError && (
+          <p className="mt-2 text-sm text-[#5c5a55]">暂无任务</p>
+        )}
+        <ul className="mt-2 grid gap-2">
+          {recent.map((task) => (
+            <li key={task.id}>
+              <button
+                className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border border-[#e3e1dc] px-3 py-2 text-left text-sm"
+                onClick={() => {
+                  setRetryConsent(false);
+                  setLast({
+                    taskId: task.id,
+                    status: task.status,
+                    sensitive: task.sensitive,
+                    pendingApproval: false,
+                  });
+                }}
+              >
+                <span className="min-w-0 break-words">{task.title}</span>
+                <StatusBadge status={task.id === last?.taskId ? last.status : task.status} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </Card>
     </div>
   );
 }
