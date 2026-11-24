@@ -171,6 +171,12 @@ export async function registerFileRoutes(app: FastifyInstance) {
       hasMore: rows.length > 25,
     };
   });
+  app.get("/api/files/:id", async (req, reply) => {
+    const p = requirePrincipal(req, reply);
+    if (!p) return;
+    const file = await getFile(p, idParam.parse(req.params).id);
+    return { ok: true, file: fileView(file) };
+  });
   app.get("/api/files/:id/preview", async (req, reply) => {
     const p = requirePrincipal(req, reply);
     if (!p) return;

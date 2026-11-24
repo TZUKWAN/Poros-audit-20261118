@@ -66,6 +66,33 @@ export const digest = (value: unknown) =>
   );
 export const matchesFrozenDigest = (value: unknown, hash: unknown) =>
   typeof hash === "string" && (digest(value) === hash || shaJson(JSON.stringify(value)) === hash);
+export const draftRevision = (agent: {
+  name: string;
+  description: string;
+  department: string;
+  draftConfig: Prisma.JsonValue;
+}) =>
+  digest({
+    name: agent.name,
+    description: agent.description,
+    department: agent.department,
+    config: agent.draftConfig,
+  });
+export const publicationRevision = (
+  agent: Parameters<typeof draftRevision>[0] & { grants: DshGrant[] },
+) =>
+  digest({
+    draft: draftRevision(agent),
+    grants: agent.grants
+      .map(({ kind, name, source, version, scopeNote }) => ({
+        kind,
+        name,
+        source,
+        version,
+        scopeNote,
+      }))
+      .sort((a, b) => (a.kind + a.name).localeCompare(b.kind + b.name)),
+  });
 export function validateGrant(g: DshGrant): void {
   if (connectorFor(g)) return;
   if (
@@ -123,7 +150,12 @@ export function parseManifest(raw: unknown): Manifest {
   validateModelPolicy(m);
   return m;
 }
-export async function requestPublication(db: PrismaClient, p: Principal, agentId: string) {
+export async function requestPublication(
+  db: PrismaClient,
+  p: Principal,
+  agentId: string,
+  expectedRevision?: string,
+) {
   return db.$transaction(async (tx) => {
     // Serialize release allocation *and* draft/grant reads on the same Agent row.
     await tx.$queryRaw`SELECT id FROM "AgentDefinition" WHERE id=${agentId} AND "organizationId"=${p.organizationId} FOR UPDATE`;
@@ -132,6 +164,8 @@ export async function requestPublication(db: PrismaClient, p: Principal, agentId
       include: { grants: true },
     });
     if (!a) throw new ApiError(404, "Agent 不存在");
+    if (expectedRevision && publicationRevision(a) !== expectedRevision)
+      throw new ApiError(409, "草稿或能力授权已有更新，请刷新并核对后重新申请发布");
     validateConfig(a.draftConfig);
     for (const grant of a.grants) {
       validateGrant(grant);

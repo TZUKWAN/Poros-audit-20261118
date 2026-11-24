@@ -51,7 +51,7 @@ export interface SettingsBody {
 }
 type Item = { title: string; snippet?: string; url?: string };
 
-export default function IntegrationsView() {
+export default function IntegrationsView({ providers }: { providers?: string[] } = {}) {
   const [state, setState] = useState<SettingsBody | null>(null);
   const [error, setError] = useState("");
   const reload = async () => {
@@ -90,14 +90,16 @@ export default function IntegrationsView() {
       )}
       {!state && !error && <p role="status">正在读取设置…</p>}
       {state &&
-        definitions.map((definition) => (
-          <ConnectionCard
-            key={definition.provider}
-            definition={definition}
-            connection={state.connections.find((row) => row.provider === definition.provider)}
-            reload={reload}
-          />
-        ))}
+        definitions
+          .filter((definition) => !providers || providers.includes(definition.provider))
+          .map((definition) => (
+            <ConnectionCard
+              key={definition.provider}
+              definition={definition}
+              connection={state.connections.find((row) => row.provider === definition.provider)}
+              reload={reload}
+            />
+          ))}
     </div>
   );
 }

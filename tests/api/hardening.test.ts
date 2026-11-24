@@ -12,8 +12,10 @@ let app: FastifyInstance,
   base = "",
   runAgent = "";
 const tokens: Record<string, string> = {};
+const modelEntered = new Set<string>();
 class DelayedModelFixture extends MockGateway {
   override async generate(prompt: string, system: string, options?: { signal?: AbortSignal }) {
+    modelEntered.add(prompt);
     if (prompt.startsWith("@fail")) throw new Error("model unavailable " + process.env.JWT_SECRET);
     const delay = prompt.startsWith("@slow") ? 1500 : 20;
     await new Promise<void>((resolve, reject) => {
@@ -459,9 +461,7 @@ it("membership revocation interrupts an already running authorized task", async 
   expect((await approveSubject(r.json().taskId)).statusCode).toBe(200);
   let entered = false;
   for (let i = 0; i < 40; i++) {
-    if (
-      await db.runEvent.count({ where: { run: { taskId: r.json().taskId }, kind: "judgment" } })
-    ) {
+    if (modelEntered.has("@slow revoked user")) {
       entered = true;
       break;
     }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, download, getToken, saveBlob, setToken } from "../api.js";
 import { dateTime, modelDisplay, sensitiveGrants, type Manifest } from "../pc.js";
-import { Badge, Button, Card, Field, Select, StatusBadge } from "../ui.js";
+import { Badge, Button, Card, Dialog, Field, Select, StatusBadge, Textarea } from "../ui.js";
 import { CorrectionDialog } from "./correction.js";
 
 type Usage = {
@@ -35,7 +35,8 @@ type Run = {
   finishedAt: string | null;
   modelGateway: string;
   modelId: string | null;
-  artifact: { name: string } | null;
+  artifact: { id: string; name: string; revisionOfId: string | null } | null;
+  feedback: Array<{ id: string; createdBy: string; rating: string | null; comment: string }>;
   fileUses: FileUse[];
   applications: Application[];
   usage: Usage;
@@ -57,7 +58,7 @@ type Detail = {
   project: { name: string; archivedAt: string | null } | null;
   approval: { decision: string; decidedBy: string | null } | null;
   inputs: Array<{ file: { id: string; name: string } }>;
-  permissions: { cancel: boolean; retry: boolean; accept: boolean };
+  permissions: { cancel: boolean; retry: boolean; accept: boolean; feedback: boolean };
   runs: Run[];
 };
 
@@ -78,9 +79,17 @@ const recovery: Record<string, string> = {
 export default function RunDetails({
   taskId,
   onChanged,
+  conversationMode = false,
+  onRevise,
+  onConnections,
+  onGovernance,
 }: {
   taskId: string;
   onChanged?: () => void;
+  conversationMode?: boolean;
+  onRevise?: (runId: string) => void;
+  onConnections?: () => void;
+  onGovernance?: (taskId: string) => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [status, setStatus] = useState("");
@@ -91,6 +100,11 @@ export default function RunDetails({
   const [retryConsent, setRetryConsent] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sourcePreview, setSourcePreview] = useState<{
+    name: string;
+    text: string;
+    truncated: boolean;
+  } | null>(null);
   const load = useCallback(async () => {
     const r = await api<Detail>("GET", `/api/tasks/${taskId}`);
     if (r.ok) {
@@ -116,6 +130,8 @@ export default function RunDetails({
   const run = detail?.runs.find((r) => r.id === selected) ?? detail?.runs[0];
   const task = detail?.task;
   const tools = sensitiveGrants(task?.executionSnapshot.grants ?? []);
+  const canCancel =
+    detail?.permissions.cancel && (["QUEUED", "RUNNING"].includes(status) || pending);
   const canRetry =
     detail?.permissions.retry &&
     ["TIMED_OUT", "FAILED"].includes(status) &&
@@ -140,42 +156,26 @@ export default function RunDetails({
   };
   return (
     <section className="space-y-4" aria-label="任务详情">
-      <Card>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-semibold">任务详情</h3>
-          {(status || task) && <StatusBadge status={status || task!.status} />}
-        </div>
+      <Card className={conversationMode ? "!border-0 !bg-transparent !p-0" : ""}>
+        {!conversationMode && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-semibold">任务详情</h3>
+            {(status || task) && <StatusBadge status={status || task!.status} />}
+          </div>
+        )}
         {task && detail && (
           <>
-            <p className="my-3 whitespace-pre-wrap break-words text-sm">{task.prompt}</p>
-            <dl className="grid gap-x-5 gap-y-2 text-sm sm:grid-cols-2 xl:grid-cols-3">
-              {[
-                ["发起人", task.createdBy],
-                ["项目", detail.project?.name ?? "个人任务"],
-                [
-                  "Agent",
-                  (task.executionSnapshot.name ?? "历史任务") +
-                    (detail.version ? ` · v${detail.version}` : " · 草稿"),
-                ],
-                ["创建时间", dateTime(task.createdAt)],
-                ["执行模型", run ? modelDisplay(run.modelGateway, run.modelId) : "等待执行"],
-                ["尝试次数", `${task.attempts} / ${task.maxAttempts}`],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <dt className="text-xs text-slate-500">{label}</dt>
-                  <dd className="break-words">{value}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="mt-3 break-all text-xs text-slate-500">任务 ID {task.id}</p>
-            {!!detail.inputs.length && (
-              <p className="mt-1 text-sm">
-                输入文件 · {detail.inputs.map((i) => i.file.name).join("、")}
-              </p>
+            {!conversationMode && (
+              <p className="my-3 whitespace-pre-wrap break-words text-sm">{task.prompt}</p>
             )}
             {pending && (
               <p role="status" className="mt-3 text-sm text-amber-800">
-                本次敏感操作已提交，请独立审阅者到「审批与规则」决定。
+                本次请求全部列明能力正在等待独立审批，尚未执行。
+                {onGovernance && (
+                  <Button className="ml-2" variant="ghost" onClick={() => onGovernance(taskId)}>
+                    查看审批申请
+                  </Button>
+                )}
               </p>
             )}
             {detail.approval?.decision === "REJECTED" && (
@@ -183,48 +183,79 @@ export default function RunDetails({
                 独立审批拒绝 · {detail.approval.decidedBy}
               </p>
             )}
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Button
-                variant="ghost"
-                disabled={
-                  busy ||
-                  task.cancelRequested ||
-                  !detail.permissions.cancel ||
-                  (!["QUEUED", "RUNNING"].includes(status) && !pending)
-                }
-                onClick={() => void invoke("cancel")}
-              >
-                取消
-              </Button>
-              {canRetry && tools.length > 0 && (
-                <label className="text-sm">
-                  <input
-                    type="checkbox"
-                    checked={retryConsent}
-                    onChange={(e) => setRetryConsent(e.target.checked)}
-                  />{" "}
-                  同意重试使用 {tools.join("、")}
-                </label>
+            {(canCancel || canRetry || detail.runs.length > 1) && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {canCancel && (
+                  <Button
+                    variant="ghost"
+                    disabled={busy || task.cancelRequested}
+                    onClick={() => void invoke("cancel")}
+                  >
+                    {task.cancelRequested ? "正在取消…" : "取消"}
+                  </Button>
+                )}
+                {canRetry && (
+                  <>
+                    {tools.length > 0 && (
+                      <label className="text-sm">
+                        <input
+                          type="checkbox"
+                          checked={retryConsent}
+                          onChange={(e) => setRetryConsent(e.target.checked)}
+                        />{" "}
+                        同意重试使用 {tools.join("、")}
+                      </label>
+                    )}
+                    <Button
+                      variant="ghost"
+                      disabled={busy || (tools.length > 0 && !retryConsent)}
+                      onClick={() => void invoke("retry", { consent: retryConsent ? tools : [] })}
+                    >
+                      重试
+                    </Button>
+                  </>
+                )}
+                {detail.runs.length > 1 && (
+                  <Field label="历史运行">
+                    <Select value={run?.id ?? ""} onChange={(e) => setSelected(e.target.value)}>
+                      {detail.runs.map((r, index) => (
+                        <option key={r.id} value={r.id}>
+                          第 {detail.runs.length - index} 次 · {dateTime(r.startedAt)}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
+              </div>
+            )}
+            <details className="mt-3 border-t border-[#e3e1dc] pt-2">
+              <summary className="cursor-pointer text-sm text-slate-700">任务信息</summary>
+              <dl className="mt-2 grid gap-x-5 gap-y-2 text-sm sm:grid-cols-2 xl:grid-cols-3">
+                {[
+                  ["发起人", task.createdBy],
+                  ["项目", detail.project?.name ?? "个人任务"],
+                  [
+                    "Agent",
+                    (task.executionSnapshot.name ?? "历史任务") +
+                      (detail.version ? ` · v${detail.version}` : " · 草稿"),
+                  ],
+                  ["创建时间", dateTime(task.createdAt)],
+                  ["执行模型", run ? modelDisplay(run.modelGateway, run.modelId) : "等待执行"],
+                  ["尝试次数", `${task.attempts} / ${task.maxAttempts}`],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="text-xs text-slate-500">{label}</dt>
+                    <dd className="break-words">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-3 break-all text-xs text-slate-500">任务 ID {task.id}</p>
+              {detail.inputs.length > 0 && (
+                <p className="mt-1 break-words text-sm">
+                  输入文件 · {detail.inputs.map((i) => i.file.name).join("、")}
+                </p>
               )}
-              <Button
-                variant="ghost"
-                disabled={busy || !canRetry || (tools.length > 0 && !retryConsent)}
-                onClick={() => void invoke("retry", { consent: retryConsent ? tools : [] })}
-              >
-                重试
-              </Button>
-              {detail.runs.length > 0 && (
-                <Field label="历史运行">
-                  <Select value={run?.id ?? ""} onChange={(e) => setSelected(e.target.value)}>
-                    {detail.runs.map((r, index) => (
-                      <option key={r.id} value={r.id}>
-                        第 {detail.runs.length - index} 次 · {dateTime(r.startedAt)}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              )}
-            </div>
+            </details>
           </>
         )}
         {message && (
@@ -257,6 +288,11 @@ export default function RunDetails({
               {run.failureCode && (
                 <p className="mt-1">{recovery[run.failureCode] ?? run.failureCode}</p>
               )}
+              {onConnections && (
+                <Button className="mt-2" variant="ghost" onClick={onConnections}>
+                  检查个人连接
+                </Button>
+              )}
             </div>
           )}
           {run.output && (
@@ -265,6 +301,9 @@ export default function RunDetails({
                 {run.output}
               </pre>
               <div className="flex flex-wrap gap-2">
+                {onRevise && run.finishedAt && (
+                  <Button onClick={() => onRevise(run.id)}>修改此结果</Button>
+                )}
                 <Button
                   variant="ghost"
                   onClick={async () => {
@@ -298,19 +337,55 @@ export default function RunDetails({
                   </Button>
                 )}
                 {detail?.permissions.accept && (
-                  <Button onClick={() => setCorrect(true)}>纠正结果</Button>
+                  <Button variant="ghost" onClick={() => setCorrect(true)}>
+                    建议今后遵循
+                  </Button>
                 )}
               </div>
+              {run.artifact?.revisionOfId && (
+                <p className="mt-2 break-all text-xs text-slate-600">
+                  产物修订 · 源产物 {run.artifact.revisionOfId}。原结果保留。
+                </p>
+              )}
+              <p className="mt-3 text-xs text-slate-600">
+                {run.status === "UNVERIFIED"
+                  ? "执行已产生结果，质量验收尚未验证。测试模型的输出不能作为真实业务验收。"
+                  : run.status === "SUCCEEDED_WITH_VIOLATIONS"
+                    ? "结果未通过列明的质量检查，请查看具体规则。"
+                    : run.status === "SUCCEEDED"
+                      ? "已通过当前配置的质量检查。是否采纳由有资格的发起人决定。"
+                      : "质量状态以本次运行记录为准。"}
+              </p>
+              {detail?.permissions.feedback && run.finishedAt && (
+                <ResultFeedback key={run.id} taskId={taskId} run={run} onSaved={load} />
+              )}
             </>
           )}
           {run.fileUses.length > 0 && (
-            <section className="mt-4">
-              <h4 className="font-medium">文件来源</h4>
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm font-medium">
+                查看文件来源 · {run.fileUses.length} 份
+              </summary>
               <ul className="mt-2 space-y-2 text-sm">
                 {run.fileUses.map((use) => (
                   <li key={use.file.id} className="rounded-lg border border-slate-200 p-2">
                     <Badge>{use.ref}</Badge> {use.file.name} · 读取 {use.chars} 字
                     {use.truncated ? "（节选）" : ""}
+                    <Button
+                      className="ml-2"
+                      variant="ghost"
+                      aria-label={"预览引用文件 " + use.file.name}
+                      onClick={async () => {
+                        const response = await api<{
+                          preview: { text: string; truncated: boolean };
+                        }>("GET", `/api/files/${use.file.id}/preview`, undefined, {}, 30000);
+                        if (response.ok)
+                          setSourcePreview({ name: use.file.name, ...response.body.preview });
+                        else setMessage(response.body.error ?? "来源当前不可读取");
+                      }}
+                    >
+                      预览原文件
+                    </Button>
                     {/^https?:\/\//i.test(use.file.sourceUrl) && (
                       <p className="mt-1 break-all">
                         <a target="_blank" rel="noreferrer" href={use.file.sourceUrl}>
@@ -322,7 +397,7 @@ export default function RunDetails({
                   </li>
                 ))}
               </ul>
-            </section>
+            </details>
           )}
           {run.applications.length > 0 && (
             <section className="mt-4">
@@ -353,12 +428,17 @@ export default function RunDetails({
           )}
         </Card>
       )}
-      <RunTimeline
-        key={streamVersion}
-        taskId={taskId}
-        selected={selected}
-        onStatus={streamStatus}
-      />
+      <details open={!conversationMode} className="rounded-xl border border-[#e3e1dc] bg-white p-3">
+        <summary className="cursor-pointer text-sm font-medium">查看执行过程与证据</summary>
+        <div className="mt-3">
+          <RunTimeline
+            key={streamVersion}
+            taskId={taskId}
+            selected={selected}
+            onStatus={streamStatus}
+          />
+        </div>
+      </details>
       {correct && run && (
         <CorrectionDialog
           taskId={taskId}
@@ -368,7 +448,101 @@ export default function RunDetails({
           close={() => setCorrect(false)}
         />
       )}
+      <Dialog
+        open={Boolean(sourcePreview)}
+        onOpenChange={(open) => !open && setSourcePreview(null)}
+        title={sourcePreview?.name ?? "文件来源"}
+      >
+        {sourcePreview?.truncated && (
+          <p className="mb-2 text-sm text-amber-900">
+            当前显示提取节选，执行使用的字数和摘要记录在来源中。
+          </p>
+        )}
+        <pre className="whitespace-pre-wrap break-words font-sans text-sm">
+          {sourcePreview?.text}
+        </pre>
+        <Button className="mt-4" variant="ghost" onClick={() => setSourcePreview(null)}>
+          返回结果
+        </Button>
+      </Dialog>
     </section>
+  );
+}
+
+function ResultFeedback({
+  taskId,
+  run,
+  onSaved,
+}: {
+  taskId: string;
+  run: Run;
+  onSaved: () => Promise<void>;
+}) {
+  const [rating, setRating] = useState("");
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  return (
+    <details className="mt-4 border-t border-[#e3e1dc] pt-3">
+      <summary className="cursor-pointer text-sm">
+        评价这次结果{run.feedback?.length ? ` · ${run.feedback.length} 条` : ""}
+      </summary>
+      <p className="my-2 text-xs text-slate-600">
+        评价只记录本次反馈。修改结果请用「修改此结果」，长期标准请用「建议今后遵循」。
+      </p>
+      <form
+        className="grid gap-2"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setBusy(true);
+          const r = await api("POST", `/api/tasks/${taskId}/runs/${run.id}/feedback`, {
+            rating: rating || null,
+            comment,
+          });
+          setBusy(false);
+          setMessage(
+            r.ok ? "本次评价已记录，质量状态保持原判定" : (r.body.error ?? "评价保存失败"),
+          );
+          if (r.ok) await onSaved();
+        }}
+      >
+        <Field label="本次评价">
+          <Select value={rating} onChange={(e) => setRating(e.target.value)}>
+            <option value="">仅填写意见</option>
+            <option value="HELPFUL">有帮助</option>
+            <option value="NEEDS_CHANGES">需要调整</option>
+          </Select>
+        </Field>
+        <Textarea
+          aria-label="本次结果意见"
+          rows={2}
+          value={comment}
+          maxLength={4000}
+          onChange={(e) => setComment(e.target.value)}
+        />
+        <Button variant="ghost" disabled={busy || !(rating || comment.trim())}>
+          保存本次评价
+        </Button>
+      </form>
+      {message && (
+        <p role="status" className="mt-2 text-sm">
+          {message}
+        </p>
+      )}
+      <ul className="mt-2 space-y-1 text-xs text-slate-600">
+        {run.feedback?.map((feedback) => (
+          <li key={feedback.id}>
+            {feedback.createdBy} ·{" "}
+            {feedback.rating === "HELPFUL"
+              ? "有帮助"
+              : feedback.rating === "NEEDS_CHANGES"
+                ? "需要调整"
+                : "意见"}
+            {feedback.comment ? ` · ${feedback.comment}` : ""}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -381,6 +555,7 @@ const timelineTitles: Record<string, string> = {
   "dsh.tool_call": "工具调用",
   "dsh.tool_result": "工具返回",
   "file.context": "准备文件上下文",
+  "conversation.context": "衔接工作上下文",
   judgment: "Judgment",
   judge: "语义裁决",
   "capability.call": "调用已授权能力",

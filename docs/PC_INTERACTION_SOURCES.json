@@ -1,0 +1,108 @@
+{
+  "date": "2026-11-24",
+  "timezone": "Asia/Shanghai",
+  "method": "官方用户文档、公开产品截图和 Poros 源码只读核查",
+  "qualification": "账号内流程未经走查，Poros 新流程为设计推演",
+  "pages": [
+    "https://doc.fastgpt.io/guide/build/logs",
+    "https://doc.fastgpt.io/guide/build/publish/link",
+    "https://doc.fastgpt.io/guide/build/publish/portal",
+    "https://doc.fastgpt.io/guide/build/publish/versions",
+    "https://docs.coze.cn/guides_agent_quick_start",
+    "https://docs.coze.cn/guides_preview_debug",
+    "https://docs.coze.cn/guides_realese_history",
+    "https://docs.coze.cn/guides_vibe_coding_agent",
+    "https://docs.dify.ai/en/self-host/use-dify/build/predefined-error-handling-logic",
+    "https://docs.dify.ai/en/self-host/use-dify/build/version-control",
+    "https://docs.dify.ai/en/self-host/use-dify/build/workflow-collaboration",
+    "https://docs.dify.ai/en/self-host/use-dify/debug/history-and-logs",
+    "https://docs.dify.ai/en/self-host/use-dify/monitor/annotation-reply",
+    "https://docs.dify.ai/en/self-host/use-dify/monitor/logs",
+    "https://docs.dify.ai/en/self-host/use-dify/nodes/human-input",
+    "https://docs.dify.ai/en/self-host/use-dify/publish/webapp/chatflow-webapp",
+    "https://docs.dify.ai/en/self-host/use-dify/publish/webapp/workflow-webapp",
+    "https://docs.dify.ai/en/self-host/use-dify/workspace/model-providers",
+    "https://docs.n8n.io/build/integrate-ai/ai-examples/human-in-the-loop-for-tools",
+    "https://help.openai.com/en/articles/20001143-chatgpt-workspace-agents-for-enterprise-and-business",
+    "https://learn.microsoft.com/en-us/copilot/manage/copilot-agent-store",
+    "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-test-bot",
+    "https://learn.microsoft.com/en-us/microsoft-copilot-studio/workflows-experience/flows-request-for-information",
+    "https://learn.microsoft.com/en-us/plugins/agent-builder-build-agents",
+    "https://open.manus.im/docs/v2/connectors",
+    "https://open.manus.im/docs/v2/task.sendMessage",
+    "https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork",
+    "https://support.claude.com/en/articles/14116274-organize-your-tasks-with-projects-in-claude-cowork",
+    "https://support.claude.com/en/articles/16761823-claude-cowork-and-chat-are-one-claude",
+    "https://support.claude.com/en/articles/17153992-what-are-artifacts-and-how-do-i-use-them",
+    "https://support.microsoft.com/en-au/sharepoint/copilot-in-sharepoint/interact-with-agents-in-sharepoint",
+    "https://support.microsoft.com/en-us/sharepoint/pages-in-sharepoint/use-agent-chat-web-part",
+    "https://www.manus.im/blog/manus-recommended-connectors",
+    "https://www.manus.im/blog/projects-connectors",
+    "https://www.manus.im/features/projects"
+  ],
+  "images": [
+    {
+      "file": "dify-chat.png",
+      "page": "https://docs.dify.ai/en/self-host/use-dify/publish/webapp/chatflow-webapp",
+      "url": "https://assets-docs.dify.ai/dify-enterprise-mintlify/en/guides/application-publishing/launch-your-webapp-quickly/5b7a6f950ed8a2ce3a705f362b4813fe.png",
+      "bytes": 71975,
+      "sha256": "B0C21B24AA5C2AF7FD3DB858EAE52A1BBE0A12C387EDF958F2809CDBD2C0FF4B"
+    },
+    {
+      "file": "dify-workflow.png",
+      "page": "https://docs.dify.ai/en/self-host/use-dify/publish/webapp/workflow-webapp",
+      "url": "https://assets-docs.dify.ai/dify-enterprise-mintlify/en/guides/application-publishing/launch-your-webapp-quickly/4c5380cf71066d933082f7c30deacb01.png",
+      "bytes": 151326,
+      "sha256": "76C6F41EC11DEF5A3E041D3FE6E328950CD07862C0605B13F3B65D8E0793FB00"
+    },
+    {
+      "file": "microsoft-builder.png",
+      "page": "https://learn.microsoft.com/en-us/plugins/agent-builder-build-agents",
+      "url": "https://learn.microsoft.com/en-us/plugins/assets/images/agent-builder-screenshots/agent-configuration.png",
+      "bytes": 97587,
+      "sha256": "48CC95D85154FD2F055FBA31717289B3054FF3A7C89E6ECBBBA01F67806278D8"
+    },
+    {
+      "file": "coze-lowcode.webp",
+      "page": "https://docs.coze.cn/guides_agent_quick_start",
+      "url": "https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/4ed20d01d89349d78891b5f7d28cf528~tplv-goo7wpa0wc-topic.webp",
+      "bytes": 11616,
+      "sha256": "592040583C687825D20D55E1F7A4A77C40789F855109B1F4FE87FA4AC80F0578"
+    },
+    {
+      "file": "coze-coding.webp",
+      "page": "https://docs.coze.cn/guides_vibe_coding_agent",
+      "url": "https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/f023dd389f5f46ea9db7118331ab0723~tplv-goo7wpa0wc-topic.webp",
+      "bytes": 97782,
+      "sha256": "041196FF5F4E5F45DD929F45D69D32F66F24E8BB2842784CB65AB500D98DF0D0"
+    },
+    {
+      "file": "manus-connector-request.webp",
+      "page": "https://www.manus.im/blog/manus-recommended-connectors",
+      "url": "https://files.manuscdn.com/assets/dashboard/materials/2026/05/05/c47da98d92926992b5b285a6e8c2a2df81f8d8fc25a7ed35fccc81257b4f45e9.webp",
+      "bytes": 86198,
+      "sha256": "C47DA98D92926992B5B285A6E8C2A2DF81F8D8FC25A7ED35FCCC81257B4F45E9"
+    },
+    {
+      "file": "manus-connector-continue.webp",
+      "page": "https://www.manus.im/blog/manus-recommended-connectors",
+      "url": "https://files.manuscdn.com/assets/dashboard/materials/2026/05/05/3513322f5d39001c30ba8c6e102e8adf099937f3e4dcc06621e3e272c43a0a29.webp",
+      "bytes": 42512,
+      "sha256": "3513322F5D39001C30BA8C6E102E8ADF099937F3E4DCC06621E3E272C43A0A29"
+    },
+    {
+      "file": "coze-debug.webp",
+      "page": "https://docs.coze.cn/guides_agent_quick_start",
+      "url": "https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/e7829808839648a8b184ed9b4747ee9e~tplv-goo7wpa0wc-topic.webp",
+      "bytes": 51154,
+      "sha256": "7D00F276066965A7C8EF0584415CF9FD4BCAE2FF3833149F3EB99C6BFF6DF5B1"
+    },
+    {
+      "file": "fastgpt-portal.webp",
+      "page": "https://doc.fastgpt.io/guide/build/publish/portal",
+      "url": "https://cdn.jsdelivr.net/gh/labring/fastgpt-img@main/optimized/current/portal-visibility.png.webp",
+      "bytes": 27034,
+      "sha256": "0EF5C41C52A81DA79AF864B7653E0F7E68E7955D366CE682463B3EB6FE09B3BE"
+    }
+  ]
+}

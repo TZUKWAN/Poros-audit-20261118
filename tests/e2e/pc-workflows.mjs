@@ -36,7 +36,9 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     page.setDefaultTimeout(20000);
   });
   const btn = (page, name) => page.getByRole("button", { name, exact: true });
-  const tab = (page, name) => page.getByRole("tab", { name, exact: true }).click();
+  const tab = async (page, name) => {
+    await page.getByRole("tab", { name, exact: true }).click();
+  };
   const wait = (page, text, timeout = 20000) =>
     page.getByText(text, { exact: false }).first().waitFor({ timeout });
   const uiLogin = async (page, role, account = `${role}@a.test`, password = `${role}-pass-123`) => {
@@ -88,6 +90,11 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
       uiLogin(reviewer, "reviewer"),
       uiLogin(employee, "employee"),
     ]);
+    assert.equal(await reviewer.getByRole("tab", { name: "审批与规则" }).isVisible(), true);
+    assert.equal(await employee.getByRole("tab", { name: "审批与规则" }).isVisible(), true);
+    assert.equal(await employee.getByLabel("Agent", { exact: true }).inputValue(), "");
+    assert.equal(await employee.getByLabel("任务", { exact: true }).isVisible(), true);
+    assert.equal(await employee.getByLabel("任务项目").isVisible(), false);
     await tab(admin, "设置");
     await admin.getByRole("heading", { name: "组织账号管理" }).waitFor();
     await tab(employee, "设置");
@@ -203,6 +210,7 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
       await tab(admin, "工作台");
       await tab(admin, "Agent 目录");
       await admin.getByRole("button", { name: new RegExp(agentName) }).click();
+      await btn(admin, "编辑与测试").click();
       await admin.getByRole("heading", { name: "Builder · " + agentName }).waitFor();
     };
     await publish("批准");
@@ -230,6 +238,21 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     );
     await screenshot(admin, "02-builder-and-versions-1920");
     await mark("PC-07", { agentId, approved: [1, 3], rejected: 2, rollback: 1 });
+    const conflictInput = "浏览器未保存的修改 " + nonce;
+    await admin.getByLabel("角色与任务").fill(conflictInput);
+    const concurrent = await api("PATCH", `/api/agents/${agentId}/draft`, token, {
+      config: { persona: "另一位编辑者保存 " + nonce },
+    });
+    assert.equal(concurrent.status, 200, concurrent.text);
+    await btn(admin, "保存草稿").click();
+    await wait(admin, "草稿保存发生冲突");
+    assert.equal(await admin.getByLabel("角色与任务").inputValue(), conflictInput);
+    await btn(admin, "采用当前已保存版本").click();
+    assert.equal(await admin.getByLabel("角色与任务").inputValue(), "另一位编辑者保存 " + nonce);
+    await mark(
+      "IX-01",
+      "Concurrent draft save rejected with HTTP409; local input preserved and current saved version explicitly adopted",
+    );
 
     await tab(admin, "项目空间");
     await admin.getByRole("button", { name: new RegExp(projectName) }).click();
@@ -282,15 +305,43 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     const download = await downloaded;
     assert.deepEqual(await readFile(await download.path()), files[0][1]);
     await screenshot(admin, "03-files-1920");
+    await btn(admin, "处理文件 brief.md").click();
+    assert.equal(await admin.getByLabel("任务项目").inputValue(), projectId);
+    assert.equal(await admin.getByLabel("Agent", { exact: true }).inputValue(), "");
+    await wait(admin, "已提取文字");
+    await admin.getByLabel("任务", { exact: true }).fill("从项目文件开始的草稿 " + nonce);
+    await btn(admin, "个人连接").click();
+    await admin
+      .getByRole("dialog", { name: "当前账号的个人连接" })
+      .getByRole("heading", { name: "Kdocs 金山文档" })
+      .waitFor();
+    await btn(admin, "返回当前工作").click();
+    assert.equal(
+      await admin.getByLabel("任务", { exact: true }).inputValue(),
+      "从项目文件开始的草稿 " + nonce,
+    );
+    await admin.reload();
+    assert.equal(
+      await admin.getByLabel("任务", { exact: true }).inputValue(),
+      "从项目文件开始的草稿 " + nonce,
+    );
+    assert.equal(await admin.getByLabel("任务项目").inputValue(), projectId);
+    await wait(admin, "已提取文字");
+    await btn(admin, "返回项目").click();
+    await admin.getByRole("heading", { name: projectName, exact: true }).waitFor();
+    await mark(
+      "IX-02",
+      "File entry carries exact project and file; explicit assistant selection, in-context settings and draft survive reload; return opens the same project",
+    );
 
     const submit = async (prompt, pins = []) => {
       await tab(employee, "工作台");
+      await btn(employee, "新建工作").click();
+      await employee.locator("summary").filter({ hasText: "项目与文件" }).click();
       await employee.getByLabel("任务项目").selectOption(projectId);
       await employee.getByLabel("Agent", { exact: true }).selectOption(agentId);
       await employee.getByLabel("任务", { exact: true }).fill(prompt);
       if (pins.length) {
-        const picker = employee.locator("summary").filter({ hasText: "输入文件" });
-        if (!(await employee.getByLabel("任务输入文件").isVisible())) await picker.click();
         for (const name of pins) {
           const listed = await api(
             "GET",
@@ -305,8 +356,10 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
         }
       }
       await employee.getByRole("checkbox", { name: /同意本次使用/ }).check();
-      await btn(employee, "提交任务").click();
-      await wait(employee, "本次敏感操作已提交");
+      await btn(employee, "开始工作").click();
+      await wait(employee, "正在等待独立审批");
+      assert.equal(await employee.getByLabel("任务", { exact: true }).isVisible(), true);
+      await employee.locator("summary").filter({ hasText: "查看执行过程与证据" }).click();
       return latestTask(employeeToken, prompt);
     };
     const approveTask = async (taskId, decision = "批准") => {
@@ -338,6 +391,13 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     };
     const firstPrompt = "PC 文件与执行验收 " + nonce;
     const firstId = await submit(firstPrompt, ["brief.md", "policy.docx", "table.xlsx"]);
+    await btn(employee, "查看审批申请").click();
+    await employee.getByRole("heading", { name: "我的审批申请" }).waitFor();
+    assert.equal(await btn(employee, "批准").count(), 0);
+    await wait(employee, "当前显示所选请求的审批记录");
+    await btn(employee, "返回原工作").click();
+    await wait(employee, "正在等待独立审批");
+    await employee.locator("summary").filter({ hasText: "查看执行过程与证据" }).click();
     await approveTask(firstId);
     await employee.getByText("已结束", { exact: true }).waitFor({ timeout: 45000 });
     const firstRun = await finish(firstId, employeeToken);
@@ -377,9 +437,72 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
       modelTransportRefs: firstRun.fileUses.map((u) => u.ref),
       runId: firstRun.id,
     });
+    await employee.locator("summary").filter({ hasText: "查看文件来源" }).click();
+    await btn(employee, "预览引用文件 brief.md").click();
+    await employee
+      .getByRole("dialog", { name: "brief.md" })
+      .getByText(files[0][2], { exact: false })
+      .waitFor();
+    await btn(employee, "返回结果").click();
     await screenshot(employee, "04-run-with-files-1366");
+    await employee.locator("summary").filter({ hasText: "查看文件来源" }).click();
 
-    await btn(employee, "纠正结果").click();
+    const originalWorkUrl = employee.url();
+    await employee.locator("summary").filter({ hasText: "评价这次结果" }).click();
+    await employee.getByLabel("本次评价").selectOption("NEEDS_CHANGES");
+    await employee.getByLabel("本次结果意见").fill("只调整本次简报，不增加长期规则");
+    await btn(employee, "保存本次评价").click();
+    await wait(employee, "本次评价已记录");
+    assert.equal(await db.runFeedback.count({ where: { runId: firstRun.id } }), 1);
+    assert.equal(await db.judgmentRule.count({ where: { sourceRunId: firstRun.id } }), 0);
+    assert.equal((await finish(firstId, employeeToken)).status, "UNVERIFIED");
+    await btn(employee, "修改此结果").click();
+    const revisionPrompt = "把这份简报改为三点结论 " + nonce;
+    await employee.getByLabel("任务", { exact: true }).fill(revisionPrompt);
+    await employee.getByRole("checkbox", { name: /同意本次使用/ }).check();
+    await btn(employee, "发送修改要求").click();
+    await wait(employee, "正在等待独立审批");
+    const revisedId = await latestTask(employeeToken, revisionPrompt);
+    const originalTask = await db.task.findUniqueOrThrow({ where: { id: firstId } });
+    const revisedTask = await db.task.findUniqueOrThrow({ where: { id: revisedId } });
+    assert.equal(revisedTask.conversationId, originalTask.conversationId);
+    assert.equal(revisedTask.parentRunId, firstRun.id);
+    assert.equal(revisedTask.intent, "REVISION");
+    assert.equal(revisedTask.turn, 2);
+    await employee.locator("summary").filter({ hasText: "查看执行过程与证据" }).click();
+    await approveTask(revisedId);
+    await employee.getByText("已结束", { exact: true }).waitFor({ timeout: 45000 });
+    const revisedRun = await finish(revisedId, employeeToken);
+    assert.equal(revisedRun.artifact.revisionOfId, firstRun.artifact.id);
+    assert.equal(
+      (await db.task.findUniqueOrThrow({ where: { id: revisedId } })).contextSnapshot.entries[0]
+        .output,
+      firstRun.output,
+    );
+    for (const [, , marker] of files.slice(0, 3))
+      assert.ok(revisedRun.output.includes(marker), revisedRun.output);
+    assert.equal((await finish(firstId, employeeToken)).output, firstRun.output);
+    const revisedWorkUrl = employee.url();
+    assert.equal(
+      new URL(revisedWorkUrl).hash.split("?")[0],
+      new URL(originalWorkUrl).hash.split("?")[0],
+    );
+    await employee.reload();
+    assert.equal(employee.url(), revisedWorkUrl);
+    await employee.getByText(revisionPrompt, { exact: true }).waitFor();
+    await btn(employee, "查看第 1 条结果与过程").click();
+    await mark("IX-03", {
+      conversationId: originalTask.conversationId,
+      original: firstRun.id,
+      revised: revisedRun.id,
+      feedbackIndependent: true,
+      priorOutputReachedContext: true,
+      artifactRevisionLinked: true,
+      stableReloadUrl: true,
+    });
+    await screenshot(employee, "08-continuous-work-1366");
+
+    await btn(employee, "建议今后遵循").click();
     await employee.getByLabel("纠正说明").fill("验证将明确纠正关联到这次运行。");
     await employee.getByLabel("检查文本").fill("POROS-DSH-OK");
     await btn(employee, "提交纠正").click();
@@ -420,16 +543,50 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     await tab(admin, "项目空间");
     await admin.getByRole("button", { name: new RegExp(projectName) }).click();
     await btn(admin, "文件").click();
-    await admin
-      .getByLabel("上传文件")
-      .setInputFiles({
-        name: "invalid.pdf",
-        mimeType: "application/pdf",
-        buffer: Buffer.from("not a PDF body"),
-      });
+    await admin.getByLabel("上传文件").setInputFiles({
+      name: "invalid.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("not a PDF body"),
+    });
     await btn(admin, "上传").click();
     await btn(admin, "预览 invalid.pdf").waitFor();
-    const bad = await submit("PC 失败与重试 " + nonce, ["invalid.pdf"]);
+    await tab(employee, "工作台");
+    await btn(employee, "新建工作").click();
+    await employee.locator("summary").filter({ hasText: "项目与文件" }).click();
+    await employee.getByLabel("任务项目").selectOption(projectId);
+    await employee.getByLabel("Agent", { exact: true }).selectOption(agentId);
+    await employee.getByLabel("任务", { exact: true }).fill("PC 失败与重试 " + nonce);
+    const badFile = (
+      await api("GET", `/api/files?projectId=${projectId}&q=invalid.pdf`, employeeToken)
+    ).json.files[0];
+    await employee.getByLabel("任务输入文件").selectOption(badFile.id);
+    const failedPreview = employee.waitForResponse((response) =>
+      response.url().endsWith(`/api/files/${badFile.id}/preview`),
+    );
+    await btn(employee, "添加输入文件").click();
+    const previewFailure = await failedPreview;
+    assert.equal(previewFailure.status(), 422);
+    await wait(employee, (await previewFailure.json()).error);
+    assert.equal(await btn(employee, "开始工作").isDisabled(), true);
+    // The form rejects unreadable input; the API still exercises runtime failure and controlled retry.
+    const badAdmission = await api(
+      "POST",
+      "/api/tasks",
+      employeeToken,
+      {
+        agentId,
+        projectId,
+        prompt: "PC 失败与重试 " + nonce,
+        fileIds: [badFile.id],
+        consent: ["bash"],
+      },
+      randomUUID(),
+    );
+    assert.equal(badAdmission.status, 202, badAdmission.text);
+    const bad = badAdmission.json.taskId;
+    await employee.goto(base + "#/work/" + badAdmission.json.conversationId);
+    await wait(employee, "正在等待独立审批");
+    await employee.locator("summary").filter({ hasText: "查看执行过程与证据" }).click();
     await approveTask(bad);
     await employee.getByText("已结束", { exact: true }).waitFor({ timeout: 45000 });
     assert.equal((await finish(bad, employeeToken)).failureCode, "FILE_READ_FAILED");
@@ -454,7 +611,10 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
       transport: "durable SSE and PC cancellation/retry/history",
     });
 
-    await tab(employee, "设置");
+    await tab(employee, "工作台");
+    await btn(employee, "新建工作").click();
+    await employee.getByLabel("任务", { exact: true }).fill("连接恢复后继续的原要求 " + nonce);
+    await btn(employee, "个人连接").click();
     const modelPanel = employee
       .getByRole("heading", { name: "大模型 API", exact: true })
       .locator("../..");
@@ -477,6 +637,11 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     await modelPanel.getByText("已验证", { exact: true }).waitFor();
     await modelPanel.getByRole("button", { name: "断开" }).click();
     await modelPanel.getByText("未配置", { exact: true }).waitFor();
+    await btn(employee, "返回当前工作").click();
+    assert.equal(
+      await employee.getByLabel("任务", { exact: true }).inputValue(),
+      "连接恢复后继续的原要求 " + nonce,
+    );
     await mark(
       "PC-13",
       "Browser checks actual 401 display, credential replacement, verification with a wire fixture and disconnect; API adds 403/429/503/timeout",
@@ -520,11 +685,12 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
 
     await tab(admin, "Agent 目录");
     await admin.getByRole("button", { name: new RegExp(agentName) }).click();
+    await btn(admin, "编辑与测试").click();
     await admin.getByLabel("测试项目").selectOption(projectId);
     await admin.getByLabel("测试任务").fill("PC 草稿运行验收 " + nonce);
     await admin.getByRole("checkbox", { name: /同意本次使用/ }).check();
     await btn(admin, "运行草稿测试").click();
-    await wait(admin, "本次敏感操作已提交");
+    await wait(admin, "正在等待独立审批");
     const draft = await latestTask(token, "PC 草稿运行验收 " + nonce);
     await approveTask(draft);
     await admin.getByText("已结束", { exact: true }).waitFor({ timeout: 45000 });
@@ -534,12 +700,43 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     assert.equal((await db.task.findUnique({ where: { id: draft } })).agentVersionId, null);
     await mark("PC-06", { draft, runId: draftRun.id, model: "poros-stub", outcome: "UNVERIFIED" });
 
+    // Cancelled metadata fixtures exercise history pagination without pretending to run 20 models.
+    await db.task.createMany({
+      data: Array.from({ length: 20 }, (_, index) => ({
+        organizationId: "org-a",
+        projectId,
+        agentVersionId: originalTask.agentVersionId,
+        conversationId: originalTask.conversationId,
+        turn: index + 3,
+        intent: "FOLLOW_UP",
+        title: "Cancelled pagination fixture",
+        prompt: "Cancelled pagination fixture " + index,
+        status: "CANCELLED",
+        createdBy: "employee@a.test",
+        executionSnapshot: originalTask.executionSnapshot,
+      })),
+    });
+    await employee.goto(base + "#/work/" + originalTask.conversationId + "?task=" + firstId);
+    await employee.getByRole("heading", { name: "已定位到第 1 条请求" }).waitFor();
+    await employee.getByText(firstRun.id, { exact: false }).first().waitFor();
+    assert.equal(await employee.getByLabel("任务详情").count(), 1);
+    await mark(
+      "IX-04",
+      "A stable request link opens the original real result beyond the latest 20 turns; one active result/SSE view",
+    );
+
     await restart();
     await employee.reload();
     await employee.getByRole("heading", { name: "Poros 工作台" }).waitFor();
     await employee.getByRole("button", { name: new RegExp(firstPrompt) }).click();
     await employee.getByText(files[0][2], { exact: false }).first().waitFor();
     assert.equal((await finish(firstId, employeeToken)).id, firstRun.id);
+    await btn(employee, "新建工作").click();
+    const draftInput = employee.getByLabel("任务", { exact: true });
+    await draftInput.fill("浏览任务时保留这段文字");
+    await employee.getByRole("button", { name: new RegExp(firstPrompt) }).click();
+    await btn(employee, "新建工作").click();
+    assert.equal(await draftInput.inputValue(), "浏览任务时保留这段文字");
     await mark("PC-14", {
       taskId: firstId,
       runId: firstRun.id,
@@ -567,6 +764,12 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
       archivePreservedData: true,
     });
     assert.deepEqual(errors, []);
+  } catch (error) {
+    for (const [index, page] of pages.entries())
+      await page
+        .screenshot({ path: path.join(evidence, `failure-${index}.png`), fullPage: true })
+        .catch(() => {});
+    throw error;
   } finally {
     await Promise.all(pages.map((p) => p.close()));
   }

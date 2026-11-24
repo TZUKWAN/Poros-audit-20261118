@@ -114,7 +114,10 @@ export function CorrectionDialog({
   const [message, setMessage] = useState("");
   const [submitted, setSubmitted] = useState(false);
   return (
-    <Dialog open onOpenChange={(open) => !open && close()} title="纠正结果">
+    <Dialog open onOpenChange={(open) => !open && close()} title="建议今后遵循">
+      <p className="mb-3 text-sm text-slate-600">
+        把这次经验提为长期规则候选，独立审批通过后才影响今后的执行。本次结果不会因此改写。
+      </p>
       <p className="mb-3 break-all text-sm text-slate-600">
         运行 {runId} · {version ? `Agent v${version}` : "草稿测试"}
       </p>

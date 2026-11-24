@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import type { Prisma, JudgmentRule } from "@prisma/client";
+import type { Prisma, JudgmentRule, Task } from "@prisma/client";
 import { getDb } from "../db.js";
 import {
   requirePrincipal,
@@ -33,6 +33,8 @@ import {
   editableConfig,
   parseManifest,
   digest,
+  draftRevision,
+  publicationRevision,
   matchesFrozenDigest,
   ApiError,
   type Manifest,
@@ -41,6 +43,7 @@ import { parseMechanical, ruleConflict } from "../judgment.js";
 import { consumeLimit } from "../security.js";
 import { TERMINAL } from "../worker.js";
 import { recordAudit } from "./projects.js";
+import { admitConversation } from "../conversations.js";
 import {
   connectorFor,
   managedSource,
@@ -212,6 +215,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         department: z.string().max(120).optional(),
         config: configSchema.optional(),
         replaceConfig: z.boolean().default(false),
+        expectedRevision: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
       })
       .parse(req.body);
     return db.$transaction(async (tx) => {
@@ -220,6 +227,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         where: { id, ...visibleAgents(p, "write") },
       });
       if (!old) throw new ApiError(404, "Agent 不存在");
+      if (b.expectedRevision && draftRevision(old) !== b.expectedRevision)
+        throw new ApiError(409, "草稿已被其他编辑更新。您的输入已保留，请对比当前版本后决定");
       const nextConfig = b.config
         ? editableConfig(
             b.replaceConfig ? b.config : { ...(old.draftConfig as object), ...b.config },
@@ -242,7 +251,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       });
       return {
         ok: true,
-        agent,
+        agent: { ...agent, draftRevision: draftRevision(agent) },
         diff: {
           before: old.draftConfig,
           after: agent.draftConfig,
@@ -324,7 +333,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const p = requirePrincipal(req, reply);
     if (!p || !requireRole(["BUILDER"], p, reply)) return;
     const { id } = idParam.parse(req.params);
-    return reply.code(202).send({ ok: true, ...(await requestPublication(db, p, id)) });
+    const { expectedRevision } = z
+      .object({
+        expectedRevision: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+      })
+      .parse(req.body ?? {});
+    return reply
+      .code(202)
+      .send({ ok: true, ...(await requestPublication(db, p, id, expectedRevision)) });
   });
   app.post("/api/agents/:id/rollback", async (req, reply) => {
     const p = requirePrincipal(req, reply);
@@ -370,6 +389,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       agents: agents.map((a) => ({
         ...a,
         ...(canBuild
+          ? { draftRevision: draftRevision(a), publicationRevision: publicationRevision(a) }
+          : {}),
+        ...(canBuild
           ? {}
           : {
               draftConfig: {},
@@ -384,11 +406,33 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  const duplicateReceipt = async (client: Prisma.TransactionClient, prior: Task) => {
+    const approval = await client.approvalRequest.findFirst({
+      where: {
+        organizationId: prior.organizationId,
+        subjectId: prior.id,
+        kind: "DANGEROUS_OPERATION",
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    return {
+      taskId: prior.id,
+      conversationId: prior.conversationId,
+      turn: prior.turn,
+      status: prior.status,
+      approvalId: approval?.id ?? null,
+      duplicate: true,
+    };
+  };
   const enqueue = async (
     p: Principal,
     b: {
       agentId: string;
       prompt: string;
+      conversationId?: string;
+      parentRunId?: string;
+      intent?: "REQUEST" | "FOLLOW_UP" | "REVISION";
       projectId?: string;
       fileIds: string[];
       consent: string[];
@@ -399,6 +443,18 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     draft = false,
   ) => {
     await checkProject(p, b.projectId, "write");
+    const hash = digest({ b, draft });
+    const submitted = await db.task.findUnique({
+      where: {
+        organizationId_createdBy_requestKey: {
+          organizationId: p.organizationId,
+          createdBy: p.userId,
+          requestKey,
+        },
+      },
+    });
+    // A lost receipt must still resolve to the frozen request after a new release or connection change.
+    if (submitted?.requestHash === hash) return duplicateReceipt(db, submitted);
     const a = await db.agentDefinition.findFirst({
       where: { id: b.agentId, ...visibleAgents(p, draft ? "write" : "read") },
       include: { grants: true, projects: { select: { projectId: true } } },
@@ -436,7 +492,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       throw new ApiError(409, "模拟环境禁止用 DSH 测试模型替代个人模型，请切换真实运行环境");
     if (sensitive.some((name) => !b.consent.includes(name)))
       throw new ApiError(403, "本次任务需要明确同意敏感能力：" + sensitive.join(", "));
-    const hash = digest({ b, versionId: v?.id ?? null, manifest });
+    const legacyHash = digest({ b, versionId: v?.id ?? null, manifest });
     return db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(709141821)::text`;
       const prior = await tx.task.findUnique({
@@ -449,8 +505,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         },
       });
       if (prior) {
-        if (prior.requestHash !== hash) throw new ApiError(409, "幂等键对应不同请求");
-        return { taskId: prior.id, status: prior.status, duplicate: true };
+        if (prior.requestHash !== hash && prior.requestHash !== legacyHash)
+          throw new ApiError(409, "幂等键对应不同请求");
+        return duplicateReceipt(tx, prior);
       }
       let modelConnectionRevision: string | undefined;
       await assertGrantRevision(tx, a.id, manifest.grants, v?.version ?? null, new Date());
@@ -483,6 +540,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         throw new ApiError(429, "组织任务队列已满");
       const task = await tx.task.create({
         data: {
+          ...(await admitConversation(tx, p, b)),
           organizationId: p.organizationId,
           projectId: b.projectId ?? null,
           agentVersionId: v?.id ?? null,
@@ -525,6 +583,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         });
       return {
         taskId: task.id,
+        conversationId: task.conversationId,
+        turn: task.turn,
         status: task.status,
         approvalId: approval?.id ?? null,
         duplicate: false,
@@ -533,6 +593,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   };
   const taskBody = z.object({
     agentId: z.string(),
+    conversationId: z.string().min(1).max(120).optional(),
+    parentRunId: z.string().min(1).max(120).optional(),
+    intent: z.enum(["REQUEST", "FOLLOW_UP", "REVISION"]).optional(),
     prompt: z.string().trim().min(1).max(20000),
     projectId: z.string().optional(),
     fileIds: z
@@ -637,7 +700,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         where: { taskId: id },
         orderBy: { startedAt: "desc" },
         include: {
-          artifact: { select: { name: true, sizeBytes: true } },
+          artifact: { select: { id: true, name: true, sizeBytes: true, revisionOfId: true } },
+          feedback: { orderBy: { updatedAt: "desc" } },
           fileUses: {
             include: {
               file: { select: { id: true, name: true, sourceUrl: true, deletedAt: true } },
@@ -686,6 +750,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         cancel: canWrite && (current || p.role === "ADMIN"),
         retry: canWrite && current,
         accept: canWrite && current,
+        feedback: canWrite && (Boolean(task.projectId) || current),
       },
     };
   });
@@ -928,11 +993,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.get("/api/approvals", async (req, reply) => {
-    const p = requirePrincipal(req, reply);
-    if (!p || !requireRoleExact(["REVIEWER", "ADMIN"], p, reply)) return;
+  const listApprovals = async (p: Principal, mine = false, taskId?: string) => {
     const all = await db.approvalRequest.findMany({
-      where: { organizationId: p.organizationId },
+      where: {
+        organizationId: p.organizationId,
+        ...(mine ? { requestedBy: p.userId } : {}),
+        ...(taskId ? { kind: "DANGEROUS_OPERATION", subjectId: taskId } : {}),
+      },
       orderBy: { createdAt: "desc" },
       take: 100,
     });
@@ -974,6 +1041,18 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       approvals.push(a);
     }
     return { ok: true, approvals };
+  };
+  app.get("/api/approvals/mine", async (req, reply) => {
+    const p = requirePrincipal(req, reply);
+    if (!p) return;
+    const { taskId } = z.object({ taskId: z.string().min(1).max(120).optional() }).parse(req.query);
+    return listApprovals(p, true, taskId);
+  });
+  app.get("/api/approvals", async (req, reply) => {
+    const p = requirePrincipal(req, reply);
+    if (!p || !requireRoleExact(["REVIEWER", "ADMIN"], p, reply)) return;
+    const { taskId } = z.object({ taskId: z.string().min(1).max(120).optional() }).parse(req.query);
+    return listApprovals(p, false, taskId);
   });
   const scopesOverlap = async (a: JudgmentRule, b: JudgmentRule) => {
     if (a.scopeType === b.scopeType) return a.scopeId === b.scopeId;

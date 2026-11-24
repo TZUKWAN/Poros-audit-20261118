@@ -18,6 +18,7 @@ import { startWorker } from "./worker.js";
 import { validateEnvironment } from "./env.js";
 import type { RunnerDeps } from "./runner.js";
 import { assertS3Private } from "./storage.js";
+import { registerConversationRoutes } from "./conversations.js";
 
 export async function buildApp(
   options: { worker?: boolean; runner?: Partial<RunnerDeps> } = {},
@@ -80,6 +81,7 @@ export async function buildApp(
   await app.register(registerProjectRoutes);
   await app.register(registerFileRoutes);
   await app.register(registerCapabilityRoutes);
+  await app.register(registerConversationRoutes);
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "public");
   await app.register(fastifyStatic, { root: publicDir, prefix: "/" });
   app.setNotFoundHandler((req, reply) => {

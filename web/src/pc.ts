@@ -21,6 +21,8 @@ export type Agent = {
   status: string;
   currentVersion: number;
   releaseReady: boolean;
+  draftRevision: string;
+  publicationRevision: string;
   draftConfig: Record<string, unknown>;
   draftOrigin: string;
   generationModel: string | null;

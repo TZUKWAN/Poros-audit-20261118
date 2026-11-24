@@ -1,7 +1,7 @@
 /** Real API/Postgres/S3/DSH/tools and headless browser; deterministic MODEL fixture, explicitly labelled. */
 import { PrismaClient } from "@prisma/client";
 import { spawn, execFileSync } from "node:child_process";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { mkdir, appendFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
@@ -23,6 +23,7 @@ const environment = {
   PORT: "0",
   DATABASE_URL: url.href,
   JWT_SECRET: randomUUID() + randomUUID(),
+  POROS_SETTINGS_KEY: randomBytes(32).toString("hex"),
   POROS_RUNTIME: "dsh",
   MODEL_GATEWAY: "mock",
   POROS_DSH_MODEL_STUB: "1",
@@ -252,8 +253,9 @@ try {
     await employeePage.getByLabel("Agent", { exact: true }).selectOption(agentId);
     await employeePage.getByLabel("任务", { exact: true }).fill("浏览器真实工作台执行检查");
     await employeePage.getByRole("checkbox").check();
-    await employeePage.getByRole("button", { name: "提交任务", exact: true }).click();
-    await employeePage.getByText("本次敏感操作已提交", { exact: false }).waitFor();
+    await employeePage.getByRole("button", { name: "开始工作", exact: true }).click();
+    await employeePage.getByText("正在等待独立审批", { exact: false }).waitFor();
+    await employeePage.locator("summary").filter({ hasText: "查看执行过程与证据" }).click();
     await reviewPage.getByRole("tab", { name: "审批与规则" }).click();
     await reviewPage.getByRole("button", { name: "刷新", exact: true }).click();
     await reviewPage.getByRole("button", { name: "批准", exact: true }).click();
@@ -261,17 +263,17 @@ try {
     await toolResult.waitFor({ timeout: 30000 });
     assert.ok((await toolResult.locator("..").textContent()).includes("POROS-DSH-REAL-EXEC"));
     await employeePage.getByText("已结束", { exact: true }).waitFor();
-    assert.equal(await employeePage.getByText("本次敏感操作已提交", { exact: false }).count(), 0);
-    assert.equal(await employeePage.getByRole("checkbox").isChecked(), false);
-    assert.equal(
-      await employeePage.getByRole("button", { name: "取消", exact: true }).isDisabled(),
-      true,
-    );
+    assert.equal(await employeePage.getByText("正在等待独立审批", { exact: false }).count(), 0);
+    assert.equal(await employeePage.getByRole("button", { name: "取消", exact: true }).count(), 0);
     await mkdir(".audit/evidence", { recursive: true });
     const screenshot = await employeePage.screenshot({
       path: ".audit/evidence/workspace.png",
       fullPage: true,
     });
+    await employeePage.getByRole("button", { name: "新建工作", exact: true }).click();
+    await employeePage.getByLabel("Agent", { exact: true }).selectOption(agentId);
+    assert.equal(await employeePage.getByRole("checkbox").isChecked(), false);
+    assert.equal(await employeePage.getByLabel("任务", { exact: true }).inputValue(), "");
     await employeePage.getByRole("tab", { name: "设置", exact: true }).click();
     await employeePage.getByText("未配置", { exact: false }).first().waitFor();
     const mobile = await browser.newContext({
@@ -284,6 +286,7 @@ try {
     phone.on("pageerror", (e) => errors.push(e.message));
     await uiLogin(phone, "employee");
     await phone.getByRole("button", { name: /浏览器真实工作台执行检查/ }).click();
+    await phone.locator("summary").filter({ hasText: "查看执行过程与证据" }).click();
     await phone.getByText("dsh.tool_result", { exact: true }).waitFor({ timeout: 20000 });
     await phone.getByRole("tab", { name: "设置", exact: true }).click();
     await phone.getByRole("heading", { name: "个人集成设置" }).waitFor();

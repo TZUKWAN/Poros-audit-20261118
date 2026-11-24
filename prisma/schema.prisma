@@ -99,6 +99,7 @@ model Organization {
   tasks     Task[]
   files     FileObject[]
   rules     JudgmentRule[]
+  conversations Conversation[]
 }
 
 model Membership {
@@ -139,6 +140,7 @@ model Project {
   agents         AgentProject[]
   tasks          Task[]
   files          FileObject[]
+  conversations Conversation[]
   @@unique([organizationId, name])
 }
 
@@ -254,6 +256,22 @@ model CapabilityDefinition {
   @@index([organizationId, projectId])
 }
 
+model Conversation {
+  id             String @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projectId      String?
+  project        Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  agentId        String?
+  title          String
+  createdBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tasks          Task[]
+  @@index([organizationId, createdBy, updatedAt])
+  @@index([projectId, updatedAt])
+}
+
 model Task {
   id             String       @id @default(cuid())
   organizationId String
@@ -264,6 +282,13 @@ model Task {
   agentVersion   AgentVersion? @relation(fields: [agentVersionId], references: [id], onDelete: SetNull)
   title          String
   prompt         String
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  turn           Int?
+  intent         String @default("REQUEST")
+  parentRunId    String?
+  parentRun      Run? @relation("ConversationParentRun", fields: [parentRunId], references: [id], onDelete: SetNull)
+  contextSnapshot Json @default("[]")
   executionSnapshot Json       @default("{}")
   modelConnectionRevision String?
   connectionRevisions Json @default("{}")
@@ -286,6 +311,7 @@ model Task {
   acceptedBy    String?
   acceptedAt    DateTime?
   @@unique([organizationId, createdBy, requestKey])
+  @@unique([conversationId, turn])
   @@index([status, availableAt])
 }
 
@@ -307,6 +333,20 @@ model Run {
   finishedAt       DateTime?
   events           RunEvent[]
   applications     JudgmentApplication[]
+  followUps        Task[] @relation("ConversationParentRun")
+  feedback         RunFeedback[]
+}
+
+model RunFeedback {
+  id        String @id @default(cuid())
+  runId     String
+  run       Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+  createdBy String
+  rating    String?
+  comment   String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([runId, createdBy])
 }
 
 model RunEvent {
@@ -343,6 +383,9 @@ model Artifact {
   run            Run?     @relation(fields: [runId], references: [id], onDelete: SetNull)
   name           String
   storageKey     String // S3 对象键（存储桶固定，元数据在此）
+  revisionOfId   String?
+  revisionOf     Artifact? @relation("ArtifactRevisions", fields: [revisionOfId], references: [id], onDelete: SetNull)
+  revisions      Artifact[] @relation("ArtifactRevisions")
   sizeBytes      Int
   sourceUrl      String   @default("") // 来源链接（溯源）
   createdBy      String

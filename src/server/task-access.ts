@@ -20,6 +20,7 @@ type TaskIdentity = Pick<
   | "executionSnapshot"
   | "connectionRevisions"
   | "modelConnectionRevision"
+  | "contextSnapshot"
 >;
 
 export async function assertTaskAccess(db: Prisma.TransactionClient, task: TaskIdentity) {
@@ -61,6 +62,28 @@ export async function assertTaskAccess(db: Prisma.TransactionClient, task: TaskI
     await db.taskInput.findFirst({ where: { taskId: task.id, file: { deletedAt: { not: null } } } })
   )
     throw new ApiError(403, "任务输入文件已删除");
+  const context = task.contextSnapshot as { entries?: Array<{ fileIds?: string[] }> } | null;
+  const contextFiles = [
+    ...new Set(
+      context && !Array.isArray(context)
+        ? (context.entries?.flatMap((entry) => entry.fileIds ?? []) ?? [])
+        : [],
+    ),
+  ];
+  if (
+    contextFiles.length &&
+    (await db.fileObject.count({
+      where: {
+        id: { in: contextFiles },
+        organizationId: task.organizationId,
+        deletedAt: null,
+        ...(task.projectId
+          ? { projectId: task.projectId }
+          : { projectId: null, createdBy: task.createdBy }),
+      },
+    })) !== contextFiles.length
+  )
+    throw new ApiError(403, "此前使用的资料已删除或当前无权继续使用");
   const grants = (task.executionSnapshot as { grants?: DshGrant[] } | null)?.grants;
   if (typeof agentId === "string" && Array.isArray(grants)) {
     const version = task.agentVersionId

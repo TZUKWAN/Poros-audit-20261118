@@ -79,10 +79,42 @@ export function startWorker(db: PrismaClient, overrides: Partial<RunnerDeps> = {
           orderBy: { createdAt: "asc" },
           take: 100,
         });
+        const conversationIds = [
+          ...new Set(
+            candidates.flatMap((task) => (task.conversationId ? [task.conversationId] : [])),
+          ),
+        ];
+        const predecessors = conversationIds.length
+          ? await tx.task.findMany({
+              where: {
+                conversationId: { in: conversationIds },
+                status: { in: ["QUEUED", "RUNNING", "BLOCKED"] },
+              },
+              select: { id: true, conversationId: true, turn: true, status: true },
+            })
+          : [];
+        const pending = await tx.approvalRequest.findMany({
+          where: {
+            kind: "DANGEROUS_OPERATION",
+            decision: "PENDING",
+            subjectId: {
+              in: predecessors.filter((task) => task.status === "BLOCKED").map((task) => task.id),
+            },
+          },
+          select: { subjectId: true },
+        });
+        const pendingTasks = new Set(pending.map((approval) => approval.subjectId));
         const task = candidates.find(
-          (t) =>
-            running.filter((r) => r.organizationId === t.organizationId).length <
-            Number(process.env.POROS_ORG_CONCURRENCY || 2),
+          (candidate) =>
+            running.filter((row) => row.organizationId === candidate.organizationId).length <
+              Number(process.env.POROS_ORG_CONCURRENCY || 2) &&
+            !predecessors.some(
+              (prior) =>
+                candidate.conversationId &&
+                prior.conversationId === candidate.conversationId &&
+                prior.turn! < candidate.turn! &&
+                (prior.status !== "BLOCKED" || pendingTasks.has(prior.id)),
+            ),
         );
         if (!task) return null;
         const updated = await tx.task.updateMany({

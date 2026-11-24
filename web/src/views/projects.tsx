@@ -3,6 +3,8 @@ import { api, download } from "../api.js";
 import { dateTime, type Agent, type Project, type StoredFile } from "../pc.js";
 import { Badge, Button, Card, Dialog, Field, Input, PageHeading, Select, Textarea } from "../ui.js";
 import { TaskList } from "./workspace.js";
+import { ConversationList } from "./work.js";
+import type { WorkStart } from "../navigation.js";
 
 const projectRoles = { MANAGER: "项目管理员", CONTRIBUTOR: "协作者", VIEWER: "只读成员" };
 const orgRoles = { ADMIN: "组织管理员", BUILDER: "构建者", EMPLOYEE: "成员", REVIEWER: "审阅者" };
@@ -36,13 +38,21 @@ export default function ProjectsView({
   email,
   role,
   onOpenTask,
+  initialProjectId,
+  onSelect,
+  onStart,
+  onOpenWork,
 }: {
   email: string;
   role: string;
   onOpenTask: (id: string) => void;
+  initialProjectId?: string;
+  onSelect: (id: string) => void;
+  onStart: (start: WorkStart) => void;
+  onOpenWork: (id: string) => void;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(initialProjectId ?? "");
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [create, setCreate] = useState(false);
@@ -54,6 +64,13 @@ export default function ProjectsView({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  useEffect(() => {
+    setSelected(initialProjectId ?? "");
+  }, [initialProjectId]);
+  const select = (id: string) => {
+    setSelected(id);
+    onSelect(id);
+  };
   return (
     <>
       <PageHeading title="项目空间">
@@ -70,7 +87,7 @@ export default function ProjectsView({
           <button
             className="mt-3 w-full rounded-lg border border-slate-200 p-2 text-left text-sm aria-pressed:border-[#c9694b]"
             aria-pressed={!selected}
-            onClick={() => setSelected("")}
+            onClick={() => select("")}
           >
             个人文件
           </button>
@@ -80,7 +97,7 @@ export default function ProjectsView({
               <button
                 key={p.id}
                 aria-pressed={selected === p.id}
-                onClick={() => setSelected(p.id)}
+                onClick={() => select(p.id)}
                 className="mt-2 block w-full rounded-lg border border-slate-200 p-2 text-left hover:bg-slate-50 aria-pressed:border-[#c9694b]"
               >
                 <strong className="block break-words text-sm">{p.name}</strong>
@@ -102,17 +119,25 @@ export default function ProjectsView({
             role={role}
             email={email}
             onOpenTask={onOpenTask}
+            onStart={onStart}
+            onOpenWork={onOpenWork}
             onChanged={refresh}
           />
         ) : (
-          <FilesPanel email={email} canWrite canManage={role === "ADMIN"} onOpenTask={onOpenTask} />
+          <FilesPanel
+            email={email}
+            canWrite
+            canManage={role === "ADMIN"}
+            onOpenTask={onOpenTask}
+            onStart={onStart}
+          />
         )}
       </div>
       {create && (
         <ProjectDialog
           close={() => setCreate(false)}
           saved={(project) => {
-            setSelected(project.id);
+            select(project.id);
             setCreate(false);
             void refresh();
           }}
@@ -199,12 +224,16 @@ function ProjectDetails({
   email,
   onOpenTask,
   onChanged,
+  onStart,
+  onOpenWork,
 }: {
   id: string;
   role: string;
   email: string;
   onOpenTask: (id: string) => void;
   onChanged: () => Promise<void>;
+  onStart: (start: WorkStart) => void;
+  onOpenWork: (id: string) => void;
 }) {
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -259,6 +288,7 @@ function ProjectDetails({
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-lg font-semibold">{project.name}</h3>
           <Badge>{project.archivedAt ? "已归档 · 只读" : projectRoles[project.role]}</Badge>
+          {canWrite && <Button onClick={() => onStart({ projectId: id })}>在项目中开始工作</Button>}
           {canManage && (
             <>
               <Button variant="ghost" onClick={() => setEdit(true)}>
@@ -307,7 +337,15 @@ function ProjectDetails({
         )}
       </Card>
       {section === "tasks" && (
-        <TaskList projectId={id} title="项目任务与运行" onOpen={onOpenTask} />
+        <div className="space-y-4">
+          <ConversationList projectId={id} onOpen={onOpenWork} />
+          <details>
+            <summary className="cursor-pointer text-sm">逐次请求与运行</summary>
+            <div className="mt-3">
+              <TaskList projectId={id} title="项目任务与运行" onOpen={onOpenTask} />
+            </div>
+          </details>
+        </div>
       )}
       {section === "files" && (
         <FilesPanel
@@ -316,6 +354,7 @@ function ProjectDetails({
           canWrite={canWrite}
           canManage={canManage}
           onOpenTask={onOpenTask}
+          onStart={onStart}
         />
       )}
       {section === "members" && (
@@ -552,12 +591,14 @@ function FilesPanel({
   canWrite,
   canManage,
   onOpenTask,
+  onStart,
 }: {
   projectId?: string;
   email: string;
   canWrite: boolean;
   canManage: boolean;
   onOpenTask: (id: string) => void;
+  onStart: (start: WorkStart) => void;
 }) {
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [q, setQ] = useState("");
@@ -702,6 +743,15 @@ function FilesPanel({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              {canWrite && file.textSupported && (
+                <Button
+                  variant="ghost"
+                  aria-label={"处理文件 " + file.name}
+                  onClick={() => onStart({ projectId, fileIds: [file.id] })}
+                >
+                  交给助手处理
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 disabled={!file.textSupported}

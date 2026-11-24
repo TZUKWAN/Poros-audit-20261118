@@ -69,17 +69,20 @@ export default function GovernanceView({
   email,
   organizationId,
   onOpenTask,
+  initialTaskId,
 }: {
   role: string;
   email: string;
   organizationId: string;
   onOpenTask: (id: string) => void;
+  initialTaskId?: string;
 }) {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [targetTaskId, setTargetTaskId] = useState(initialTaskId ?? "");
   const [form, setForm] = useState<"new" | Rule | null>(null);
   const [disable, setDisable] = useState<Rule | null>(null);
   const [message, setMessage] = useState("");
@@ -95,12 +98,16 @@ export default function GovernanceView({
     else setMessage(r.body.error ?? "规则读取失败");
     if (a.ok) setAgents(a.body.agents);
     if (p.ok) setProjects(p.body.projects);
-    if (canReview) {
-      const response = await api<{ approvals: Approval[] }>("GET", "/api/approvals");
+    {
+      const response = await api<{ approvals: Approval[] }>(
+        "GET",
+        (canReview ? "/api/approvals" : "/api/approvals/mine") +
+          (targetTaskId ? "?taskId=" + encodeURIComponent(targetTaskId) : ""),
+      );
       if (response.ok) setApprovals(response.body.approvals);
       else setMessage(response.body.error ?? "审批读取失败");
     }
-  }, [canReview]);
+  }, [canReview, targetTaskId]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -120,10 +127,10 @@ export default function GovernanceView({
         </Button>
       </PageHeading>
       <div className="grid gap-4 lg:grid-cols-2">
-        {canReview && (
+        {
           <Card className="self-start">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-semibold">独立审批</h3>
+              <h3 className="font-semibold">{canReview ? "独立审批" : "我的审批申请"}</h3>
               <label className="text-sm">
                 <input
                   type="checkbox"
@@ -133,6 +140,19 @@ export default function GovernanceView({
                 显示审批历史
               </label>
             </div>
+            {targetTaskId && (
+              <div className="mb-3 rounded-lg bg-[#faf8f5] p-2 text-sm">
+                <p>当前显示所选请求的审批记录。</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button variant="ghost" onClick={() => onOpenTask(targetTaskId)}>
+                    返回原工作
+                  </Button>
+                  <Button variant="ghost" onClick={() => setTargetTaskId("")}>
+                    查看全部申请
+                  </Button>
+                </div>
+              </div>
+            )}
             {!approvals.some((a) => showHistory || a.decision === "PENDING") && (
               <p className="text-sm text-slate-600">暂无待审批事项。</p>
             )}
@@ -200,7 +220,7 @@ export default function GovernanceView({
                       )}
                     </div>
                   )}
-                  {a.decision === "PENDING" && (
+                  {canReview && a.decision === "PENDING" && (
                     <div className="mt-2 flex gap-2">
                       {(["APPROVED", "REJECTED"] as const).map((decision) => (
                         <Button
@@ -228,7 +248,7 @@ export default function GovernanceView({
                 </article>
               ))}
           </Card>
-        )}
+        }
         <Card className="self-start">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-semibold">Judgment 规则</h3>

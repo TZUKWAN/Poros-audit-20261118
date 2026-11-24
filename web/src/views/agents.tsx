@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import {
   capabilityBlock,
@@ -15,6 +15,7 @@ import { Badge, Button, Card, Dialog, Field, Input, PageHeading, Select, Textare
 import type { SettingsBody } from "./integrations.js";
 import RunDetails from "./run-details.js";
 import { Confirm } from "./projects.js";
+import type { WorkStart } from "../navigation.js";
 
 const originLabel: Record<string, string> = {
   MANUAL: "手工创建",
@@ -23,13 +24,26 @@ const originLabel: Record<string, string> = {
   LEGACY_NL: "历史草稿 · 生成通道未记录",
 };
 
-export default function AgentsView({ role }: { role: string }) {
+export default function AgentsView({
+  role,
+  ownerKey,
+  initialAgentId,
+  onSelect,
+  onUse,
+}: {
+  role: string;
+  ownerKey: string;
+  initialAgentId?: string;
+  onSelect: (id: string) => void;
+  onUse: (start: WorkStart) => void;
+}) {
   const canBuild = ["BUILDER", "ADMIN"].includes(role);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [settings, setSettings] = useState<SettingsBody | null>(null);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(initialAgentId ?? "");
+  const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [error, setError] = useState("");
@@ -55,6 +69,14 @@ export default function AgentsView({ role }: { role: string }) {
     });
   }, [refresh]);
   const agent = agents.find((a) => a.id === selected);
+  useEffect(() => {
+    if (initialAgentId) setSelected(initialAgentId);
+  }, [initialAgentId]);
+  const select = (id: string) => {
+    setSelected(id);
+    setEditing(false);
+    onSelect(id);
+  };
   return (
     <>
       <PageHeading title="Agent 中心">
@@ -83,7 +105,7 @@ export default function AgentsView({ role }: { role: string }) {
                 <li key={a.id}>
                   <button
                     aria-pressed={a.id === selected}
-                    onClick={() => setSelected(a.id)}
+                    onClick={() => select(a.id)}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-left hover:bg-slate-50 aria-pressed:border-[#c9694b] aria-pressed:bg-[#fdf7f4]"
                   >
                     <span className="block break-words text-sm font-medium">{a.name}</span>
@@ -101,25 +123,50 @@ export default function AgentsView({ role }: { role: string }) {
             <p className="mt-2 text-sm text-slate-600">暂无可访问的 Agent</p>
           )}
         </Card>
-        {agent &&
-          (canBuild ? (
-            <Builder
-              key={agent.id}
-              agent={agent}
-              projects={projects}
-              catalog={catalog}
-              settings={settings}
-              refresh={refresh}
-            />
-          ) : (
+        {agent && (
+          <div className="min-w-0 space-y-4">
             <Card>
-              <h3 className="font-semibold">{agent.name}</h3>
-              <p className="mt-2 whitespace-pre-wrap text-sm">{agent.description}</p>
-              <p className="mt-2 text-sm">
-                {agent.department || "未归部门"} · v{agent.currentVersion}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold">{agent.name}</h3>
+                <Badge tone={agent.releaseReady ? "ok" : "warn"}>
+                  {agent.releaseReady
+                    ? `可使用 · 已审批 v${agent.currentVersion}`
+                    : "尚未发布可用版本"}
+                </Badge>
+              </div>
+              <p className="my-3 whitespace-pre-wrap text-sm">
+                {agent.description || "此助手尚未填写用途说明"}
               </p>
+              <p className="mb-3 text-xs text-slate-600">
+                {agent.department || "未归部门"} ·{" "}
+                {agent.projectRestricted
+                  ? "项目专用，开始前请选择有权限的项目"
+                  : "可在个人工作或授权项目中使用"}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button disabled={!agent.releaseReady} onClick={() => onUse({ agentId: agent.id })}>
+                  使用此助手
+                </Button>
+                {canBuild && (
+                  <Button variant="ghost" onClick={() => setEditing((value) => !value)}>
+                    {editing ? "收起编辑" : "编辑与测试"}
+                  </Button>
+                )}
+              </div>
             </Card>
-          ))}
+            {canBuild && editing && (
+              <Builder
+                key={agent.id}
+                agent={agent}
+                projects={projects}
+                catalog={catalog}
+                settings={settings}
+                refresh={refresh}
+                ownerKey={ownerKey}
+              />
+            )}
+          </div>
+        )}
       </div>
       {createOpen && (
         <CreateAgent
@@ -127,6 +174,8 @@ export default function AgentsView({ role }: { role: string }) {
           close={() => setCreateOpen(false)}
           onCreated={(id) => {
             setSelected(id);
+            onSelect(id);
+            setEditing(true);
             setCreateOpen(false);
             void refresh();
           }}
@@ -308,15 +357,43 @@ function Builder({
   catalog,
   settings,
   refresh,
+  ownerKey,
 }: {
   agent: Agent;
   projects: Project[];
   catalog: CatalogEntry[];
   settings: SettingsBody | null;
   refresh: () => Promise<void>;
+  ownerKey: string;
 }) {
-  const [fields, setFields] = useState(() => fromAgent(agent));
+  const storageKey = `poros-builder:${ownerKey}:${agent.id}`;
+  const [local] = useState(() => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) ?? "null") as {
+        fields?: Fields;
+        revision?: string;
+        testPrompt?: string;
+        testProject?: string;
+        testTask?: string;
+      } | null;
+      if (
+        value?.fields &&
+        typeof value.fields.name === "string" &&
+        value.fields.config &&
+        typeof value.fields.config === "object" &&
+        !Array.isArray(value.fields.config)
+      )
+        return value;
+    } catch {
+      /* Ignore invalid optional browser drafts. */
+    }
+    return null;
+  });
+  const [fields, setFields] = useState(() => local?.fields ?? fromAgent(agent));
   const [saved, setSaved] = useState(() => fromAgent(agent));
+  const [revision, setRevision] = useState(local?.revision ?? agent.draftRevision);
+  const [conflict, setConflict] = useState<Agent | null>(null);
+  const lastServerRevision = useRef(agent.draftRevision);
   const [diff, setDiff] = useState<{ before: Fields; after: Fields } | null>(null);
   const [json, setJson] = useState("");
   const [advanced, setAdvanced] = useState(false);
@@ -324,11 +401,30 @@ function Builder({
   const [busy, setBusy] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [targetVersion, setTargetVersion] = useState("");
-  const [testPrompt, setTestPrompt] = useState("");
-  const [testProject, setTestProject] = useState("");
-  const [testTask, setTestTask] = useState("");
+  const [testPrompt, setTestPrompt] = useState(local?.testPrompt ?? "");
+  const [testProject, setTestProject] = useState(local?.testProject ?? "");
+  const [testTask, setTestTask] = useState(local?.testTask ?? "");
   const [consent, setConsent] = useState(false);
   const dirty = JSON.stringify(fields) !== JSON.stringify(saved);
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({ fields, revision, testPrompt, testProject, testTask }),
+      );
+    } catch {
+      /* Local draft storage is optional. */
+    }
+  }, [storageKey, fields, revision, testPrompt, testProject, testTask]);
+  useEffect(() => {
+    if (agent.draftRevision === lastServerRevision.current) return;
+    lastServerRevision.current = agent.draftRevision;
+    if (!dirty && agent.draftRevision !== revision) {
+      setFields(fromAgent(agent));
+      setSaved(fromAgent(agent));
+      setRevision(agent.draftRevision);
+    }
+  }, [agent, revision, dirty]);
   const model = modelPreflight(agent.grants, settings);
   const tools = sensitiveGrants(agent.grants);
   const testBlock = capabilityBlock(agent.grants, settings, catalog, testProject);
@@ -364,6 +460,15 @@ function Builder({
   return (
     <div className="min-w-0 space-y-4">
       <Card>
+        <p className="mb-3 text-sm text-slate-600">
+          1 配置与保存 → 2 授权与测试 → 3 申请独立审批 → 4 发布后使用
+        </p>
+        <p className="mb-3 text-xs text-slate-600">
+          {agent.releaseReady
+            ? `同事当前使用已审批 v${agent.currentVersion}。这里编辑的是独立草稿。`
+            : "草稿尚未成为同事可用版本。测试结果与正式发布分别记录。"}
+          {dirty ? " · 有未保存修改" : " · 配置已保存"}
+        </p>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <h3 className="mr-auto font-semibold">Builder · {agent.name}</h3>
           <Badge>
@@ -450,14 +555,25 @@ function Builder({
               const r = await api<{
                 agent: Agent;
                 diff: { fields: { before: Fields; after: Fields } };
-              }>("PATCH", `/api/agents/${agent.id}/draft`, { ...fields, replaceConfig: true });
+              }>("PATCH", `/api/agents/${agent.id}/draft`, {
+                ...fields,
+                replaceConfig: true,
+                expectedRevision: revision,
+              });
               setBusy(false);
               if (!r.ok) {
                 setMessage(r.body.error ?? "保存失败");
+                if (r.status === 409) {
+                  const current = await api<{ agents: Agent[] }>("GET", "/api/agents");
+                  if (current.ok)
+                    setConflict(current.body.agents.find((row) => row.id === agent.id) ?? null);
+                  void refresh();
+                }
                 return;
               }
               setFields(fromAgent(r.body.agent));
               setSaved(fromAgent(r.body.agent));
+              setRevision(r.body.agent.draftRevision);
               setDiff(r.body.diff.fields);
               setMessage("草稿已保存");
               void refresh();
@@ -466,6 +582,39 @@ function Builder({
             保存草稿
           </Button>
         </div>
+        {conflict && (
+          <div
+            role="alert"
+            className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"
+          >
+            <p>草稿保存发生冲突，您的修改已保留。请核对当前已保存配置与本地修改。</p>
+            <Diff before={fromAgent(conflict)} after={fields} />
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setFields(fromAgent(conflict));
+                  setSaved(fromAgent(conflict));
+                  setRevision(conflict.draftRevision);
+                  setConflict(null);
+                }}
+              >
+                采用当前已保存版本
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setSaved(fromAgent(conflict));
+                  setRevision(conflict.draftRevision);
+                  setConflict(null);
+                  setMessage("已保留您的修改，请核对差异后再次保存");
+                }}
+              >
+                保留我的修改并重新核对
+              </Button>
+            </div>
+          </div>
+        )}
         {advanced && (
           <div className="mt-3 grid gap-2">
             <p className="text-xs text-slate-600">
@@ -665,7 +814,7 @@ function Builder({
             onClick={async () => {
               const ok = await run(
                 "publish",
-                undefined,
+                { expectedRevision: agent.publicationRevision },
                 (value) => `v${value.version} 已冻结，等待独立审批`,
               );
               if (ok) setReviewOpen(false);

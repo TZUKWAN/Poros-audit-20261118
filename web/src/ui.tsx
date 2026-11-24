@@ -34,7 +34,7 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   );
 }
 
-export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function Textarea(props: React.ComponentProps<"textarea">) {
   const { className = "", ...rest } = props;
   return (
     <textarea
@@ -151,7 +151,10 @@ export function Dialog({
       )}
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 bg-black/40 data-[state=open]:animate-in" />
-        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 max-h-[85vh] w-[min(680px,92vw)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+        <DialogPrimitive.Content
+          aria-describedby={undefined}
+          className="fixed left-1/2 top-1/2 max-h-[85vh] w-[min(680px,92vw)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-5 shadow-xl"
+        >
           <DialogPrimitive.Title className="mb-3 text-base font-semibold">
             {title}
           </DialogPrimitive.Title>
