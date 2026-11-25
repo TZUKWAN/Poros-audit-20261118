@@ -1,0 +1,23 @@
+{
+  "name": "poros-agent-relay",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-11-25",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AGENTS",
+        "class_name": "AgentChannel",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AgentChannel"],
+    },
+  ],
+  "observability": {
+    "enabled": false,
+  },
+}

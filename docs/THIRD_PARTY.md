@@ -1,23 +1,23 @@
-# THIRD_PARTY — 第三方组件清单（SBOM 入口）
+# 第三方与 SBOM
 
-| 组件 | 版本 | 许可证 | 用途 | 备注 |
-|---|---|---|---|---|
-| @deepseek-ai/dsh | 0.2.2-rc.1 | MIT | 唯一 Agent Harness（容器内） | 上游 github.com/deepseek-ai/deepseek-harness |
-| node | 24-bookworm-slim 基础镜像 | MIT 等 | 运行时镜像基座 | Node ≥24.9.0 |
-| postgres | 17-alpine | PostgreSQL License | 主数据库 | 官方镜像 |
-| chrislusf/seaweedfs | 3.85 | Apache-2.0 | S3 兼容对象存储 | 替代 MinIO（本环境镜像源不可达，已实测记录） |
-| Fastify / @fastify/static | 5.x / 8.x | MIT | API 框架 | |
-| Prisma / @prisma/client | 6.19.0 | Apache-2.0 | ORM + 迁移 | |
-| zod | 4.6.7 | MIT | 输入校验 | 仓库既有 |
-| jsonwebtoken / bcryptjs | 9.x / 3.x | MIT | 会话/口令 | |
-| @aws-sdk/client-s3 | 3.x | Apache-2.0 | S3 客户端 | |
-| pino | 9.5.0 | MIT | 结构化日志 | fastify 内建 |
-| vitest / esbuild / tsx / typescript-eslint / prettier / eslint | 仓库既有 | MIT 等 | 工具链 | |
+[sbom.cdx.json](sbom.cdx.json) 由 `npm run sbom` 从实际 npm 依赖树生成，包含开发工具；精确版本/完整性见 lockfile。
 
-## 评估后未引入（记录于 REUSE_AUDIT）
+| 组件 | 基线 | 许可 |
+|---|---|---|
+| DSH | 0.2.2-rc.1 | MIT，deepseek-ai/deepseek-harness |
+| Node | 24.22.3 | MIT 等 |
+| PostgreSQL | 17-alpine | PostgreSQL License |
+| SeaweedFS | 3.85 | Apache-2.0 |
+| Fastify/static | 5.12.8 / 10.1.11 | MIT |
+| Prisma/client | 6.19.0 | Apache-2.0 |
+| AWS S3 SDK | 3.1170.0 | Apache-2.0 |
+| React/Radix/Tailwind/Vite | lockfile 实际版本 | MIT |
+| Vitest / Playwright Core | 5.1.0 / 1.65.1 | MIT / Apache-2.0 |
+| @poros/picomatch-secure | 4.0.7+poros.security.1 | 原 MIT 保留 |
+| PDF.js / yauzl / saxes | 6.5.438 / 3.4.0 / 6.0.0 | Apache-2.0 / MIT / ISC |
 
-DS-Bot（Apache-2.0，作多 Bot 工作台设计参考而非整仓复制）、Kdocs/IMA/TinyFish（无凭证，mock 契约测试并标注"未配置"）、agent-desktop（默认不启用）、dsh-purge（不接入）。
+匹配器上游 GHSA-fc5q-39xc-vjpf 尚无已发布修复，不能假称升级解决。私有完整源码补丁禁用项目不需要的重复 extglob；见 [补丁说明](../vendor/picomatch/SECURITY_PATCH.md) 与对应测试。没有漏洞忽略项，npm audit 检查真实依赖树。
 
-## 许可证状态警示
+仓库公开可读。Poros 根包声明 UNLICENSED，第三方组件以其各自的许可证为准。
 
-原仓库无根 LICENSE 文件（迁移前事实，PRD §1.1）。在权利人明确许可证前：本仓库代码按"仅审查不外发"管理；第三方组件以上表许可证为准。
+依据：已安装 DSH 0.2.2-rc.1 官方发行源码、Prisma 6.19.0 类型与真实数据库事务、[Fastify static 兼容表](https://github.com/fastify/fastify-static#compatibility)、[SeaweedFS 凭证](https://github.com/seaweedfs/seaweedfs/wiki/S3-Credentials)、[Playwright Library](https://playwright.dev/docs/library)、[匹配器漏洞公告](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)。Context7 返回 Invalid API key，未将失败记作成功检索。

@@ -1,0 +1,12 @@
+ARG DSH_IMAGE=poros/dsh:0.2.2-rc.1-audit
+FROM ${DSH_IMAGE}
+USER root
+WORKDIR /opt/poros
+COPY deploy/compiler/package.json deploy/compiler/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund && npm cache clean --force
+COPY .compiler-build/compile.cjs /opt/poros/compile.cjs
+ENV NODE_PATH=/opt/poros/node_modules
+LABEL org.poros.component="compiler-sdk" org.poros.compiler-protocol="1"
+USER poros
+HEALTHCHECK NONE
+CMD ["node", "-e", "require('/opt/poros/compile.cjs')"]

@@ -24,6 +24,12 @@ enum AgentStatus {
   DISABLED
 }
 
+enum ProjectRole {
+  MANAGER
+  CONTRIBUTOR
+  VIEWER
+}
+
 enum GrantKind {
   TOOL
   SKILL
@@ -41,6 +47,8 @@ enum TaskStatus {
   // 质量验收状态（审查项⑥）：Judgment FAIL/UNCHECKED 必须体现在最终状态
   SUCCEEDED_WITH_VIOLATIONS
   UNVERIFIED
+  CANCELLED
+  TIMED_OUT
 }
 
 enum ApprovalKind {
@@ -53,6 +61,7 @@ enum ApprovalDecision {
   PENDING
   APPROVED
   REJECTED
+  WITHDRAWN
 }
 
 enum JudgmentStatus {
@@ -90,6 +99,7 @@ model Organization {
   tasks     Task[]
   files     FileObject[]
   rules     JudgmentRule[]
+  conversations Conversation[]
 }
 
 model Membership {
@@ -98,8 +108,24 @@ model Membership {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   userId         String
   role           Role
+  disabledAt     DateTime?
   createdAt      DateTime     @default(now())
+  connections    IntegrationConnection[]
   @@unique([organizationId, userId])
+}
+
+model IntegrationConnection {
+  organizationId String
+  userId         String
+  provider       String
+  membership     Membership @relation(fields: [organizationId, userId], references: [organizationId, userId], onDelete: Cascade)
+  revision       String
+  settings       Json
+  encryptedKey   String
+  testedAt       DateTime?
+  testCode       String?
+  updatedAt      DateTime @updatedAt
+  @@id([organizationId, userId, provider])
 }
 
 model Project {
@@ -107,9 +133,14 @@ model Project {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
+  description    String       @default("")
+  archivedAt     DateTime?
+  createdAt      DateTime     @default(now())
   members        ProjectMember[]
+  agents         AgentProject[]
   tasks          Task[]
   files          FileObject[]
+  conversations Conversation[]
   @@unique([organizationId, name])
 }
 
@@ -118,7 +149,28 @@ model ProjectMember {
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   userId    String
+  role      ProjectRole @default(CONTRIBUTOR)
   @@unique([projectId, userId])
+}
+
+model AgentProject {
+  agentId   String
+  agent     AgentDefinition @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@id([agentId, projectId])
+}
+
+model AuditEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  projectId      String?
+  actorId        String
+  action         String
+  subjectId      String
+  detail         Json     @default("{}")
+  createdAt      DateTime @default(now())
+  @@index([organizationId, projectId, createdAt])
 }
 
 model AgentDefinition {
@@ -132,8 +184,13 @@ model AgentDefinition {
   draftConfig    Json
   // 审查项②：自然语言构建来源留痕（生成该草稿的原始描述；null = 显式表单创建）
   nlSource       String?
+  draftOrigin    String       @default("MANUAL")
+  generationModel String?
+  projectRestricted Boolean  @default(false)
+  projects       AgentProject[]
   status         AgentStatus  @default(DRAFT)
   currentVersion Int          @default(0)
+  versionCounter Int          @default(0)
   versions       AgentVersion[]
   grants         AgentGrant[]
   createdBy      String
@@ -148,6 +205,8 @@ model AgentVersion {
   agent        AgentDefinition @relation(fields: [agentId], references: [id], onDelete: Cascade)
   version      Int
   config       Json // 发布时冻结的不可变快照
+  manifest     Json            @default("{}")
+  approvedAt   DateTime?
   publishedBy  String
   createdAt    DateTime        @default(now())
   applications JudgmentApplication[]
@@ -162,8 +221,55 @@ model AgentGrant {
   kind      GrantKind
   name      String // 工具/Skill/MCP/知识/模型 名称
   scopeNote String    @default("") // 来源/版本/授权说明
+  version   String    @default("0.2.2-rc.1")
+  source    String    @default("@deepseek-ai/dsh")
   createdAt DateTime  @default(now())
   @@unique([agentId, kind, name])
+}
+
+model AgentGrantRevocation {
+  id             String   @id @default(cuid())
+  agentId        String
+  kind           GrantKind
+  name           String
+  source         String
+  throughVersion Int
+  revokedAt      DateTime @default(now())
+  @@index([agentId, kind, name])
+}
+
+model CapabilityDefinition {
+  id             String    @id @default(cuid())
+  organizationId String
+  kind           GrantKind
+  name           String
+  version        Int
+  description    String
+  instruction    String    @default("")
+  fileId         String?
+  projectId      String?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  disabledAt     DateTime?
+  disabledBy     String?
+  @@unique([organizationId, kind, name, version])
+  @@index([organizationId, projectId])
+}
+
+model Conversation {
+  id             String @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projectId      String?
+  project        Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  agentId        String?
+  title          String
+  createdBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tasks          Task[]
+  @@index([organizationId, createdBy, updatedAt])
+  @@index([projectId, updatedAt])
 }
 
 model Task {
@@ -176,11 +282,37 @@ model Task {
   agentVersion   AgentVersion? @relation(fields: [agentVersionId], references: [id], onDelete: SetNull)
   title          String
   prompt         String
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  turn           Int?
+  intent         String @default("REQUEST")
+  parentRunId    String?
+  parentRun      Run? @relation("ConversationParentRun", fields: [parentRunId], references: [id], onDelete: SetNull)
+  contextSnapshot Json @default("[]")
+  executionSnapshot Json       @default("{}")
+  modelConnectionRevision String?
+  connectionRevisions Json @default("{}")
+  requestKey     String?
+  requestHash    String?
+  timeoutMs      Int           @default(180000)
+  maxAttempts    Int           @default(3)
+  attempts       Int           @default(0)
+  cancelRequested Boolean      @default(false)
+  availableAt    DateTime      @default(now())
+  leaseUntil     DateTime?
+  workerId       String?
   status         TaskStatus   @default(QUEUED)
   createdBy      String
   createdAt      DateTime     @default(now())
   runs           Run[]
   artifacts      Artifact[]
+  inputs         TaskInput[]
+  acceptedRunId String?
+  acceptedBy    String?
+  acceptedAt    DateTime?
+  @@unique([organizationId, createdBy, requestKey])
+  @@unique([conversationId, turn])
+  @@index([status, availableAt])
 }
 
 model Run {
@@ -188,14 +320,33 @@ model Run {
   taskId           String
   task             Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   status           TaskStatus @default(RUNNING)
-  modelGateway     String   @default("mock") // mock | deepseek | ...（未配置真实网关时恒为 mock 并如实标注）
+  modelGateway     String   @default("pending")
+  modelId          String?
+  failureCode      String?
+  artifact         Artifact?
+  fileUses         FileUse[]
   injectedRules    Json     @default("[]") // 实际注入的 ruleId+version 列表（注入留痕）
   output           String   @default("")
   error            String   @default("")
+  usage            Json     @default("{}")
   startedAt        DateTime @default(now())
   finishedAt       DateTime?
   events           RunEvent[]
   applications     JudgmentApplication[]
+  followUps        Task[] @relation("ConversationParentRun")
+  feedback         RunFeedback[]
+}
+
+model RunFeedback {
+  id        String @id @default(cuid())
+  runId     String
+  run       Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+  createdBy String
+  rating    String?
+  comment   String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([runId, createdBy])
 }
 
 model RunEvent {
@@ -219,6 +370,7 @@ model ApprovalRequest {
   decidedBy      String?
   createdAt      DateTime         @default(now())
   decidedAt      DateTime?
+  payload        Json             @default("{}")
 }
 
 model Artifact {
@@ -227,8 +379,13 @@ model Artifact {
   projectId      String?
   taskId         String?
   task           Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  runId          String?  @unique
+  run            Run?     @relation(fields: [runId], references: [id], onDelete: SetNull)
   name           String
   storageKey     String // S3 对象键（存储桶固定，元数据在此）
+  revisionOfId   String?
+  revisionOf     Artifact? @relation("ArtifactRevisions", fields: [revisionOfId], references: [id], onDelete: SetNull)
+  revisions      Artifact[] @relation("ArtifactRevisions")
   sizeBytes      Int
   sourceUrl      String   @default("") // 来源链接（溯源）
   createdBy      String
@@ -245,8 +402,33 @@ model FileObject {
   storageKey     String
   sizeBytes      Int
   sourceUrl      String       @default("")
+  category       String       @default("")
+  deletedAt      DateTime?
+  inputs         TaskInput[]
+  uses           FileUse[]
   createdBy      String
   createdAt      DateTime     @default(now())
+}
+
+model TaskInput {
+  taskId     String
+  task       Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fileId     String
+  file       FileObject @relation(fields: [fileId], references: [id])
+  @@id([taskId, fileId])
+}
+
+model FileUse {
+  runId      String
+  run        Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+  fileId     String
+  file       FileObject @relation(fields: [fileId], references: [id])
+  digest     String
+  ref        String
+  chars      Int
+  truncated  Boolean
+  createdAt  DateTime @default(now())
+  @@id([runId, fileId])
 }
 
 // Judgment Layer V2（PRD §7）：候选→审批→作用域→注入→验证→生命周期
@@ -257,14 +439,44 @@ model JudgmentRule {
   scopeType      ScopeType
   scopeId        String
   sourceRunId    String       @default("")
+  sourceEvidence Json         @default("{}")
   sourceFeedback String       @default("") // 用户纠正原文或机器可观测失败摘录
   rule           String
   kind           RuleKind
   status         JudgmentStatus @default(CANDIDATE)
   version        Int          @default(1)
+  familyId       String       @default(cuid())
+  previousId     String?
+  disabledBy     String?
+  disabledAt     DateTime?
   approvedBy     String?
   createdAt      DateTime     @default(now())
   applications   JudgmentApplication[]
+  @@unique([familyId, version])
+}
+
+model AuthSession {
+  id             String   @id
+  organizationId String
+  userId         String
+  expiresAt      DateTime
+  revokedAt      DateTime?
+}
+
+model DownloadTicket {
+  id             String   @id
+  fileId         String
+  organizationId String
+  userId         String
+  sessionId      String
+  expiresAt      DateTime
+  usedAt         DateTime?
+}
+
+model RateLimitBucket {
+  id        String   @id
+  count     Int      @default(1)
+  resetAt   DateTime
 }
 
 model JudgmentApplication {
@@ -280,4 +492,71 @@ model JudgmentApplication {
   evaluation     EvaluationStatus @default(UNCHECKED)
   evidenceRef    String         @default("")
   failureReason  String         @default("")
+}
+
+// AI IDE source snapshots and operations. Owner scopes are enforced on every API and job.
+model IdeWorkspace {
+  id              String        @id @default(cuid())
+  organizationId  String
+  ownerId         String
+  name            String
+  kind            String        @default("AGENT")
+  sourceDigest    String        @default("")
+  latestBuildId   String?
+  settings        Json          @default("{}")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  revisions       IdeRevision[]
+  builds          IdeBuild[]
+  jobs            IdeJob[]
+  @@index([organizationId, ownerId, updatedAt])
+}
+
+model IdeRevision {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  workspace       IdeWorkspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  digest          String
+  files           Json
+  createdAt       DateTime      @default(now())
+  @@unique([workspaceId, digest])
+}
+
+model IdeBuild {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  workspace       IdeWorkspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceDigest    String
+  status          String
+  diagnostics     Json          @default("[]")
+  manifest        Json          @default("{}")
+  bundles         Json          @default("{}")
+  previewHtml     String        @default("")
+  evidence        Json          @default("{}")
+  createdAt       DateTime      @default(now())
+  @@index([workspaceId, createdAt])
+}
+
+model IdeJob {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  workspace       IdeWorkspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  kind            String
+  status          String        @default("QUEUED")
+  stage           String        @default("queued")
+  requestKey      String
+  requestHash     String
+  sourceDigest    String
+  buildId         String?
+  input           Json
+  output          Json          @default("{}")
+  events          Json          @default("[]")
+  usage           Json          @default("{}")
+  cancelRequested Boolean       @default(false)
+  workerId        String?
+  leaseUntil      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  @@unique([workspaceId, requestKey])
+  @@index([status, createdAt])
 }

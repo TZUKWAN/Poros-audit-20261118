@@ -9,8 +9,8 @@ services:
       dockerfile: deploy/Dockerfile.dsh
       args:
         DSH_VERSION: "0.2.2-rc.1"
-    image: poros/dsh:0.2.2-rc.1
-    # 常驻运行时容器：Poros API 经 docker exec 在其中拉起真实 dsh headless 会话（审查项①）。
+    image: ${POROS_DSH_IMAGE:-poros/dsh:0.2.2-rc.1-audit}
+    # Compose 实例用于运行时探针与隔离测试。任务执行使用独立的无网络临时容器。
     command: ["sleep", "infinity"]
     user: "10001:10001"
     environment:
@@ -58,28 +58,32 @@ services:
       - poros-net
     # 仅环回发布供开发机迁移/测试；生产走 poros-net 内部、不发布。
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:${POROS_DB_PORT:-55432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U poros"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "poros"]
       interval: 5s
       timeout: 3s
       retries: 12
 
   s3:
     image: chrislusf/seaweedfs:3.85
-    command: server -dir=/data -s3 -s3.port=8333
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/poros-s3-auth.json
+    configs:
+      - source: s3-auth
+        target: /etc/poros-s3-auth.json
     volumes:
       - s3-data:/data
     networks:
       - poros-net
     ports:
-      - "127.0.0.1:59000:8333"
+      - "127.0.0.1:${POROS_S3_PORT:-59000}:8333"
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8333/ >/dev/null 2>&1 || exit 1"]
+      test:
+        ["CMD-SHELL", "wget -qO- http://127.0.0.1:9333/cluster/status >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -95,3 +99,8 @@ volumes:
   dsh-cache:
   db-data:
   s3-data:
+
+configs:
+  s3-auth:
+    content: |
+      {"identities":[{"name":"poros-service","credentials":[{"accessKey":"${S3_ACCESS_KEY:-poros}","secretKey":"${S3_SECRET_KEY:-poros}"}],"actions":["Admin","Read","Write","List"]}]}

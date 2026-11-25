@@ -1,0 +1,26 @@
+[
+  {
+    "appId": "poros.0d7cfe7eef158f587d4e74b3",
+    "name": "Poros 安装验收 A",
+    "version": "565171a7334c8a45c0580676f197369b337f3e2a550bc8bd53dea12b1da393a2",
+    "sha256": "517f2effd181b0110351e8e27b5e6d570c65a48086268ad27c44709fc1c007b8",
+    "bytes": 406888547,
+    "runtimeImageId": "sha256:1ee6d2badafd992ff987912a2b56ad03c5842897222e44dfdd956f9ae51d7eeb",
+    "runtimeImageSha256": "9019c5ef61a6260251ba6b6b0fce9651a88e816944df456121452cc245fa14fe",
+    "windowsCodeSigned": false,
+    "windowsSignatureStatus": "NotSigned",
+    "packagedFrameworkSha256": "fb6202abf5d05e2859d211322deebb31feeacf228fd6fb8af9bc46a5acc3d991"
+  },
+  {
+    "appId": "poros.0f24af358b0b3107164bb079",
+    "name": "Poros 安装验收 B",
+    "version": "80d04d08b376031f6279c762f9a09415d87bc2e9d2a711b31a8b4bd4c7874ec0",
+    "sha256": "5fb860d11a7f0de53bc8a7a062a0eb9c32a67f939a1fa77812d9c18645b99452",
+    "bytes": 406888521,
+    "runtimeImageId": "sha256:1ee6d2badafd992ff987912a2b56ad03c5842897222e44dfdd956f9ae51d7eeb",
+    "runtimeImageSha256": "9019c5ef61a6260251ba6b6b0fce9651a88e816944df456121452cc245fa14fe",
+    "windowsCodeSigned": false,
+    "windowsSignatureStatus": "NotSigned",
+    "packagedFrameworkSha256": "fb6202abf5d05e2859d211322deebb31feeacf228fd6fb8af9bc46a5acc3d991"
+  }
+]

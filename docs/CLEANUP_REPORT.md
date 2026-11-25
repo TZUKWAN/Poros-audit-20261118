@@ -1,3 +1,5 @@
+> 历史记录：本文描述旧 Pi 或早期企业基线，不作为当前功能/部署验收。当前事实见 [README](../README.md)、[DEPLOYMENT](DEPLOYMENT.md)、[功能迁移矩阵](FEATURE_MIGRATION_MATRIX.md) 和 [测试证据](../TEST_EVIDENCE.md)。
+
 # CLEANUP_REPORT — Poros Enterprise V2
 
 > 规则执行：先证明无引用/数据不损/替代实现与测试通过，再删除（执行提示词 §5）。删除后已重跑全量（见文末）。
