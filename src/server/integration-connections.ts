@@ -50,18 +50,22 @@ const address = (p: Owner, provider: Provider) => ({
 });
 const aad = (row: Owner & { provider: string; revision: string }) =>
   Buffer.from(JSON.stringify([row.organizationId, row.userId, row.provider, row.revision]));
-function seal(
+export function sealConnectionSecret(
   row: Owner & { provider: string; revision: string },
   value: { apiKey: string; clientId?: string },
+  encryptionKey = settingsKey(),
 ) {
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", settingsKey(), iv);
+  const cipher = createCipheriv("aes-256-gcm", encryptionKey, iv);
   cipher.setAAD(aad(row));
   const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
   return [iv, cipher.getAuthTag(), ciphertext].map((part) => part.toString("base64url")).join(".");
 }
 
-export function connectionSecret(row: IntegrationConnection): {
+export function connectionSecret(
+  row: IntegrationConnection,
+  encryptionKey = settingsKey(),
+): {
   apiKey: string;
   clientId?: string;
 } {
@@ -69,7 +73,7 @@ export function connectionSecret(row: IntegrationConnection): {
     const [iv, tag, data] = row.encryptedKey
       .split(".")
       .map((value) => Buffer.from(value, "base64url"));
-    const decipher = createDecipheriv("aes-256-gcm", settingsKey(), iv!);
+    const decipher = createDecipheriv("aes-256-gcm", encryptionKey, iv!);
     decipher.setAAD(aad(row));
     decipher.setAuthTag(tag!);
     return JSON.parse(Buffer.concat([decipher.update(data!), decipher.final()]).toString("utf8"));
@@ -104,6 +108,7 @@ export async function saveConnection(
   p: Owner,
   provider: Provider,
   body: unknown,
+  storageProvider: string = provider,
 ) {
   const input = credentialBody.parse(body);
   let settings: Record<string, string> = {};
@@ -116,12 +121,12 @@ export async function saveConnection(
   } else if (input.baseUrl || input.model || (provider === "ima") !== Boolean(input.clientId)) {
     throw new ProviderError("SETTINGS_INCOMPLETE");
   }
-  const identity = address(p, provider),
+  const identity = { ...address(p, provider), provider: storageProvider },
     revision = randomUUID();
   const data = {
     revision,
     settings,
-    encryptedKey: seal(
+    encryptedKey: sealConnectionSecret(
       { ...identity, revision },
       { apiKey: input.apiKey, clientId: input.clientId },
     ),
@@ -151,10 +156,13 @@ export function recordConnectionCheck(
   });
 }
 
-export function modelConnection(row: IntegrationConnection): ModelConnection {
+export function modelConnection(
+  row: IntegrationConnection,
+  encryptionKey?: Buffer,
+): ModelConnection {
   const parsed = z.object({ baseUrl: z.string(), model: modelId }).safeParse(row.settings);
   if (!parsed.success) throw new ProviderError("SETTINGS_INCOMPLETE");
-  return { ...parsed.data, apiKey: connectionSecret(row).apiKey };
+  return { ...parsed.data, apiKey: connectionSecret(row, encryptionKey).apiKey };
 }
 
 export async function readyPersonalModel(

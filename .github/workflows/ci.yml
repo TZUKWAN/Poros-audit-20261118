@@ -26,6 +26,7 @@ jobs:
       JWT_SECRET: ci-jwt-secret-0123456789abcdef
       DATABASE_URL: postgresql://poros:ci-password-0123456789@127.0.0.1:55432/poros?schema=public
       LOG_LEVEL: silent
+      POROS_RUNTIME: gateway
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node24
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6, Node24
@@ -40,6 +41,10 @@ jobs:
           node scripts/wait-infra.mjs
       - run: npm run build
       - run: npm run lint
+      - name: Build real isolated program and compiler images
+        run: |
+          docker compose -f deploy/docker-compose.yml build dsh
+          npm run compiler:build
       - run: npm run test:api
   isolation:
     runs-on: ubuntu-24.04
@@ -74,6 +79,7 @@ jobs:
       - name: Build pinned runtime and start test infrastructure
         run: |
           docker compose -f deploy/docker-compose.yml build dsh
+          npm run compiler:build
           docker compose -f deploy/docker-compose.yml up -d db s3
           for i in $(seq 1 60); do docker compose -f deploy/docker-compose.yml exec -T db pg_isready -h 127.0.0.1 -U poros >/dev/null 2>&1 && break; sleep 1; done
           docker compose -f deploy/docker-compose.yml exec -T db pg_isready -h 127.0.0.1 -U poros
@@ -83,3 +89,12 @@ jobs:
         run: npm run e2e
       - name: PC workflow acceptance on two desktop viewports
         run: npm run e2e:pc
+      - name: Agent IDE and independent App browser acceptance
+        run: |
+          npm run e2e:ide
+          npm run e2e:app
+      - name: Actual local Cloudflare runtime acceptance
+        run: |
+          npm --prefix relay ci --ignore-scripts
+          npm --prefix relay audit --audit-level=low
+          npm run e2e:relay

@@ -31,7 +31,9 @@ export function apply(ctx) {
           schema: { type: "string" },
           render: (_args, text) => [{ type: "text", text }],
         },
-        timeoutMs: 18000,
+        timeoutMs: Number.isFinite(tool.timeoutMs)
+          ? Math.min(120000, Math.max(3000, tool.timeoutMs))
+          : 18000,
         async execute(args, call) {
           const reply = await request("/tool", { name: tool.name, input: args }, call.signal);
           if (!reply.ok)

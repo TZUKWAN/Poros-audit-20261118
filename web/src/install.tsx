@@ -6,7 +6,7 @@ interface InstallEvent extends Event {
   userChoice: Promise<{ outcome: string }>;
 }
 
-export function InstallApp() {
+export function InstallApp({ name = "Poros", base = "/" }: { name?: string; base?: string } = {}) {
   const [install, setInstall] = useState<InstallEvent | null>(null);
   const [open, setOpen] = useState(false);
   const [standalone, setStandalone] = useState(
@@ -23,12 +23,12 @@ export function InstallApp() {
     window.addEventListener("beforeinstallprompt", available);
     window.addEventListener("appinstalled", installed);
     if (window.isSecureContext && "serviceWorker" in navigator)
-      void navigator.serviceWorker.register("/sw.js").catch(() => {});
+      void navigator.serviceWorker.register(base + "sw.js", { scope: base }).catch(() => {});
     return () => {
       window.removeEventListener("beforeinstallprompt", available);
       window.removeEventListener("appinstalled", installed);
     };
-  }, []);
+  }, [base]);
   if (standalone) return null;
   return (
     <>
@@ -49,7 +49,7 @@ export function InstallApp() {
         安装应用
       </Button>
       {open && (
-        <Dialog open onOpenChange={setOpen} title="安装 Poros">
+        <Dialog open onOpenChange={setOpen} title={"安装 " + name}>
           {window.isSecureContext ? (
             <ul className="list-disc space-y-2 pl-5 text-sm">
               <li>iPhone 或 iPad：在 Safari 打开，点「分享」，再点「添加到主屏幕」。</li>

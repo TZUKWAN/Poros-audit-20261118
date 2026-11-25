@@ -963,20 +963,31 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         if (closed || reply.raw.destroyed) break;
         if (batch.length === 200) continue;
         if (TERMINAL.has(t.status) && !runs.some((r) => r.status === "RUNNING")) {
-          const pendingApproval =
-            t.status === "BLOCKED" &&
-            (await db.approvalRequest.count({
-              where: {
-                organizationId: p.organizationId,
-                subjectId: id,
-                kind: "DANGEROUS_OPERATION",
-                decision: "PENDING",
-              },
-            })) > 0;
-          reply.raw.write(
-            `event: done\ndata: ${JSON.stringify({ status: t.status, pendingApproval })}\n\n`,
+          // Approval/retry can commit between the earlier task, run and event
+          // reads. Never combine a stale BLOCKED task with a newly approved
+          // request and announce completion of an execution that just started.
+          const [current, running, pendingCount] = await db.$transaction(
+            [
+              db.task.findUniqueOrThrow({ where: { id }, select: { status: true } }),
+              db.run.count({ where: { taskId: id, status: "RUNNING" } }),
+              db.approvalRequest.count({
+                where: {
+                  organizationId: p.organizationId,
+                  subjectId: id,
+                  kind: "DANGEROUS_OPERATION",
+                  decision: "PENDING",
+                },
+              }),
+            ],
+            { isolationLevel: "RepeatableRead" },
           );
-          break;
+          if (TERMINAL.has(current.status) && running === 0) {
+            const pendingApproval = current.status === "BLOCKED" && pendingCount > 0;
+            reply.raw.write(
+              `event: done\ndata: ${JSON.stringify({ status: current.status, pendingApproval })}\n\n`,
+            );
+            break;
+          }
         }
         if (++idle % 20 === 0) reply.raw.write(": heartbeat\n\n");
         await new Promise((resolve) => setTimeout(resolve, 500));

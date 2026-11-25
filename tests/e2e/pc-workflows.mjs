@@ -42,7 +42,7 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
   const wait = (page, text, timeout = 20000) =>
     page.getByText(text, { exact: false }).first().waitFor({ timeout });
   const uiLogin = async (page, role, account = `${role}@a.test`, password = `${role}-pass-123`) => {
-    await page.goto(base);
+    await page.goto(base + "?legacy=1");
     await page.getByLabel("组织 ID").fill("org-a");
     await page.getByLabel("邮箱", { exact: true }).fill(account);
     await page.getByLabel("密码", { exact: true }).fill(password);
@@ -399,7 +399,11 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     await wait(employee, "正在等待独立审批");
     await employee.locator("summary").filter({ hasText: "查看执行过程与证据" }).click();
     await approveTask(firstId);
-    await employee.getByText("已结束", { exact: true }).waitFor({ timeout: 45000 });
+    await employee
+      .getByText(firstPrompt, { exact: true })
+      .locator("..")
+      .getByText("已结束", { exact: true })
+      .waitFor({ timeout: 45000 });
     const firstRun = await finish(firstId, employeeToken);
     assert.equal(firstRun.status, "UNVERIFIED");
     for (const [, , marker] of files.slice(0, 3))
@@ -471,7 +475,11 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     assert.equal(revisedTask.turn, 2);
     await employee.locator("summary").filter({ hasText: "查看执行过程与证据" }).click();
     await approveTask(revisedId);
-    await employee.getByText("已结束", { exact: true }).waitFor({ timeout: 45000 });
+    await employee
+      .getByText(revisionPrompt, { exact: true })
+      .locator("..")
+      .getByText("已结束", { exact: true })
+      .waitFor({ timeout: 45000 });
     const revisedRun = await finish(revisedId, employeeToken);
     assert.equal(revisedRun.artifact.revisionOfId, firstRun.artifact.id);
     assert.equal(
@@ -518,7 +526,11 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     const nextPrompt = "PC 判断规则执行 " + nonce;
     const next = await submit(nextPrompt);
     await approveTask(next);
-    await employee.getByText("已结束", { exact: true }).waitFor({ timeout: 45000 });
+    await employee
+      .getByText(nextPrompt, { exact: true })
+      .locator("..")
+      .getByText("已结束", { exact: true })
+      .waitFor({ timeout: 45000 });
     const nextRun = await finish(next, employeeToken);
     assert.equal(nextRun.applications.find((a) => a.ruleId === correction.id).evaluation, "PASS");
     assert.equal(nextRun.status, "UNVERIFIED");
@@ -538,7 +550,11 @@ export async function runPcWorkflows({ browser, base, api, login, db, restart, m
     const cancelled = await submit("PC 取消 " + nonce);
     await btn(employee, "取消").click();
     await wait(employee, "取消请求已提交");
-    await employee.getByText("已结束", { exact: true }).waitFor();
+    await employee
+      .getByText("PC 取消 " + nonce, { exact: true })
+      .locator("..")
+      .getByText("已结束", { exact: true })
+      .waitFor();
     assert.equal((await db.task.findUnique({ where: { id: cancelled } })).status, "CANCELLED");
     await tab(admin, "项目空间");
     await admin.getByRole("button", { name: new RegExp(projectName) }).click();

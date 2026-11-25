@@ -9,6 +9,7 @@ npm ci
 npm run db:up
 npx prisma migrate deploy
 npm run runtime:build
+npm run compiler:build
 npm run build
 npm run db:seed  # 仅开发
 npm start
@@ -16,7 +17,7 @@ npm start
 
 Compose 显式读取 `.env`；CI 用环境变量。SeaweedFS 使用 `-s3.config` 身份，无匿名账户；3.85 仅设置 AWS 环境变量经实测不足以拒绝匿名。S3 密钥使用随机字母/数字/下划线/连字符，避免 JSON 插值歧义。认证升级保留具名数据卷，真实部署禁止 `down -v`。
 
-`Dockerfile.dsh` 支持从零构建。若 Docker Hub 不可达且已有已验证的 `poros/dsh:0.2.2-rc.1`，可用 `docker build -f deploy/Dockerfile.runtime -t poros/dsh:0.2.2-rc.1-audit .` 叠加本机测试修复层；离线基础镜像的 Node 精确版本可能不同，完整 CI 从固定 Dockerfile 构建。Compose dsh 是隔离测试模板，实际任务不使用其共享卷。
+`Dockerfile.dsh` 支持从零构建。若 Docker Hub 不可达且已有已验证的 `poros/dsh:0.2.2-rc.1`，可用 `docker build -f deploy/Dockerfile.runtime -t poros/dsh:0.2.2-rc.1-audit .` 叠加本机测试修复层；离线层现在强制验证 Node 24.22.3、DSH 0.2.2-rc.1 和桥协议 2；版本不符会拒绝构建。完整 CI 从固定 Dockerfile 构建。Compose dsh 是隔离测试模板，实际任务不使用其共享卷。
 
 ## 真实模型与生产
 
@@ -39,3 +40,15 @@ JWT 至少 32 字符；数据库/S3 替换开发默认，数据库不得含 `.te
 迁移只增加字段/表/枚举/保护触发器，不删除业务数据。保留旧版本记录，但拒绝按当前草稿补猜历史授权；需重新发布审批。回滚只指向已审批版本。旧 Pi/宿主 DSH 不自动访问。
 
 运行 build、lint、test:api、test:isolation、e2e、audit。API/E2E 创建 UUID 独立测试库并清理自建对象。ISO-03 唯一 project、finally 清理。Linux UI 测试前执行 `node node_modules/playwright-core/cli.js install --with-deps chromium`；Windows 使用独立无头 Edge，不控制可见桌面。
+
+## Agent AI IDE 与独立软件
+
+Builder/管理员默认进入新 IDE，原企业工作台使用 ?legacy=1。应用所有增量迁移，包括 20261125100000_agent_ide 与 20261126010000_ide_bindings。后者保留原四种连接，增加严格的 IDE 私有连接命名空间。IDE 模型只接受用户已验证的连接，没有 mock 回退。
+
+生产还需构建 poros/compiler:1；npm run compiler:build 会准备受信编译入口并构建固定依赖镜像。API 宿主只转发源码数据，生成程序的 TypeScript 检查和打包在无网络、非 root 的独立构建容器里运行。Linux Engine 需支持 API 1.47；远程 TLS/SSH Docker context 继续使用 CLI 适配。
+
+配置持久的 POROS_WORKSPACE_ROOT 和 POROS_RELEASE_ROOT。源码修订也有数据库归档，但发布者私钥、安装产物与本地缓存有独立文件；备份必须一起保存数据库、S3、工程目录、发行目录及设置加密主密钥，不可仅备份 Git。升级不要覆盖已存在的发布者密钥。
+
+回滚时先停止新 worker，再切回已验证的代码、DSH 镜像与静态产物；保留增量表和原业务数据，不使用破坏性 down migration。恢复同一份发布者密钥和目录；已运行或结果不确定的任务不自动重放。旧服务不应加载与后台 API 不匹配的新 UI 资产。
+
+独立安装端、Windows 构建器与免费远控见 [AGENT_APP_DELIVERY](AGENT_APP_DELIVERY.md)。Windows 安装器需要 npm --prefix desktop ci；Linux 服务仍可导出签名工程包，界面会如实显示当前没有 Windows 构建器。

@@ -493,3 +493,70 @@ model JudgmentApplication {
   evidenceRef    String         @default("")
   failureReason  String         @default("")
 }
+
+// AI IDE source snapshots and operations. Owner scopes are enforced on every API and job.
+model IdeWorkspace {
+  id              String        @id @default(cuid())
+  organizationId  String
+  ownerId         String
+  name            String
+  kind            String        @default("AGENT")
+  sourceDigest    String        @default("")
+  latestBuildId   String?
+  settings        Json          @default("{}")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  revisions       IdeRevision[]
+  builds          IdeBuild[]
+  jobs            IdeJob[]
+  @@index([organizationId, ownerId, updatedAt])
+}
+
+model IdeRevision {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  workspace       IdeWorkspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  digest          String
+  files           Json
+  createdAt       DateTime      @default(now())
+  @@unique([workspaceId, digest])
+}
+
+model IdeBuild {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  workspace       IdeWorkspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceDigest    String
+  status          String
+  diagnostics     Json          @default("[]")
+  manifest        Json          @default("{}")
+  bundles         Json          @default("{}")
+  previewHtml     String        @default("")
+  evidence        Json          @default("{}")
+  createdAt       DateTime      @default(now())
+  @@index([workspaceId, createdAt])
+}
+
+model IdeJob {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  workspace       IdeWorkspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  kind            String
+  status          String        @default("QUEUED")
+  stage           String        @default("queued")
+  requestKey      String
+  requestHash     String
+  sourceDigest    String
+  buildId         String?
+  input           Json
+  output          Json          @default("{}")
+  events          Json          @default("[]")
+  usage           Json          @default("{}")
+  cancelRequested Boolean       @default(false)
+  workerId        String?
+  leaseUntil      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  @@unique([workspaceId, requestKey])
+  @@index([status, createdAt])
+}

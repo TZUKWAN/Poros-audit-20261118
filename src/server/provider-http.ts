@@ -114,8 +114,8 @@ export async function checkPublicTarget(value: string): Promise<string> {
   return url.href;
 }
 
-interface ProviderRequest {
-  method: "GET" | "POST";
+export interface ProviderRequest {
+  method: "GET" | "POST" | "DELETE";
   headers: Record<string, string>;
   signal: AbortSignal;
   body?: string;
@@ -130,6 +130,40 @@ export async function requestModel(
   const url = new URL(base + endpoint);
   checkModelBase(base);
   const addresses = permittedLoopback(base, url) ? undefined : await publicAddresses(url);
+  return pinnedRequest(url, init, addresses);
+}
+
+/** A separate, explicit allowlist for development API/MCP loopback endpoints. Public DNS is pinned. */
+export async function requestPublicEndpoint(
+  input: string,
+  init: ProviderRequest,
+): Promise<Response> {
+  const url = parseUrl(input);
+  const local = (process.env.POROS_LOCAL_API_BASES || "")
+    .split(",")
+    .filter(Boolean)
+    .some((value) => {
+      try {
+        const base = parseUrl(value);
+        return (
+          ["127.0.0.1", "::1"].includes(unbracket(url.hostname)) &&
+          base.origin === url.origin &&
+          (url.pathname === base.pathname ||
+            url.pathname.startsWith(base.pathname.replace(/\/$/, "") + "/"))
+        );
+      } catch {
+        return false;
+      }
+    });
+  if (!local) checkPublicUrl(url);
+  return pinnedRequest(url, init, local ? undefined : await publicAddresses(url));
+}
+
+function pinnedRequest(
+  url: URL,
+  init: ProviderRequest,
+  addresses?: Array<{ address: string; family: number }>,
+): Promise<Response> {
   init.signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const request = url.protocol === "https:" ? httpsRequest : httpRequest;
@@ -161,6 +195,12 @@ export async function requestModel(
             status,
             headers: {
               "content-type": incoming.headers["content-type"] ?? "application/octet-stream",
+              ...(incoming.headers["mcp-session-id"]
+                ? { "mcp-session-id": String(incoming.headers["mcp-session-id"]) }
+                : {}),
+              ...(incoming.headers["www-authenticate"]
+                ? { "www-authenticate": String(incoming.headers["www-authenticate"]) }
+                : {}),
             },
           }),
         );

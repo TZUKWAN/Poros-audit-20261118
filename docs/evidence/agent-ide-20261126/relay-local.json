@@ -1,0 +1,13 @@
+{
+  "scope": "Actual local Cloudflare workerd + SQLite Durable Object + outbound WS; source fixtures; not deployed Cloudflare or physical cellular phone acceptance",
+  "apps": ["poros.bcb948c596d7a2a027bf4fb2", "poros.bcb948c596d7a2a027bf4fb2"],
+  "oneRelayMultipleApps": true,
+  "samePackageTwoInstallationsOneBrowser": true,
+  "ownerBlockedRemotely": true,
+  "phonePairApproval": true,
+  "actualResult": 21,
+  "stableChannelReconnect": true,
+  "oldJobRecoveredWithoutReplay": true,
+  "deviceRevoked": true,
+  "browserErrors": []
+}

@@ -8,6 +8,8 @@ import type { describeProviderError } from "./provider-errors.js";
 import { runtimeToolName } from "./capability-catalog.js";
 import { personalModelSource, type ModelConnection } from "./integration-connections.js";
 import { StringDecoder } from "node:string_decoder";
+import { LocalContainer, dockerJson } from "./docker-session.js";
+import { localSocket, localDockerControl } from "./docker-control.js";
 export interface DshGrant {
   kind: "TOOL" | "SKILL" | "MCP" | "KNOWLEDGE" | "MODEL";
   name: string;
@@ -33,13 +35,20 @@ export interface DshRunOptions {
   model?: ModelConnection;
   signal?: AbortSignal;
   onEvent?: (event: DshEvent) => Promise<void>;
-  brokerTools?: Array<{ name: string; description: string; input: Record<string, "string"> }>;
+  brokerTools?: Array<{
+    name: string;
+    description: string;
+    input: Record<string, "string">;
+    timeoutMs?: number;
+  }>;
   invokeTool?: (name: string, input: unknown, signal: AbortSignal) => Promise<unknown>;
   authorizeTool?: (name: string) => Promise<void>;
   authorizeModel?: () => Promise<void>;
   /** Deterministic MODEL fixture only. Real DSH/tool bodies. Production rejects this. */
   testCalls?: Array<{ name: string; arguments: Record<string, unknown> }>;
   testSequence?: boolean;
+  /** IDE always uses its verified model, independently of the legacy test profile. */
+  configuredModelOnly?: boolean;
 }
 export interface DshRunResult {
   modelCalls: number | null;
@@ -52,6 +61,9 @@ export interface DshRunResult {
   modelChannel: "configured" | "stub";
   modelFailure?: ReturnType<typeof describeProviderError>;
 }
+/** Windows Docker Desktop also ships an extensionless POSIX shim; never spawn that shim. */
+export const dockerExecutable = () =>
+  process.env.POROS_DOCKER_BINARY || (process.platform === "win32" ? "docker.exe" : "docker");
 export function grantedToolNames(grants: DshGrant[]): Set<string> {
   return new Set(grants.map(runtimeToolName).filter((name): name is string => name !== null));
 }
@@ -134,13 +146,21 @@ export function dockerCommand(
   args: string[],
   input = "",
   signal?: AbortSignal,
-  onLine?: (line: string, send: (value: unknown) => Promise<void>) => void,
+  onLine?: (
+    line: string,
+    send: (value: unknown) => Promise<void>,
+    finishInput?: () => void,
+  ) => void,
   interactive = false,
+  existingChild?: LocalContainer,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   // Node readline treats these Unicode characters as delimiters even inside a JSON string.
-  const frame = (json: string) => json.replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029") + "\n";
+  const frame = (json: string) =>
+    json.replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029") + "\n";
   return new Promise((resolve, reject) => {
-    const child = spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const child =
+      existingChild ||
+      spawn(dockerExecutable(), args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     let stdout = "",
       stderr = "",
       pending = "",
@@ -158,6 +178,9 @@ export function dockerCommand(
       });
     const abort = () => {
       child.kill();
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
       reject(new Error("DSH cancelled/aborted or timed out"));
     };
     const deadline = signal ? null : setTimeout(abort, 20000);
@@ -174,7 +197,7 @@ export function dockerCommand(
         pending += decoder.write(d);
         let index: number;
         while ((index = pending.indexOf("\n")) >= 0) {
-          onLine(pending.slice(0, index), send);
+          onLine(pending.slice(0, index), send, () => child.stdin.end());
           pending = pending.slice(index + 1);
         }
       } else stdout += decoder.write(d);
@@ -191,11 +214,15 @@ export function dockerCommand(
       if (deadline) clearTimeout(deadline);
       signal?.removeEventListener("abort", abort);
       pending += decoder.end();
-      if (pending) onLine?.(pending, send);
+      if (pending) onLine?.(pending, send, () => child.stdin.end());
       resolve({ code: code ?? -1, stdout, stderr });
     });
-    if (interactive) child.stdin.write(frame(input));
-    else child.stdin.end(input);
+    const begin = async () => {
+      if (existingChild) await existingChild.start();
+      if (interactive) child.stdin.write(frame(input));
+      else child.stdin.end(input);
+    };
+    void begin().catch(reject);
   });
 }
 export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> {
@@ -203,7 +230,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
   if (!opts.organizationId || !opts.agentId || !opts.taskId)
     throw new Error("DSH requires organization, Agent and task authorization context");
   if (Buffer.byteLength(opts.task) > 80000) throw new Error("Task exceeds size quota");
-  const stub = env.dshModelStub();
+  const stub = opts.configuredModelOnly ? false : env.dshModelStub();
   if (process.env.NODE_ENV === "production" && (stub || opts.testCalls || opts.testSequence))
     throw new Error("Production forbids DSH model fixtures");
   if (opts.model && stub) throw new Error("Personal model cannot run through a test model");
@@ -221,6 +248,29 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
   )
     throw new Error("DSH Model capability not granted");
   const scope = deploymentScope();
+  const runtimeImage = process.env.POROS_DSH_IMAGE || "poros/dsh:0.2.2-rc.1-audit";
+  const socket = await localSocket();
+  const image = socket
+    ? await dockerJson(socket, "GET", "/images/" + encodeURIComponent(runtimeImage) + "/json")
+    : null;
+  const protocol = image
+    ? {
+        code: image.status === 200 ? 0 : 1,
+        stdout: String(
+          (image.data as { Config?: { Labels?: Record<string, string> } }).Config?.Labels?.[
+            "org.poros.bridge-protocol"
+          ] || "",
+        ),
+      }
+    : await dockerCommand([
+        "image",
+        "inspect",
+        "--format",
+        '{{index .Config.Labels "org.poros.bridge-protocol"}}',
+        runtimeImage,
+      ]);
+  if (protocol.code || protocol.stdout.trim() !== "3")
+    throw new Error("DSH 镜像缺少交互桥协议 v3，请用当前 deploy/Dockerfile.dsh 重新构建运行镜像");
   const proxy = stub ? null : await createRunModelProxy(undefined, model);
   const id = createHash("sha256").update(opts.runId).digest("hex").slice(0, 24),
     name = `poros-run-${id}`;
@@ -256,7 +306,16 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
     }
     if (requests.has(id)) return;
     const request = new AbortController();
-    const signal = AbortSignal.any([ctrl.signal, request.signal, AbortSignal.timeout(35000)]);
+    const toolName = (e.body as { name?: string } | undefined)?.name;
+    const requestedTimeout =
+      e.route === "tool"
+        ? opts.brokerTools?.find((tool) => tool.name === toolName)?.timeoutMs
+        : undefined;
+    const signal = AbortSignal.any([
+      ctrl.signal,
+      request.signal,
+      AbortSignal.timeout(Math.min(180000, Math.max(35000, requestedTimeout || 35000))),
+    ]);
     requests.set(id, request);
     const reply = (part: Record<string, unknown>) => send({ type: "bridge.reply", id, ...part });
     const chunk = (data: string | Uint8Array) => {
@@ -320,7 +379,11 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
       requests.delete(id);
     }
   };
-  const dispatch = (line: string, send: (value: unknown) => Promise<void>) => {
+  const dispatch = (
+    line: string,
+    send: (value: unknown) => Promise<void>,
+    finishInput?: () => void,
+  ) => {
     let e: DshEvent;
     try {
       e = JSON.parse(line) as DshEvent;
@@ -344,6 +407,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
       result.completed = (e.reason as { kind?: string })?.kind === "completed";
     }
     if (e.type === "done") result.completed = true;
+    if (e.type === "runtime.exit") finishInput?.();
     if (e.type === "error") result.error = String(e.message ?? e.error ?? "DSH error");
     writes = writes
       .then(() => opts.onEvent?.(e))
@@ -353,52 +417,91 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
       });
   };
   try {
-    const create = await dockerCommand(
-      [
-        "create",
-        "--name",
-        name,
-        "--label",
-        "org.poros.owner=runtime",
-        "--label",
-        `org.poros.deployment=${scope}`,
-        "--label",
-        `org.poros.run=${opts.runId}`,
-        "--label",
-        `org.poros.token=${ownerToken}`,
-        "--label",
-        `org.poros.tenant=${createHash("sha256").update(opts.organizationId).digest("hex")}`,
-        "--interactive",
-        "--init",
-        "--user",
-        "10001:10001",
-        "--read-only",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges:true",
-        "--pids-limit",
-        "128",
-        "--memory",
-        "768m",
-        "--cpus",
-        "1",
-        "--network",
-        "none",
-        "--tmpfs",
-        "/home/poros:rw,noexec,nosuid,size=268435456,uid=10001,gid=10001,mode=0700",
-        "--tmpfs",
-        "/tmp:rw,noexec,nosuid,size=67108864,mode=1777",
-        "--env",
-        "NARB_DISABLE_NATIVE_CACHE=1",
-        "--entrypoint",
-        "node",
-        process.env.POROS_DSH_IMAGE || "poros/dsh:0.2.2-rc.1-audit",
-        "/opt/poros/bootstrap.mjs",
-      ],
-      "",
+    const local = await LocalContainer.create(
+      {
+        Image: runtimeImage,
+        User: "10001:10001",
+        OpenStdin: true,
+        StdinOnce: true,
+        AttachStdin: true,
+        AttachStdout: true,
+        AttachStderr: true,
+        Labels: {
+          "org.poros.owner": "runtime",
+          "org.poros.deployment": scope,
+          "org.poros.run": opts.runId,
+          "org.poros.token": ownerToken,
+          "org.poros.tenant": createHash("sha256").update(opts.organizationId).digest("hex"),
+        },
+        Env: ["NARB_DISABLE_NATIVE_CACHE=1"],
+        Entrypoint: ["node"],
+        Cmd: ["/opt/poros/bootstrap.mjs"],
+        HostConfig: {
+          Init: true,
+          ReadonlyRootfs: true,
+          CapDrop: ["ALL"],
+          SecurityOpt: ["no-new-privileges:true"],
+          NetworkMode: "none",
+          PidsLimit: 128,
+          Memory: 768 * 1024 * 1024,
+          NanoCpus: 1000000000,
+          Tmpfs: {
+            "/home/poros": "rw,noexec,nosuid,size=268435456,uid=10001,gid=10001,mode=0700",
+            "/tmp": "rw,noexec,nosuid,size=67108864,mode=1777",
+          },
+        },
+      },
+      name,
       ctrl.signal,
     );
+    const create = local
+      ? { code: 0, stderr: "" }
+      : await dockerCommand(
+          [
+            "create",
+            "--name",
+            name,
+            "--label",
+            "org.poros.owner=runtime",
+            "--label",
+            `org.poros.deployment=${scope}`,
+            "--label",
+            `org.poros.run=${opts.runId}`,
+            "--label",
+            `org.poros.token=${ownerToken}`,
+            "--label",
+            `org.poros.tenant=${createHash("sha256").update(opts.organizationId).digest("hex")}`,
+            "--interactive",
+            "--init",
+            "--user",
+            "10001:10001",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--pids-limit",
+            "128",
+            "--memory",
+            "768m",
+            "--cpus",
+            "1",
+            "--network",
+            "none",
+            "--tmpfs",
+            "/home/poros:rw,noexec,nosuid,size=268435456,uid=10001,gid=10001,mode=0700",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=67108864,mode=1777",
+            "--env",
+            "NARB_DISABLE_NATIVE_CACHE=1",
+            "--entrypoint",
+            "node",
+            process.env.POROS_DSH_IMAGE || "poros/dsh:0.2.2-rc.1-audit",
+            "/opt/poros/bootstrap.mjs",
+          ],
+          "",
+          ctrl.signal,
+        );
     if (create.code)
       throw new Error(`DSH container creation failed: ${create.stderr.slice(0, 200)}`);
     const input = JSON.stringify({
@@ -433,6 +536,7 @@ export async function runDshSession(opts: DshRunOptions): Promise<DshRunResult> 
       ctrl.signal,
       dispatch,
       true,
+      local || undefined,
     );
     await writes;
     if (streamError) throw streamError;
@@ -472,7 +576,38 @@ export async function removeOwnedResource(
   runId: string,
   token?: string,
   scope = deploymentScope(),
+  owner: "runtime" | "ide" = "runtime",
 ): Promise<void> {
+  if (!/^[A-Za-z0-9_.-]{1,120}$/.test(name)) throw new Error("Invalid runtime resource name");
+  const resource = kind === "container" ? `/containers/${name}/json` : `/networks/${name}`;
+  const inspectedApi = await localDockerControl("GET", resource);
+  if (inspectedApi) {
+    if (inspectedApi.status === 404) return;
+    if (inspectedApi.status !== 200) throw new Error("Cannot verify owned runtime cleanup");
+    const meta = inspectedApi.data as {
+      Id: string;
+      Labels?: Record<string, string>;
+      Config?: { Labels?: Record<string, string> };
+    };
+    const labels = meta.Labels ?? meta.Config?.Labels ?? {};
+    if (
+      labels["org.poros.owner"] !== owner ||
+      labels["org.poros.deployment"] !== scope ||
+      labels["org.poros.run"] !== runId ||
+      (token && labels["org.poros.token"] !== token)
+    )
+      return;
+    if (!/^[a-f0-9]{64}$/.test(meta.Id)) throw new Error("Invalid runtime resource identity");
+    const removed = await localDockerControl(
+      "DELETE",
+      kind === "container" ? `/containers/${meta.Id}?force=1` : `/networks/${meta.Id}`,
+    );
+    if (!removed || ![204, 404].includes(removed.status)) {
+      const remaining = await localDockerControl("GET", resource);
+      if (remaining?.status !== 404) throw new Error("Owned runtime resource removal failed");
+    }
+    return;
+  }
   const inspected = await dockerCommand(
     kind === "container" ? ["inspect", name] : ["network", "inspect", name],
   );
@@ -486,7 +621,7 @@ export async function removeOwnedResource(
   };
   const labels = meta.Labels ?? meta.Config?.Labels ?? {};
   if (
-    labels["org.poros.owner"] !== "runtime" ||
+    labels["org.poros.owner"] !== owner ||
     labels["org.poros.deployment"] !== scope ||
     labels["org.poros.run"] !== runId ||
     (token && labels["org.poros.token"] !== token)

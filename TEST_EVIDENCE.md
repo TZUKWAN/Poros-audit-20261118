@@ -1,5 +1,7 @@
 # 测试证据
 
+本页保留 2026-11-18 企业底座的历史结果。2026-11-26 Agent AI IDE、独立安装、免费环境与远控的当前证据见 [本轮实施交付](docs/AGENT_IDE_DELIVERY.md)，不能使用本页旧 HEAD 的结果代替本轮验收。
+
 执行日期：2026-11-18，Windows PowerShell 7.6，Docker Server 29.1.2。原宿主 Node25不受新版 Vitest 支持，实际后续验证使用独立缓存的 Node **24.22.3**，未修改全局安装。命令通过该 Node 调用 npm-cli.js，子进程 PATH 使用同一 Node。
 
 ## 已记录的针对性证据

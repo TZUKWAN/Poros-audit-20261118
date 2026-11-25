@@ -629,6 +629,7 @@ function RunTimeline({
             },
             signal: ctrl.signal,
           });
+          if (ctrl.signal.aborted) return;
           if (res.status === 401) {
             setToken(null);
             window.dispatchEvent(new Event("poros-auth-expired"));
@@ -647,6 +648,7 @@ function RunTimeline({
           let buffer = "";
           while (!ctrl.signal.aborted) {
             const chunk = await reader.read();
+            if (ctrl.signal.aborted) return;
             if (chunk.done) break;
             buffer += decoder.decode(chunk.value, { stream: true });
             const frames = buffer.split("\n\n");

@@ -25,11 +25,12 @@ export async function api<T = Record<string, unknown>>(
   timeoutMs = 15000,
 ): Promise<ApiResult<T>> {
   let res: Response;
+  const sentToken = token;
   try {
     res = await fetch(path, {
       method,
       headers: {
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(sentToken ? { authorization: `Bearer ${sentToken}` } : {}),
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
         ...extraHeaders,
       },
@@ -43,7 +44,7 @@ export async function api<T = Record<string, unknown>>(
       body: { error: "网络中断或请求超时，请重试" } as T & { error: string },
     };
   }
-  if (res.status === 401) {
+  if (res.status === 401 && token === sentToken) {
     setToken(null);
     window.dispatchEvent(new Event("poros-auth-expired"));
   }

@@ -1,0 +1,22 @@
+{
+  "scope": "SOURCE fixture; no model/supplier/physical-phone acceptance",
+  "bundledOutsideNodeModules": true,
+  "developmentDatabaseUnavailable": true,
+  "desktop": "1366x768",
+  "mobile": "390x844",
+  "opaqueFrameBoundary": true,
+  "actualResult": 21,
+  "reloadRecovery": true,
+  "lostAcknowledgmentAndRefreshExecutedOnce": true,
+  "pwa": {
+    "name": "独立软件浏览器验收",
+    "display": "standalone",
+    "icons": [true, true],
+    "scope": "http://127.0.0.1:63976/",
+    "cacheUrls": [
+      "http://127.0.0.1:63976/offline.html",
+      "http://127.0.0.1:63976/icons/poros-192.png"
+    ]
+  },
+  "browserErrors": []
+}

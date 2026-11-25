@@ -74,4 +74,7 @@ child.on("close", async (code) => {
   lines.close();
   process.stdin.pause();
   process.exitCode = code ?? 1;
+  // The inner DSH final precedes its child close and the boundary checks above.
+  // Only this outer acknowledgement permits the host to close the bridge input.
+  event({ type: "runtime.exit", code: process.exitCode });
 });

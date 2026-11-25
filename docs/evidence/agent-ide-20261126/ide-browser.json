@@ -1,0 +1,16 @@
+{
+  "mode": "Explicit model protocol fixture; real DSH/compiler/files/browser",
+  "actualModelRequests": 7,
+  "lostDevelopmentAcknowledgmentRecoveredOnce": true,
+  "desktop": "1366x768",
+  "mobile": "390x844",
+  "defaultEntry": "IDE",
+  "firstPromptRecovery": true,
+  "settingsDraftRecovery": true,
+  "realCompileErrorAndRepair": true,
+  "actualAgentResult": 21,
+  "failedBuildKeepsOldPreview": true,
+  "actualMcpProtocol": true,
+  "refreshRecovery": true,
+  "browserErrors": []
+}

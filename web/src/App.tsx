@@ -11,11 +11,19 @@ import CapabilitiesView from "./views/capabilities.js";
 import { InstallApp } from "./install.js";
 import { useAppRoute, type WorkStart } from "./navigation.js";
 import WorkView from "./views/work.js";
+import IdeView from "./ide/index.js";
+import RuntimeView from "./runtime/index.js";
 
 const tabClass =
   "min-h-11 rounded-t-lg px-2 py-2 text-sm text-[#66625c] hover:text-[#1f1f1e] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a14e33] sm:px-4 data-[state=active]:border-b-2 data-[state=active]:border-[#c9694b] data-[state=active]:font-medium data-[state=active]:text-[#1f1f1e]";
 
 export default function App() {
+  if (document.querySelector('meta[name="poros-runtime"]')?.getAttribute("content") === "app")
+    return <RuntimeView />;
+  return <StudioApp />;
+}
+
+function StudioApp() {
   const [logoutError, setLogoutError] = useState("");
   const [auth, setAuth] = useState<OrgInfo | null>(getToken() ? parseJwt(getToken()!) : null);
   const { route, navigate } = useAppRoute();
@@ -30,6 +38,20 @@ export default function App() {
   }, []);
 
   if (!auth) return <LoginView onLogin={setAuth} />;
+
+  if (
+    ["ADMIN", "BUILDER"].includes(auth.role) &&
+    new URLSearchParams(location.search).get("legacy") !== "1"
+  )
+    return (
+      <IdeView
+        auth={auth}
+        onLogout={async () => {
+          if (await logout()) setAuth(null);
+          else throw new Error("退出未成功，请重试");
+        }}
+      />
+    );
 
   const openTask = async (id: string) => {
     const response = await api<{ task: { conversationId: string | null } }>(
@@ -190,7 +212,7 @@ function LoginView({ onLogin }: { onLogin: (info: OrgInfo) => void }) {
     <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4">
       <div className="mb-6 text-center">
         <h1 className="text-2xl font-bold">Poros</h1>
-        <p className="mt-1 text-sm text-[#8a8880]">企业 Agent 开发、配置、协作与治理平台</p>
+        <p className="mt-1 text-sm text-[#8a8880]">用对话开发、试用和交付 Agent</p>
       </div>
       <div className="space-y-3 rounded-2xl border border-[#e3e1dc] bg-white p-5">
         <label htmlFor="organization" className="block text-sm font-medium">

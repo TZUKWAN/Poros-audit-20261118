@@ -4,3 +4,9 @@
 !deploy/
 !deploy/Dockerfile.dsh
 !deploy/Dockerfile.runtime
+!deploy/Dockerfile.compiler
+!deploy/compiler/
+!deploy/compiler/package.json
+!deploy/compiler/package-lock.json
+!.compiler-build/
+!.compiler-build/compile.cjs

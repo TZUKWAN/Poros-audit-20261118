@@ -51,11 +51,21 @@ export interface SettingsBody {
 }
 type Item = { title: string; snippet?: string; url?: string };
 
-export default function IntegrationsView({ providers }: { providers?: string[] } = {}) {
+export default function IntegrationsView({
+  providers,
+  context,
+  request = api,
+  endpointBase = settingsPath,
+}: {
+  providers?: string[];
+  context?: "ide" | "app";
+  request?: typeof api;
+  endpointBase?: string;
+} = {}) {
   const [state, setState] = useState<SettingsBody | null>(null);
   const [error, setError] = useState("");
   const reload = async () => {
-    const r = await api<SettingsBody>("GET", settingsPath);
+    const r = await request<SettingsBody>("GET", endpointBase);
     if (r.ok) {
       setError("");
       setState(r.body);
@@ -68,11 +78,13 @@ export default function IntegrationsView({ providers }: { providers?: string[] }
   return (
     <div className="space-y-4">
       <Card>
-        <h2 className="font-semibold">个人集成设置</h2>
+        <h2 className="font-semibold">{context === "app" ? "当前软件连接" : "个人集成设置"}</h2>
         <p className="mt-1 text-sm text-[#5c5a55]">
-          凭证仅用于当前组织下的您的账号。保存后可测试实际连接。
+          {context === "app"
+            ? "凭证只保存在当前软件安装端。保存后可测试实际连接。"
+            : "凭证仅用于当前组织下的您的账号。保存后可测试实际连接。"}
         </p>
-        {state && (
+        {state && !context && (
           <p className="mt-2 text-xs text-[#5c5a55]">
             {state.runtime === "dsh" ? "DSH 独立运行容器" : "开发网关"}
             {state.modelMode === "SIMULATION" ? " · 模拟环境 · 测试模型" : " · 已配置模型通道"}
@@ -98,6 +110,9 @@ export default function IntegrationsView({ providers }: { providers?: string[] }
               definition={definition}
               connection={state.connections.find((row) => row.provider === definition.provider)}
               reload={reload}
+              request={request}
+              endpointBase={endpointBase}
+              context={context}
             />
           ))}
     </div>
@@ -108,13 +123,19 @@ function ConnectionCard({
   definition,
   connection,
   reload,
+  request,
+  endpointBase,
+  context,
 }: {
   definition: Definition;
   connection?: PersonalConnectionView;
   reload: () => Promise<void>;
+  request: typeof api;
+  endpointBase: string;
+  context?: "ide" | "app";
 }) {
   const { provider, name, help, key } = definition;
-  const endpoint = settingsPath + "/" + provider;
+  const endpoint = endpointBase + "/" + provider;
   const [apiKey, setApiKey] = useState("");
   const [clientId, setClientId] = useState("");
   const [baseUrl, setBaseUrl] = useState(connection?.settings.baseUrl ?? "");
@@ -132,7 +153,7 @@ function ConnectionCard({
   async function save() {
     setBusy("save");
     setMessage(null);
-    const r = await api("PUT", endpoint, {
+    const r = await request("PUT", endpoint, {
       apiKey,
       ...(provider === "model" ? { baseUrl, model } : {}),
       ...(provider === "ima" ? { clientId } : {}),
@@ -149,7 +170,7 @@ function ConnectionCard({
   async function verify() {
     setBusy("test");
     setMessage(null);
-    const r = await api<{ passed: boolean; message: string }>(
+    const r = await request<{ passed: boolean; message: string }>(
       "POST",
       endpoint + "/test",
       undefined,
@@ -286,8 +307,10 @@ function ConnectionCard({
       </form>
       {provider === "model" && connection?.settings.model && (
         <p className="mt-2 break-all text-xs text-[#5c5a55]">
-          已保存 {connection.settings.model} · {connection.settings.baseUrl}。测试通过后，在 Builder
-          中授权该模型用于运行和评估。
+          已保存 {connection.settings.model} · {connection.settings.baseUrl}。
+          {context
+            ? "测试通过后可用于当前开发或软件运行。"
+            : "测试通过后，在 Builder 中授权该模型用于运行和评估。"}
         </p>
       )}
       {message ? (

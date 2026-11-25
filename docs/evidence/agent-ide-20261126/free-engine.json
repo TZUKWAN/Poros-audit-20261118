@@ -1,0 +1,38 @@
+{
+  "distro": "PorosRuntime-86913396a38f2232",
+  "engineId": "e6ebc1b4-463e-45c3-8231-aa52f2bb22da",
+  "engineVersion": "29.9.3",
+  "os": "Alpine Linux v3.24",
+  "memoryLimit": true,
+  "pidsLimit": true,
+  "cgroup": "2",
+  "swapLimit": false,
+  "imageId": "sha256:b947d4aa732765ff73071271465c04ed5c2d2c71c99ba23a70225352fbeb0c94",
+  "probe": {
+    "uid": 10001,
+    "key": null,
+    "interfaces": ["lo"],
+    "status": ["CapEff:\t0000000000000000", "NoNewPrivs:\t1"]
+  },
+  "outputs": [
+    {
+      "appId": "poros.0d7cfe7eef158f587d4e74b3",
+      "status": "SUCCEEDED",
+      "output": {
+        "version": "565171a7334c8a45c0580676f197369b337f3e2a550bc8bd53dea12b1da393a2",
+        "result": 21,
+        "verification": "NOT_EVALUATED"
+      }
+    },
+    {
+      "appId": "poros.0f24af358b0b3107164bb079",
+      "status": "SUCCEEDED",
+      "output": {
+        "version": "80d04d08b376031f6279c762f9a09415d87bc2e9d2a711b31a8b4bd4c7874ec0",
+        "result": 12,
+        "verification": "NOT_EVALUATED"
+      }
+    }
+  ],
+  "scope": "Actual separate Alpine WSL Linux Engine; no Docker Desktop API used. Source fixtures only."
+}

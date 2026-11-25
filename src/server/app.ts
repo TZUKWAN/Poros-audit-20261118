@@ -19,6 +19,10 @@ import { validateEnvironment } from "./env.js";
 import type { RunnerDeps } from "./runner.js";
 import { assertS3Private } from "./storage.js";
 import { registerConversationRoutes } from "./conversations.js";
+import { registerIdeRoutes } from "./ide/routes.js";
+import { startIdeWorker } from "./ide/engine.js";
+import { registerIdeSettings } from "./ide/settings.js";
+import { registerIdePreview } from "./ide/preview.js";
 
 export async function buildApp(
   options: { worker?: boolean; runner?: Partial<RunnerDeps> } = {},
@@ -31,7 +35,7 @@ export async function buildApp(
       serializers: {
         req: (req: { method: string; url: string; ip: string }) => ({
           method: req.method,
-          path: req.url?.split("?")[0],
+          path: req.url?.startsWith("/preview/") ? "/preview/[ticket]" : req.url?.split("?")[0],
           ip: req.ip,
         }),
       },
@@ -60,16 +64,20 @@ export async function buildApp(
   });
   app.addHook("onRequest", authMiddleware);
   app.addHook("onSend", async (req, reply, payload) => {
+    const preview = req.routeOptions.url === "/preview/:ticket" && reply.statusCode === 200;
     reply
       .header("x-content-type-options", "nosniff")
       .header("referrer-policy", "no-referrer")
-      .header("x-frame-options", "DENY")
+      .header("x-frame-options", preview ? "SAMEORIGIN" : "DENY")
       .header(
         "content-security-policy",
-        "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
+        preview
+          ? "frame-ancestors 'self'; sandbox allow-scripts"
+          : "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
       );
     if (
       req.url.startsWith("/api/") ||
+      req.url.startsWith("/preview/") ||
       ["/", "/index.html", "/sw.js", "/manifest.webmanifest"].includes(req.url.split("?")[0]!)
     )
       reply.header("cache-control", "no-store");
@@ -82,6 +90,9 @@ export async function buildApp(
   await app.register(registerFileRoutes);
   await app.register(registerCapabilityRoutes);
   await app.register(registerConversationRoutes);
+  await app.register(registerIdeRoutes);
+  await app.register(registerIdeSettings);
+  await app.register(registerIdePreview);
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "public");
   await app.register(fastifyStatic, { root: publicDir, prefix: "/" });
   app.setNotFoundHandler((req, reply) => {
@@ -99,7 +110,11 @@ export async function buildApp(
   if (process.env.NODE_ENV === "production") await assertS3Private();
   if (options.worker !== false) {
     const worker = startWorker(getDb(), options.runner);
-    app.addHook("preClose", async () => worker.stop());
+    const ideWorker = startIdeWorker(getDb());
+    app.addHook("preClose", async () => {
+      await ideWorker.stop();
+      await worker.stop();
+    });
   }
   return app;
 }

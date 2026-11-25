@@ -1,0 +1,11 @@
+{
+  "scope": "Real public trycloudflare.com HTTPS + headless phone-sized browser; source fixture, not physical cellular phone or paid-model acceptance",
+  "at": "2026-11-25T18:54:25.447Z",
+  "cloudflared": "2026.11.2",
+  "publicHttps": true,
+  "computerApproval": true,
+  "actualIsolatedResult": 21,
+  "ownerRoutesBlocked": true,
+  "revocation": true,
+  "browserErrors": []
+}

@@ -35,8 +35,13 @@ const imaSchema = z.object({
     })
     .optional(),
 });
-async function imaSearch(row: IntegrationConnection, query: string, signal?: AbortSignal) {
-  const { clientId, apiKey } = connectionSecret(row);
+async function imaSearch(
+  row: IntegrationConnection,
+  query: string,
+  signal?: AbortSignal,
+  encryptionKey?: Buffer,
+) {
+  const { clientId, apiKey } = connectionSecret(row, encryptionKey);
   const result = imaSchema.safeParse(
     await requestJson("https://ima.qq.com/openapi/wiki/v1/search_knowledge_base", {
       method: "POST",
@@ -64,8 +69,9 @@ async function imaContent(
   query: string,
   knowledgeBaseId: string,
   signal?: AbortSignal,
+  encryptionKey?: Buffer,
 ) {
-  const { clientId, apiKey } = connectionSecret(row);
+  const { clientId, apiKey } = connectionSecret(row, encryptionKey);
   const validated = z
     .object({
       retcode: z.number(),
@@ -130,8 +136,13 @@ const fetchSchema = z.object({
     }),
   ),
 });
-async function tinySearch(row: IntegrationConnection, query: string, signal?: AbortSignal) {
-  const { apiKey } = connectionSecret(row);
+async function tinySearch(
+  row: IntegrationConnection,
+  query: string,
+  signal?: AbortSignal,
+  encryptionKey?: Buffer,
+) {
+  const { apiKey } = connectionSecret(row, encryptionKey);
   const url = new URL("https://api.search.tinyfish.ai/");
   url.searchParams.set("query", query);
   const result = searchSchema.safeParse(
@@ -144,8 +155,13 @@ async function tinySearch(row: IntegrationConnection, query: string, signal?: Ab
     url: safeLink(mask(item.url, apiKey)),
   }));
 }
-async function tinyFetch(row: IntegrationConnection, input: string, signal?: AbortSignal) {
-  const { apiKey } = connectionSecret(row);
+async function tinyFetch(
+  row: IntegrationConnection,
+  input: string,
+  signal?: AbortSignal,
+  encryptionKey?: Buffer,
+) {
+  const { apiKey } = connectionSecret(row, encryptionKey);
   const url = input === "https://www.tinyfish.ai/" ? input : await checkPublicTarget(input);
   const result = fetchSchema.safeParse(
     await requestJson("https://api.fetch.tinyfish.ai/", {
@@ -178,8 +194,9 @@ async function kdocsRequest(
   operation: "search" | "read",
   args: Record<string, string | number>,
   taskSignal?: AbortSignal,
+  encryptionKey?: Buffer,
 ) {
-  const { apiKey } = connectionSecret(row);
+  const { apiKey } = connectionSecret(row, encryptionKey);
   const signal = AbortSignal.any([AbortSignal.timeout(14000), ...(taskSignal ? [taskSignal] : [])]);
   const headers = {
     authorization: "Bearer " + apiKey,
@@ -274,8 +291,13 @@ async function kdocsRequest(
     }
   }
 }
-const kdocsSearch = (row: IntegrationConnection, query: string, signal?: AbortSignal) =>
-  kdocsRequest(row, "search", { keyword: query, page_size: 5, type: "all" }, signal);
+const kdocsSearch = (
+  row: IntegrationConnection,
+  query: string,
+  signal?: AbortSignal,
+  encryptionKey?: Buffer,
+) =>
+  kdocsRequest(row, "search", { keyword: query, page_size: 5, type: "all" }, signal, encryptionKey);
 
 function mask(value: string, ...secrets: Array<string | undefined>) {
   for (const secret of secrets) if (secret) value = value.replaceAll(secret, "[REDACTED]");
@@ -292,8 +314,8 @@ function safeLink(input: string): string | undefined {
   return undefined;
 }
 
-async function checkModel(row: IntegrationConnection) {
-  const { baseUrl, model, apiKey } = modelConnection(row);
+export async function checkModel(row: IntegrationConnection, encryptionKey?: Buffer) {
+  const { baseUrl, model, apiKey } = modelConnection(row, encryptionKey);
   const nonce = "POROS-" + randomBytes(4).toString("hex");
   const response = await requestModel(baseUrl, "/chat/completions", {
     method: "POST",
@@ -331,21 +353,24 @@ async function checkModel(row: IntegrationConnection) {
   if (!done || output.trim() !== nonce) throw new ProviderError("PROBE_MISMATCH", response.status);
 }
 
-export async function verifyIntegration(row: IntegrationConnection): Promise<void> {
+export async function verifyIntegration(
+  row: IntegrationConnection,
+  encryptionKey?: Buffer,
+): Promise<void> {
   switch (row.provider) {
     case "model":
-      await checkModel(row);
+      await checkModel(row, encryptionKey);
       break;
     case "kdocs":
-      await kdocsSearch(row, "Poros");
+      await kdocsSearch(row, "Poros", undefined, encryptionKey);
       break;
     case "ima":
-      await imaSearch(row, "");
+      await imaSearch(row, "", undefined, encryptionKey);
       break;
     case "tinyfish":
       await Promise.all([
-        tinySearch(row, "TinyFish official documentation"),
-        tinyFetch(row, "https://www.tinyfish.ai/"),
+        tinySearch(row, "TinyFish official documentation", undefined, encryptionKey),
+        tinyFetch(row, "https://www.tinyfish.ai/", undefined, encryptionKey),
       ]);
       break;
     default:
@@ -359,12 +384,17 @@ export async function useIntegration(
   action: "search" | "fetch",
   query: string,
   signal?: AbortSignal,
+  encryptionKey?: Buffer,
 ): Promise<IntegrationItem[]> {
   if (row.testCode !== "OK") throw new ProviderError("NOT_VERIFIED");
   if (row.provider === "tinyfish")
-    return action === "fetch" ? tinyFetch(row, query, signal) : tinySearch(row, query, signal);
-  if (action === "search" && row.provider === "ima") return imaSearch(row, query, signal);
-  if (action === "search" && row.provider === "kdocs") return kdocsSearch(row, query, signal);
+    return action === "fetch"
+      ? tinyFetch(row, query, signal, encryptionKey)
+      : tinySearch(row, query, signal, encryptionKey);
+  if (action === "search" && row.provider === "ima")
+    return imaSearch(row, query, signal, encryptionKey);
+  if (action === "search" && row.provider === "kdocs")
+    return kdocsSearch(row, query, signal, encryptionKey);
   throw new ProviderError("ACTION_NOT_SUPPORTED");
 }
 
@@ -373,6 +403,7 @@ export async function useIntegrationTool(
   action: "search" | "fetch" | "read" | "knowledge",
   input: Record<string, string>,
   signal: AbortSignal,
+  encryptionKey?: Buffer,
 ): Promise<IntegrationItem[]> {
   if (row.testCode !== "OK") throw new ProviderError("NOT_VERIFIED");
   if (action === "read" && row.provider === "kdocs")
@@ -381,9 +412,16 @@ export async function useIntegrationTool(
       action,
       { drive_id: input.drive_id!, file_id: input.file_id! },
       signal,
+      encryptionKey,
     );
   if (action === "knowledge" && row.provider === "ima")
-    return imaContent(row, input.query!, input.knowledge_base_id!, signal);
+    return imaContent(row, input.query!, input.knowledge_base_id!, signal, encryptionKey);
   if (action === "read" || action === "knowledge") throw new ProviderError("ACTION_NOT_SUPPORTED");
-  return useIntegration(row, action, action === "fetch" ? input.url! : input.query!, signal);
+  return useIntegration(
+    row,
+    action,
+    action === "fetch" ? input.url! : input.query!,
+    signal,
+    encryptionKey,
+  );
 }

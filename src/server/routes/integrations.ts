@@ -8,6 +8,7 @@ import {
   deleteConnection,
   findConnection,
   providerSchema,
+  providers,
   recordConnectionCheck,
   saveConnection,
 } from "../integration-connections.js";
@@ -26,7 +27,11 @@ export async function registerIntegrationRoutes(app: FastifyInstance) {
     const p = requirePrincipal(req, reply);
     if (!p) return;
     const connections = await db.integrationConnection.findMany({
-      where: { organizationId: p.organizationId, userId: p.userId },
+      where: {
+        organizationId: p.organizationId,
+        userId: p.userId,
+        provider: { in: [...providers] },
+      },
     });
     return {
       ok: true,

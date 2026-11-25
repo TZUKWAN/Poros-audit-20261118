@@ -1,18 +1,43 @@
-# Poros Enterprise
+# Poros Agent AI IDE
 
-企业 Agent 的构建、发布、执行和判断规则治理平台。运行时使用容器内的 **DSH 0.2.2-rc.1**。仓库和审查 PR 公开可读。根项目仍声明 UNLICENSED，第三方组件沿用各自的许可证。
+用左侧对话开发 Agent，在右侧直接试用它的真实界面。主界面保留工程、开发对话、PC/手机预览和一个设置入口；代码与执行记录按需展开。
 
-## 当前行为
+Agent、标准 Skill 和 MCP 服务共用这套开发环境。AI 读写实际源码，运行严格类型检查和隔离构建，用失败诊断修复；成功版本才进入预览。开发模型必须由用户配置并完成连接测试，没有可用连接时保留输入并打开设置。
 
-- React 19 / Radix / Tailwind / Vite：组织登录、连续工作会话、Builder、执行实时事件、独立审批、规则修订、个人集成设置及可安装的手机 Web App。
-- 发布申请冻结 Persona、配置、Model Policy、精确授权及版本/来源；独立审阅者批准后生效。版本单调递增，回滚只换指针。缺少历史授权快照的旧版本须重新发布审批，不虚构迁移授权。
-- 任务提交立即返回 202 和 ID，PostgreSQL Worker 后台执行；支持事件 ID/重连补发、幂等、取消、超时、显式限次重试和共享并发限额。敏感工具须本次同意和独立审批。
-- 每任务独立临时 DSH 容器，无用户卷/宿主挂载/Docker socket；非 root、只读根、资源配额。工具执行前默认拒绝，事后再审计。模型供应商密钥留在 API 宿主。
-- Judgment：显式反馈、真实作用域/来源、人工审批、机械冲突检测、不可变修订与逐次证据。FAIL/UNCHECKED/PASS 分离；开发 mock 输出为 UNVERIFIED。
-- 可撤销认证、登录/上传限流、原子一次性下载票据；SeaweedFS S3 拒绝匿名访问。
-- 成员可保存、测试和断开大模型 API、Kdocs、IMA、TinyFish。模型端点和型号随 Agent 版本审批，发起人的凭证按任务修订固定。手机端可从「最近工作」恢复同一会话和事件流。
+## 当前能力
 
-## PC 工作流程
+- **开发与试用**：工程文件、不可变源码修订、并发修改检查、持续开发记录、停止、构建和明确案例验收。构建失败保留上次成功预览并显示版本。
+- **技能与 MCP**：创建/编辑标准 SKILL.md、资料与 TypeScript 脚本；开发真实 MCP tools 服务，发现、校验及调用工具；导入/导出签名能力包，固定源码与版本，新增能力不自动授权。
+- **统一配置**：开发模型与 Agent 运行模型分开；大模型 API、Kdocs、IMA、TinyFish、外部 MCP 和业务 API 均有用户配置入口。保存、连接测试与实际业务验收分别记录，凭证留在受信运行端。
+- **独立软件**：导出签名工程包；Windows 构建端可在工程设置中生成具名 NSIS 安装器。客户软件有自己的密钥、数据、连接和任务，不依赖开发平台数据库。
+- **手机远控**：电脑运行 Agent，手机 PWA 发起/停止任务和查看结果。两分钟配对邀请、电脑确认、每设备授权及撤销。免账号 Quick Tunnel 提供临时免费地址；自己的 Cloudflare Worker + SQLite Durable Object 提供稳定中继。
+- **运行边界**：生成代码在无宿主卷、非 root、只读、无网络的独立容器中编译/运行。外部调用通过凭证代理和明确授权；预览 iframe 取不到 IDE 登录态。
+- **回执恢复**：请求号和输入摘要在浏览器持久保存；网关错误、丢回执和刷新后找回原操作，避免重复任务。案例通过只代表记录的案例；未知用量/价格与未验证业务保持明确状态。
+
+代码、验收范围与实测限制见 [AI IDE 实施交付](docs/AGENT_IDE_DELIVERY.md)。仓库和审查 PR 为 PUBLIC；根项目保留 UNLICENSED，第三方许可证随独立产物附带。
+
+## 开发启动
+
+需要 Node 24.22.3 和兼容 API 1.47 的 Linux Engine。PostgreSQL/S3 使用本部署的独立配置。
+
+```sh
+cp .env.example .env
+# 填写本部署的数据库、JWT、S3 与设置加密密钥
+npm ci
+npm run db:up
+npx prisma migrate deploy
+npm run runtime:build
+npm run compiler:build
+npm run build
+npm run db:seed       # 仅开发
+npm start
+```
+
+默认环回地址为 `http://127.0.0.1:8787`。Builder/管理员默认进入 IDE；原企业工作台可从 `?legacy=1` 访问，原业务 API 与历史数据保留。生产、持久目录、迁移与回滚见 [部署说明](docs/DEPLOYMENT.md)。
+
+Windows 安装器、客户配置与免费远控的完整步骤见 [独立软件交付](docs/AGENT_APP_DELIVERY.md)；稳定中继部署见 [relay](relay/README.md)。客户软件内置 Node；自动免费环境路径已在启用 WSL2 的 Windows x64 上实测，不要求客户安装开发数据库。
+
+## 兼容的企业工作流程
 
 从「Agent 目录」选择已发布助手并使用，或从项目及文件直接开始。项目是可选的；新工作必须明确选择助手。要求、材料和个人连接在当前工作内准备，发送后自动保存在「最近工作」，刷新或重新登录可打开原地址继续。
 
@@ -24,25 +49,7 @@
 
 支持提取 UTF-8 文本、Markdown、CSV、JSON、文本层 PDF、DOCX 正文及 XLSX 单元格。已提取的文本按额度进入任务，来源编号和摘要留痕。图片和 PPTX 支持存储及下载。
 
-## 启动
-
-Node **24.22.3**（`.node-version`），Docker / Compose v2。API 默认只监听 `127.0.0.1:8787`。
-
-```sh
-cp .env.example .env
-# 编辑本部署自己的数据库、JWT、S3 配置，不提交真实凭证
-npm ci
-npm run db:up
-npx prisma migrate deploy
-npm run runtime:build
-npm run build
-npm run db:seed       # 仅开发，生产拒绝种子
-npm start
-```
-
-构建包含服务端、UI 和 `dist/src/server/public`。生产使用 `npm run start:prod`；配置不全、mock/stub、开发默认口令或开发成员均拒绝启动。详见 [DEPLOYMENT](docs/DEPLOYMENT.md)。
-
-手机访问复用 Poros 登录、API 和审批。Windows 可启动独立部署并发布私网入口。见 [手机与个人集成](docs/MOBILE_AND_CONNECTIONS.md)。
+兼容工作台使用上述同一部署；旧手机流程见 [历史工作台手机与个人集成](docs/MOBILE_AND_CONNECTIONS.md)，独立 Agent 的配对方式以 [软件交付说明](docs/AGENT_APP_DELIVERY.md) 为准。
 
 ## 验证与证据
 
@@ -53,13 +60,17 @@ npm run test:api
 npm run test:isolation
 npm run e2e
 npm run e2e:pc
+npm run e2e:ide
+npm run e2e:app
+npm --prefix relay ci --ignore-scripts
+npm run e2e:relay
 npm audit --audit-level=low
 npm run sbom
 ```
 
 测试使用独立临时数据库、真实 PostgreSQL/S3/DSH/工具及无头浏览器。模型与第三方响应夹具用于验证协议和边界。真实服务的结果以本人的连接测试为准。
 
-交付：[审计修复报告](AUDIT_FIX_REPORT.md)、[测试证据](TEST_EVIDENCE.md)、[安全复核](SECURITY_REVIEW.md)、[功能迁移矩阵](docs/FEATURE_MIGRATION_MATRIX.md)、[已定事项](docs/DECISIONS.md)、[第三方/SBOM](docs/THIRD_PARTY.md)。旧 Pi 文档是历史资料，不能作为当前部署说明。
+当前轮证据见 [AI IDE 实施交付](docs/AGENT_IDE_DELIVERY.md)。此前企业底座报告保留其当时的时间、HEAD 和验收范围：[审计修复报告](AUDIT_FIX_REPORT.md)、[测试证据](TEST_EVIDENCE.md)、[安全复核](SECURITY_REVIEW.md)、[功能迁移矩阵](docs/FEATURE_MIGRATION_MATRIX.md)、[已定事项](docs/DECISIONS.md)、[第三方/SBOM](docs/THIRD_PARTY.md)。旧 Pi 文档是历史资料，不能作为当前部署说明。
 
 PC 专项证据见 [功能真实性审计](docs/PC_FUNCTION_AUDIT.md)、[产品验收矩阵](docs/PC_PRODUCT_ACCEPTANCE.md) 和 [整改报告](docs/PC_REMEDIATION_REPORT.md)。
 
